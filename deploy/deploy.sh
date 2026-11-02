@@ -14,6 +14,7 @@ tag=$(git rev-parse HEAD)
 previous=$(cat .deploy/active-tag 2>/dev/null || true)
 export VOXI_IMAGE_TAG="$tag"
 compose=(docker compose --env-file /etc/voxi/deploy.env -f "$root/compose.yaml")
+if [[ -f /etc/voxi/pocket.enabled ]];then compose+=(-f "$root/compose.pocket.yaml");fi
 healthy(){
   "${compose[@]}" exec -T gateway node -e \
     "fetch('http://127.0.0.1:8787/healthz').then(async r=>{const h=await r.json();if(!r.ok||h.revision!==process.argv[1])process.exit(1)}).catch(()=>process.exit(1))" "$tag" >/dev/null 2>&1

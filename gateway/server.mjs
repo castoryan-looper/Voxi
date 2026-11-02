@@ -3,11 +3,13 @@ import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
 import WebSocket,{WebSocketServer} from 'ws';
 import {channels,instructions,RadioFilter} from './radio.mjs';
+import {attachPocket} from './pocket.mjs';
 
-export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev'}={}) {
+export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
-  if(!['mock','openai'].includes(mode)) throw Error('MODE must be mock or openai');
+  if(!['mock','openai','pocket'].includes(mode)) throw Error('MODE must be mock, openai or pocket');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
+  if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const server=http.createServer((req,res)=>{
     if(req.url==='/setup/'||req.url==='/setup'){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY'});
@@ -25,6 +27,11 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     const heartbeat=setInterval(()=>{if(!device.isAlive)return device.terminate();device.isAlive=false;device.ping();},30000);
     // A stale idle session must not keep a paid model connection forever.
     const lifetime=setTimeout(()=>device.close(1000,'Session rotation'),30*60*1000);
+    if(mode==='pocket'){
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa});
+      device.on('close',()=>{clearInterval(heartbeat);clearTimeout(lifetime);});
+      return;
+    }
     let upstream,channel=0,ready=false,recording=false,bytes=0,epoch=0,timer,deadline,turn=0,responseId=null;
     let item=null,playedMs=0,responding=false,acceptOutput=false,filter=new RadioFilter(),released=0,first=true;
     let queued=Buffer.alloc(0),pump,sourceDone=false;
@@ -121,7 +128,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   return {server,wss};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
-  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev'});
+  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev',pocketUrl:process.env.POCKET_URL,pocketToken:process.env.POCKET_DEVICE_TOKEN,pocketCa:process.env.POCKET_CA_FILE?readFileSync(process.env.POCKET_CA_FILE):undefined});
   server.listen(Number(process.env.PORT||8787),'0.0.0.0',()=>console.log('Radio gateway listening'));
   process.on('SIGTERM',()=>{
     for(const client of wss.clients)client.close(1012,'Service restarting');

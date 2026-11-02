@@ -1,0 +1,9 @@
+services:
+  gateway:
+    networks:
+      - default
+      - pocket
+networks:
+  pocket:
+    external: true
+    name: codex-pocket-radio
