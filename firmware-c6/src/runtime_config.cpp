@@ -147,6 +147,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
     diagnosticsJson(out);speakerDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
+  else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}
   else if(method=="speaker_test"){if(busyNow){out["error"]="请先等待录音或回复结束";return 409;}speakerTestRequest();out["message"]="即将播放两声本地测试音（不经过云端）";}
   else if(method=="storage_test"){
     uint8_t* bytes=(uint8_t*)malloc(5000);bool ok=storageReady&&bytes;
@@ -192,6 +193,7 @@ void setupBegin(){
   web.on("/api/wifi/scan",HTTP_GET,[](){webCall("scan_results");});web.on("/api/wifi/scan",HTTP_POST,[](){webCall("scan_start");});web.on("/api/wifi/forget",HTTP_POST,[](){webCall("wifi_forget");});
   web.on("/api/bluetooth/scan",HTTP_POST,[](){webCall("bluetooth_scan_start");});web.on("/api/bluetooth/scan",HTTP_GET,[](){webCall("bluetooth_scan_results");});
   web.on("/api/bluetooth/pair",HTTP_POST,[](){webCall("bluetooth_pair");});web.on("/api/bluetooth/forget",HTTP_POST,[](){webCall("bluetooth_forget");});
+  web.on("/api/speaker/volume",HTTP_POST,[](){webCall("speaker_volume");});
   web.on("/api/speaker/test",HTTP_POST,[](){webCall("speaker_test");});
   web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});

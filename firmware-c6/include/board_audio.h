@@ -20,3 +20,6 @@ void speakerTestRequest();
 bool speakerTestPending();
 void speakerTestRun();
 void speakerDiagnostics(JsonDocument& out);
+
+bool speakerSetVolume(int percent);
+int speakerVolume();

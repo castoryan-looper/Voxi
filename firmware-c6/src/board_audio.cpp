@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <HWCDC.h>
 #include <math.h>
+#include <Preferences.h>
 #if __has_include("config.h")
 #include "config.h"
 #else
@@ -21,6 +22,12 @@ static i2s_chan_handle_t output,input;
 static i2c_master_bus_handle_t bus;
 static i2c_master_dev_handle_t expander;
 static esp_codec_dev_handle_t codec;
+static int volumePercent=45;
+int speakerVolume(){return volumePercent;}
+bool speakerSetVolume(int percent){
+  if(percent<0||percent>100)return false;Preferences p;if(!p.begin("voxi-audio",false))return false;
+  bool ok=p.putUChar("volume",percent)==1;p.end();if(ok)volumePercent=percent;return ok;
+}
 static void expWrite(uint8_t reg,uint8_t value){uint8_t b[]={reg,value};ESP_ERROR_CHECK(i2c_master_transmit(expander,b,2,100));}
 
 static int batteryMv=-1,batteryLevel=-1;
@@ -135,6 +142,7 @@ void displayDebugTick(){
 #endif
 }
 void boardInit(){
+  Preferences volumePrefs;if(volumePrefs.begin("voxi-audio",true)){volumePercent=volumePrefs.getUChar("volume",45);volumePrefs.end();}
   analogReadResolution(12);analogSetPinAttenuation(0,ADC_11db);boardStatusTick();
   i2c_master_bus_config_t b={};b.i2c_port=I2C_NUM_0;b.sda_io_num=GPIO_NUM_18;b.scl_io_num=GPIO_NUM_8;
   b.clk_source=I2C_CLK_SRC_DEFAULT;b.glitch_ignore_cnt=7;b.flags.enable_internal_pullup=true;
@@ -161,7 +169,7 @@ void boardInit(){
   codec=esp_codec_dev_new(&dev);assert(codec);
   esp_codec_dev_sample_info_t fs={};fs.sample_rate=24000;fs.channel=2;fs.bits_per_sample=16;
   ESP_ERROR_CHECK(esp_codec_dev_open(codec,&fs));
-  ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(codec,80));
+  ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(codec,100));
   ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(codec,MICROPHONE_GAIN_DB));
   ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(codec,false));
   audioFlush();expWrite(1,0x2B); // enable amplifier after clocks/codec are stable
@@ -189,10 +197,10 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
-  for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=(int32_t)mono[i]*SPEAKER_VOLUME/100;
+  for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=(int32_t)mono[i]*volumePercent/100;
   size_t bytes=0;esp_err_t err=i2s_channel_write(output,stereo,samples*4,&bytes,0);
   if(err!=ESP_OK&&err!=ESP_ERR_TIMEOUT){outputErrors++;diagnosticError("I2S speaker write failed");}
   size_t written=bytes/4;outputSamples+=written;
@@ -201,7 +209,7 @@ size_t audioWrite(const int16_t* mono,size_t samples){
 }
 void speakerTestRun(){
   testPending=false;radioDebug("SPEAKER TEST","Local test: 2 quiet tones");
-  audioFlush();esp_codec_dev_set_out_mute(codec,false);esp_codec_dev_set_out_vol(codec,80);expWrite(1,0x2B);
+  audioFlush();esp_codec_dev_set_out_mute(codec,false);esp_codec_dev_set_out_vol(codec,100);expWrite(1,0x2B);
   outputPeak=0;uint32_t start=millis();size_t position=0;
   while(position<18000&&millis()-start<3000){
     int16_t block[240];size_t n=min((size_t)240,18000-position);
