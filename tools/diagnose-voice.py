@@ -80,6 +80,8 @@ async def main():
             for _ in range(100):
                 if session.ws.closed:break
                 await asyncio.sleep(.1)
+            track=getattr(session,'input_track',None)
+            print('RTP input PCM bytes emitted:',getattr(track,'emitted_bytes','track unavailable'),flush=True)
             print('Probe received PCM bytes:', session.ws.received, flush=True)
             print('Silence probes verify transport errors only, not recognition quality.', flush=True)
     except Exception as error:
