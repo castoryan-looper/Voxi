@@ -1,6 +1,7 @@
 """Run inside the Pocket container as its regular UID; no service changes."""
 import asyncio
 import json
+import os
 import re
 import sys
 sys.path.insert(0, '/app/bridge')
@@ -56,6 +57,9 @@ async def main():
 
     class Socket:
         closed = False
+        received = 0
+        async def send_bytes(self, data):
+            self.received += len(data)
         async def send_json(self, packet):
             if packet.get('type') in ('connecting', 'ready', 'error'):
                 print('State:', safe_text(packet), flush=True)
@@ -66,6 +70,18 @@ async def main():
     try:
         await asyncio.wait_for(session.start(), 65)
         print('Native voice READY', flush=True)
+        if os.environ.get('VOXI_PROBE_AUDIO') == '1':
+            # Non-private synthetic silence: exercises the exact release/upload
+            # path without asking for credentials or uploading a user's recording.
+            print('Audio protocol probe: 200ms synthetic silence', flush=True)
+            await session.control({'type':'ptt_down'})
+            await session.pcm(bytes(9600))
+            await session.control({'type':'ptt_up'})
+            for _ in range(100):
+                if session.ws.closed:break
+                await asyncio.sleep(.1)
+            print('Probe received PCM bytes:', session.ws.received, flush=True)
+            print('Silence probes verify transport errors only, not recognition quality.', flush=True)
     except Exception as error:
         print('Failed phase:', session.phase, flush=True)
         print('Error:', type(error).__name__, safe_text(error), flush=True)
