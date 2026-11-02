@@ -154,7 +154,7 @@ void boardInit(){
   // Write outputs before changing direction; preserve other pins as inputs.
   expWrite(1,0x23);expWrite(3,0xD4);delay(30); // PA initially muted
   i2s_chan_config_t c=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
-  c.dma_desc_num=4;c.dma_frame_num=240;c.auto_clear=true;
+  c.dma_desc_num=6;c.dma_frame_num=240;c.auto_clear=true;
   ESP_ERROR_CHECK(i2s_new_channel(&c,&output,&input));
   i2s_std_config_t s={};s.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(24000);
   s.slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO);
@@ -180,11 +180,11 @@ void boardInit(){
 #endif
 }
 void audioFlush(){
-  // Stop DMA and replace the whole four-descriptor queue with silence.
+  // Stop DMA and replace the whole six-descriptor queue with silence.
   if(!output)return;
   esp_err_t stopped=i2s_channel_disable(output);
   if(stopped!=ESP_OK&&stopped!=ESP_ERR_INVALID_STATE){diagnosticError("audio disable failed");return;}
-  static const uint8_t silence[3840]={};size_t loaded=0;
+  static const uint8_t silence[5760]={};size_t loaded=0;
   if(i2s_channel_preload_data(output,silence,sizeof(silence),&loaded)!=ESP_OK)diagnosticError("audio preload failed");
   esp_err_t enabled=i2s_channel_enable(output);
   if(enabled!=ESP_OK&&enabled!=ESP_ERR_INVALID_STATE)diagnosticError("audio enable failed");

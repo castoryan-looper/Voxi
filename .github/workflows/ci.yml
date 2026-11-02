@@ -52,5 +52,6 @@ jobs:
       - run: cp firmware-c6/include/config.example.h firmware-c6/include/config.h
       - run: g++ -std=c++17 tools/test_ptt_hold.cpp -o /tmp/voxi-ptt && /tmp/voxi-ptt
       - run: g++ -std=c++17 tools/test_output_gain.cpp -o /tmp/voxi-output && /tmp/voxi-output
+      - run: g++ -std=c++17 tools/test_playback_gate.cpp -o /tmp/voxi-playback && /tmp/voxi-playback
       - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6

@@ -14,12 +14,15 @@
 #include "diagnostics.h"
 #include "ble_knob.h"
 #include "ptt_hold.h"
+#include "playback_gate.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 WebSocketsClient ws;
 String authorizationHeader;
 constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
+static PlaybackGate playbackGate;
+void playbackDiagnostics(JsonDocument& out){out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;}
 bool ready=false,tx=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false;
 uint32_t played=0,lastReport=0,pressAt=0;
 int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
@@ -44,7 +47,7 @@ static void networkTask(void*){
   }
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
-void flushAudio(){head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void flushAudio(){playbackGate.reset();head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 void fault(){radioDebug("ERROR","Audio/queue fault: reconnect");ready=tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_DISCONNECTED){radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
@@ -69,7 +72,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){playbackGate.reset();radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end"){radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static PttHold ptt;
@@ -105,20 +108,24 @@ void encoder(){
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
   if(tx&&samples){unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));radioDebugMic(samples*2,peak);sendAudio((uint8_t*)mic,samples*2);}
-  // Prebuffer 40 ms; board layer handles ES8311 stereo slots.
-  if(!tx&&playing&&(used>=1920||ending)){
+  // Prime once with 120ms, then continuously drain even below the watermark.
+  // If input runs dry, count it and refill before restarting.
+  uint32_t previousRefills=playbackGate.rebuffers;
+  if(!tx&&playing&&playbackGate.canWrite(used,ending)){
     size_t count=min(used/2,(size_t)240);int16_t mono[240];
     for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=(int16_t)(lo|(hi<<8));}
     size_t written=count?audioWrite(mono,count):0;
     size_t consumed=written*2;tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;
     if(ending&&used==0){radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
+  if(playbackGate.rebuffers!=previousRefills)radioDebug("BUFFERING","Audio jitter: refilling");
+  if(!tx&&playing&&ending&&used==0){playing=ending=thinking=false;radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
   if(millis()-lastReport>100){lastReport=millis();JsonDocument d;d["type"]="played";
-    // Approximate DAC position: subtract maximum queued DMA (40 ms).
-    d["ms"]=played>960?(played-960)/24:0;String s;serializeJson(d,s);if(ready)sendText(s);}
+    // Approximate DAC position: subtract maximum queued DMA (60 ms).
+    d["ms"]=played>1440?(played-1440)/24:0;String s;serializeJson(d,s);if(ready)sendText(s);}
 }
 void setup(){
-  Serial.setRxBufferSize(16384);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
+  Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
   pinMode(2,INPUT_PULLUP);
   encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
   diagnosticsBegin();boardInit();setupBegin();
