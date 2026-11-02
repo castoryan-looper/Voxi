@@ -26,17 +26,19 @@ int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
 
 struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
+struct TxPacket{WStype_t type;size_t len;uint8_t data[512];};
 static QueueHandle_t incoming,outgoing;
 static volatile bool resetLink=false,queueFault=false;
-static bool sendText(String text){Packet p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,0)!=pdTRUE){queueFault=true;return false;}return true;}
-static void sendAudio(uint8_t* bytes,size_t n){Packet p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,0)!=pdTRUE)queueFault=true;}
-static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){queueFault=true;return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)queueFault=true;}
+static void networkFault(const char* reason){diagnosticError(reason);queueFault=true;}
+static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
+static void sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE)networkFault("TX audio queue full");}
+static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
 static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
   authorizationHeader="Authorization: Bearer "+radioConfig.token;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
-  Packet p;uint32_t retryAt=0;
+  TxPacket p;uint32_t retryAt=0;
   while(true){if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
-    if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){ws.loop();while(xQueueReceive(outgoing,&p,0)==pdTRUE){if(ws.isConnected()){if(p.type==WStype_BIN){if(ws.sendBIN(p.data,p.len))radioDebugTx(p.len);else queueFault=true;}else{bool sent=ws.sendTXT(p.data,p.len);String text((const char*)p.data,p.len);if(sent&&text.indexOf("ptt_up")>=0)radioDebug("WAIT AI","PTT UP sent to gateway");if(!sent)queueFault=true;}}}}
+    if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){ws.loop();while(xQueueReceive(outgoing,&p,0)==pdTRUE){if(ws.isConnected()){if(p.type==WStype_BIN){if(ws.sendBIN(p.data,p.len))radioDebugTx(p.len);else networkFault("WebSocket audio send failed");}else{bool sent=ws.sendTXT(p.data,p.len);String text((const char*)p.data,p.len);if(sent&&text.indexOf("ptt_up")>=0)radioDebug("WAIT AI","PTT UP sent to gateway");if(!sent)networkFault("WebSocket control send failed");}}}}
     else xQueueReset(outgoing);
     vTaskDelay(pdMS_TO_TICKS(2));
   }
@@ -123,7 +125,7 @@ void setup(){
   if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
-  incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(6,sizeof(Packet));
+  incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(24,sizeof(TxPacket));
   if(!incoming||!outgoing||xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr)!=pdPASS){diagnosticError("network task allocation failed");radioConfig.valid=false;}
 
 }
@@ -135,7 +137,7 @@ void loop(){
     int16_t discard[240];audioRead(discard,240);delay(1);return;
   }
   Packet p;for(int i=0;i<8&&xQueueReceive(incoming,&p,0)==pdTRUE;i++)onWs(p.type,p.data,p.len);
-  if(queueFault){queueFault=false;diagnosticError("audio network queue overflow");fault();}
+  if(queueFault){queueFault=false;fault();}
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=tx=false;diagnosticStage("wifi_connecting");}
   button();encoder();audioTick();
