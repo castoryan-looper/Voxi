@@ -8,6 +8,7 @@
 
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
+- [服务器空间与旧 Codex 处理](docs/SERVER-SPACE.md)
 - [开发计划与验收](docs/PLAN.md)
 - [音频设备协议](docs/PROTOCOL.md)
 

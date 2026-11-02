@@ -1,7 +1,7 @@
 # 腾讯云部署：在管理页面终端输入命令
 
 仓库：https://github.com/castoryan-looper/Voxi 。主机 IP：43.160.215.253。
-8448 已返回 HTTPS 响应，保留现有服务。Voxi 默认对外使用 **9443/TCP**，内部网关只映射 127.0.0.1:8787。以下为 Linux Docker Compose 方案；不需要 SSH、GitHub Actions 密钥或 Webhook 公网端口。
+8448 已返回 HTTPS 响应，保留现有服务。Voxi 默认对外使用 **9443/TCP**，内部网关只在 Docker 网络监听 8787，不映射宿主端口。以下为 Linux Docker Compose 方案；不需要 SSH、GitHub Actions 密钥或 Webhook 公网端口。
 
 ## 1. 首次安装
 
@@ -39,13 +39,12 @@ sudo bash deploy/bootstrap.sh 43.160.215.253
 ## 2. 验证
 
 ```bash
-curl -fsS http://127.0.0.1:8787/healthz
 sudo curl --cacert /etc/voxi/tls/ca.crt https://43.160.215.253:9443/healthz
 sudo docker compose --env-file /etc/voxi/deploy.env -f "$HOME/Voxi/compose.yaml" ps
 sudo systemctl list-timers voxi-update.timer
 ```
 
-返回 `{"ok":true,"mode":"mock","revision":"<commit SHA>"}` 即进程健康。这项检查**不代表模型 API 可达**，还要用设备完成一次真实语音往返。浏览器不认识私有 CA 时提示证书不受信任是预期现象，设备会显式信任此 CA。
+网关不再暴露主机 8787，使用上面的带 CA HTTPS 检查。返回 `{"ok":true,"mode":"mock","revision":"<commit SHA>"}` 即进程健康。这项检查**不代表模型 API 可达**，还要用设备完成一次真实语音往返。浏览器不认识私有 CA 时提示证书不受信任是预期现象，设备会显式信任此 CA。
 
 ## 3. 配置设备
 
@@ -80,7 +79,7 @@ sudo bash deploy/deploy.sh --force
 sudo docker compose --env-file /etc/voxi/deploy.env logs --tail=100 gateway
 ```
 
-配置改动需要 `--force`，否则同一提交会跳过已健康运行的版本。
+配置改动需要 `--force`，否则同一提交会跳过已健康运行的版本。已有同 SHA 镜像会复用，配置变更只重建容器。
 
 ## 5. 以后怎么更新
 
@@ -121,6 +120,6 @@ cd ~/Voxi
 sudo env VOXI_IMAGE_TAG=OLD_SHA docker compose --env-file /etc/voxi/deploy.env up -d --no-deps gateway
 ```
 
-恢复自动检查：`sudo systemctl start voxi-update.timer`。当前不自动清理旧镜像，定期查看磁盘空间，确认回退窗口后再手动清理。
+恢复自动检查：`sudo systemctl start voxi-update.timer`。自动保留当前和上一版 Voxi 镜像，容器引用中的镜像也保留；定期用 `sudo bash deploy/space.sh` 查看磁盘。参见 [小磁盘与旧 Codex 清理](SERVER-SPACE.md)。
 
 证书服务证书有效期 825 天，根 CA 10 年；应在到期前续签服务证书并重启代理，不必轮换根 CA。更换根 CA 需要同步更新设备固件；更换主机 IP 需要重新签发带正确 SAN 的服务证书。以后有域名可换成 Caddy 自动公共证书方案。

@@ -1,4 +1,5 @@
 FROM node:22-alpine
+LABEL io.voxi.project="voxi"
 WORKDIR /app
 COPY gateway/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force

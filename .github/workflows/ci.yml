@@ -18,6 +18,7 @@ jobs:
       - run: npm ci && npm test
         working-directory: gateway
       - run: for script in deploy/*.sh .githooks/post-merge; do bash -n "$script"; done
+      - run: node --test deploy/*.test.mjs
       - run: docker build -t voxi-gateway:ci .
       - run: |
           mkdir -p /tmp/tls
@@ -31,12 +32,13 @@ jobs:
           exit 1
       - name: Exercise deployment and TLS proxy
         run: |
-          docker rm -f voxi-test
+          # Keep the unrelated 8787 listener running to reproduce the server conflict.
           sudo install -d /etc/voxi
           printf 'DEVICE_TOKEN=ci-only-token\nMODE=mock\n' | sudo tee /etc/voxi/gateway.env >/dev/null
           printf 'VOXI_HTTPS_PORT=9443\n' | sudo tee /etc/voxi/deploy.env >/dev/null
           sudo bash deploy/make-tls.sh 127.0.0.1
           bash deploy/deploy.sh --no-pull
+          docker rm -f voxi-test
           sudo curl --retry 5 --retry-delay 1 --retry-all-errors --fail --cacert /etc/voxi/tls/ca.crt https://127.0.0.1:9443/healthz
           bash deploy/deploy.sh --no-pull
   firmware:
