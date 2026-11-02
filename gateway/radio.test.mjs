@@ -54,3 +54,19 @@ test('cloud health, connection budget and malformed events',async t=>{
   first.send('null');assert.equal((await error).message,'Expected event object');
   first.close();
 });
+
+test('setup route returns HTML and malformed WebSocket frames do not crash gateway',async t=>{
+ const {server,wss}=createGateway({token:'test'});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
+ const page=await fetch(base+'/setup/');assert.equal(page.status,200);assert.match(await page.text(),/Voxi/);
+ const client=new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer test'}});
+ client.on('error',()=>{});
+ await new Promise(r=>client.once('open',r));
+ const closed=new Promise(r=>client.once('close',r));
+ // Deliberately invalid client frame: the MASK bit is absent.
+ client._socket.write(Buffer.from([0x82,0x02,0,0]));
+ assert.equal(await closed,1002);
+ const health=await fetch(base+'/healthz');assert.equal(health.status,200);
+});

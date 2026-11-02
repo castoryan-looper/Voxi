@@ -19,7 +19,19 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision}));
   });
   const wss=new WebSocketServer({server,maxPayload:8192});
+  let connectionSequence=0;
   wss.on('connection',(device,req)=>{
+    const connection=++connectionSequence;let inputBytes=0;
+    // ws emits 'error' for malformed frames. Handle it before authentication
+    // so one bad/disconnected client cannot terminate the whole gateway.
+    device.on('error',error=>console.error(JSON.stringify({event:'device_ws_error',connection,code:/^[A-Z0-9_]+$/.test(error.code||'')?error.code:'OTHER'})));
+    device.on('message',(raw,binary)=>{
+      if(binary){inputBytes+=raw.length;return;}
+      let control;try{control=JSON.parse(raw);}catch{return;}
+      if(['ptt_down','ptt_up'].includes(control?.type))console.log(JSON.stringify({event:'device_ptt',connection,type:control.type,inputBytes}));
+    });
+    device.on('close',(code)=>console.log(JSON.stringify({event:'device_closed',connection,code,inputBytes})));
+
     if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.close(1008,'Unauthorized');return;}
     if([...wss.clients].filter(c=>c.authenticated).length>=maxConnections){device.close(1013,'Device limit reached');return;}
     device.authenticated=true;

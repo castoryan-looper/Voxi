@@ -17,7 +17,16 @@
 #include "playback_gate.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
-WebSocketsClient ws;
+class RadioSocket:public WebSocketsClient{
+public:
+  void writeFailure(){
+    char tls[96]={},message[160];int code=0;
+    if(_client.ssl)code=_client.ssl->lastError(tls,sizeof(tls));
+    snprintf(message,sizeof(message),"WebSocket send failed TLS=%d %.96s",code,tls);
+    diagnosticError(message);
+  }
+};
+RadioSocket ws;
 String authorizationHeader;
 constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
@@ -32,7 +41,8 @@ struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
 struct TxPacket{WStype_t type;size_t len;uint8_t data[512];};
 static QueueHandle_t incoming,outgoing;
 static volatile bool resetLink=false,queueFault=false;
-static void networkFault(const char* reason){diagnosticError(reason);queueFault=true;}
+static void networkFault(const char* reason){if(!queueFault){diagnosticError(reason);queueFault=true;}}
+static void socketWriteFault(){if(!queueFault){ws.writeFailure();queueFault=true;}}
 static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
 static void sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE)networkFault("TX audio queue full");}
 static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
@@ -41,7 +51,18 @@ static void networkTask(void*){
   authorizationHeader="Authorization: Bearer "+radioConfig.token;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;
   while(true){if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
-    if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){ws.loop();while(xQueueReceive(outgoing,&p,0)==pdTRUE){if(ws.isConnected()){if(p.type==WStype_BIN){if(ws.sendBIN(p.data,p.len))radioDebugTx(p.len);else networkFault("WebSocket audio send failed");}else{bool sent=ws.sendTXT(p.data,p.len);String text((const char*)p.data,p.len);if(sent&&text.indexOf("ptt_up")>=0)radioDebug("WAIT AI","PTT UP sent to gateway");if(!sent)networkFault("WebSocket control send failed");}}}}
+    if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
+      ws.loop();
+      // Bound each burst; keep reading control/error/close frames during upload.
+      for(int budget=0;budget<4&&!resetLink&&!queueFault;budget++){
+        if(!ws.isConnected()||xQueueReceive(outgoing,&p,0)!=pdTRUE)break;
+        bool sent=p.type==WStype_BIN?ws.sendBIN(p.data,p.len):ws.sendTXT(p.data,p.len);
+        if(!sent){socketWriteFault();ws.loop();break;}
+        if(p.type==WStype_BIN)radioDebugTx(p.len);
+        else{String text((const char*)p.data,p.len);if(text.indexOf("ptt_up")>=0)radioDebug("WAIT AI","PTT UP sent to gateway");}
+        ws.loop();
+      }
+    }
     else xQueueReset(outgoing);
     vTaskDelay(pdMS_TO_TICKS(2));
   }
