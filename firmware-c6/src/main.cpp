@@ -13,13 +13,14 @@
 #include "runtime_config.h"
 #include "diagnostics.h"
 #include "ble_knob.h"
+#include "ptt_hold.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 WebSocketsClient ws;
 String authorizationHeader;
 constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
-bool ready=false,tx=false,ending=false,playing=false,gatewayLinked=false,backendError=false;
+bool ready=false,tx=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false;
 uint32_t played=0,lastReport=0,pressAt=0;
 int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
@@ -41,10 +42,10 @@ static void networkTask(void*){
   }
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
-void flushAudio(){head=tail=used=0;ending=playing=false;played=0;audioFlush();}
-void fault(){ready=tx=false;flushAudio();resetLink=true;Serial.println("Link reset");}
+void flushAudio(){head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void fault(){ready=tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED){gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
+  if(t==WStype_DISCONNECTED){gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     if(tx)return;
@@ -59,25 +60,29 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
     else{backendError=false;diagnosticError("");diagnosticStage("ready");ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
   }
-  if(type=="connecting"||type=="offline"||type=="error"){ready=tx=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
+  if(type=="connecting"||type=="offline"||type=="error"){ready=tx=false;thinking=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
   if(type=="flush")flushAudio();
-  if(type=="audio_start"){played=0;ending=false;playing=true;}
+  if(type=="idle")thinking=false;
+  if(type=="audio_start"){thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end")ending=true;
 }
+static PttHold ptt;
 void button(){
-  if(digitalRead(2)==LOW){if(tx){tx=false;control("ptt_up");}return;}
   bool down=digitalRead(PIN_PTT)==LOW;
   if(down!=candidate){candidate=down;changedAt=millis();}
-  if(candidate!=stable&&millis()-changedAt>=15){
-    stable=candidate;
-    if(stable&&ready){
-      flushAudio();control("ptt_down");tx=true;pressAt=millis();
-      // Discard microphone backlog collected while receiving.
-      int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
-    }else if(!stable&&tx){tx=false;control("ptt_up");}
+  if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
+  auto action=ptt.update(millis(),stable,ready,digitalRead(2)==LOW);
+  if(action==PttHold::Start){
+    flushAudio();
+    // Never include audio from the initial 0.5s hold threshold.
+    int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
+    control("ptt_down");thinking=false;tx=true;pressAt=millis();diagnosticStage("recording");
+    Serial.println("VOXI_PTT recording");
+  }else if(action==PttHold::Stop&&tx){
+    tx=false;thinking=true;control("ptt_up");diagnosticStage("thinking");Serial.println("VOXI_PTT submitted");
   }
-  if(tx&&millis()-pressAt>29000){tx=false;control("ptt_up");}
 }
+
 void encoder(){
   int action=bleAction();if(action&1){pendingChannel=(pendingChannel+1)%4;encAt=millis();}if(action&2){pendingChannel=(pendingChannel+3)%4;encAt=millis();}
   static const int8_t table[]={0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
@@ -99,7 +104,7 @@ void audioTick(){
     for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=(int16_t)(lo|(hi<<8));}
     size_t written=count?audioWrite(mono,count):0;
     size_t consumed=written*2;tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;
-    if(ending&&used==0){playing=false;ending=false;}
+    if(ending&&used==0){playing=false;ending=false;thinking=false;}
   }
   if(millis()-lastReport>100){lastReport=millis();JsonDocument d;d["type"]="played";
     // Approximate DAC position: subtract maximum queued DMA (40 ms).
@@ -118,7 +123,7 @@ void setup(){
 
 }
 void loop(){
-  boardStatusTick();setupTick(tx||playing,ready,channel);
+  boardStatusTick();setupTick(tx||playing||thinking,ready,channel);
   if(!radioConfig.valid){
     static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());}
     int16_t discard[240];audioRead(discard,240);delay(1);return;
@@ -130,8 +135,9 @@ void loop(){
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();
     bool wifi=WiFi.status()==WL_CONNECTED;
-    const char* label=!wifi?"WIFI CONNECT":radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
-    if(!ready)diagnosticStage(!wifi?"wifi_connecting":radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
+    const char* label=!wifi?"WIFI CONNECT":radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
+    if(ready)diagnosticStage(tx?"recording":thinking?"thinking":playing?"receiving":"ready");
+    else diagnosticStage(!wifi?"wifi_connecting":radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
   delay(1);

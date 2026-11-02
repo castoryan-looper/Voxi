@@ -39,3 +39,19 @@
 顶部右侧电池图标：GPIO0 / ADC1 CH0，12-bit 校准毫伏采样，按官方板级例程的二倍分压换算；16 次平均，每 30 秒更新。使用官方 3.00–4.12V 区间估算百分比，前缀 ~ 表示估算，读数不在 2.8–4.5V 时显示 ?。该板没有在这里使用独立电量计或充电状态检测，因此不显示“正在充电”；USB 供电与电池充电会影响电压估算。
 
 USB 自动切页：检测到电脑 USB 主机连接稳定 400ms 后显示 USB SETUP、管理地址 http://127.0.0.1:8788/ 和 Chrome/Edge 连接提示；断开后自动返回频道待机页。只改变显示页面，不重启设备，不清除配置，也不主动断开 AI 会话。充电器仅供电、未枚举 USB 主机时保持待机页。
+
+## 长按对讲
+
+BOOT 稳定按下达到 500ms 后进入录音；短按不发送 PTT、音频或创建云端回合。录音开始前丢弃麦克风积压，因此门限前的声音不会上传。继续按住讲话，松开结束并提交；为降低延迟，录音期间音频已流式上传，松开只需提交并请求生成。录音每轮最多 29 秒，超时停止后必须松开再按；PWR 组合键或云端未就绪不会触发录音。
+
+待机页显示 RECORDING / THINKING / RECEIVING / READY。USB 设置页仍优先显示，后台对讲保持可用。云端缺少完整配置或语音后端未就绪时不录音。
+
+服务器独立语音诊断（不需要设备在线）：
+
+```bash
+git -C ~/Voxi -c core.hooksPath=/dev/null pull --ff-only
+docker exec -i voxi-gateway-1 node --input-type=module < ~/Voxi/gateway/diagnose-pocket.mjs
+docker logs --since=3m codex-pocket-gateway-1 2>&1 | grep 'Native voice' | tail -n 10
+```
+
+诊断会占用唯一的原生语音会话，测试前可先断开设备的云端连接。诊断返回 READY 会主动关闭会话；最长 55 秒结束。它不会输出设备令牌或账号登录文件。

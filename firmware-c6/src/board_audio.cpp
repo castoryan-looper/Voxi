@@ -88,7 +88,7 @@ static void screenTask(void*){
         screen.setTextSize(4);screen.setCursor(18,64);screen.printf("CH %02d",state.channel+1);
         screen.setTextSize(2);screen.drawRoundRect(8,109,184,32,5,GxEPD_BLACK);screen.setCursor(12,118);screen.print(state.label[0]?state.label:state.online?"READY":"CONNECTING");
         screen.setTextSize(1);screen.setCursor(10,151);screen.printf("WiFi:%s  Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
-        screen.setCursor(10,166);screen.print(state.online?"Hold BOOT to talk":"AI not ready - see USB web");
+        screen.setCursor(10,166);screen.print(state.online?"Hold BOOT >0.5s to talk":"AI not ready - see USB web");
         screen.setCursor(10,181);screen.print(state.usb?"USB: 127.0.0.1:8788":"BOOT+PWR 3s: setup");
 
       }
