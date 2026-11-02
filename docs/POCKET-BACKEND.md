@@ -13,7 +13,7 @@ ESP32 → Voxi :9443 /radio → Docker 内部 Pocket /voxi
 - 通过官方 app-server 的 `thread/realtime/start` + WebRTC 协商使用现有登录。没有配置 API Key 时不会回退到收费 API 路径。
 - Pocket 的设备令牌只用于内部服务间鉴权，由连接脚本写入 /etc/voxi/gateway.env，终端不显示它。ESP32 的 Voxi 设备令牌不变。
 - 每次连接创建独立、临时、只读的语音会话，不使用 Pocket 原有任务会话；语音工具清空，客户端不执行任务、批准动作或调用 shell。每次只允许一个实时语音连接。
-- 沿用 Voxi 频道、PTT、滤波和打断。原生服务必须明确接受关闭 VAD、清空 tools 的会话配置，设备才显示 READY。
+- 沿用 Voxi 频道、PTT、滤波和打断。原生服务确认 Frameless Bidi 会话配置后设备显示 READY；按住时云端暂存音频，松开后提交，并用静音尾段触发服务端结束检测。
 - Codex 0.163.0 固定版本源码中，直接 Realtime WebSocket 要求 API Key；本适配使用支持账号登录的 WebRTC 路线。
 - 这是实验接口。账号必须有原生语音权限，并受账号实际额度与地区/服务可用性限制；登录成功不等于原生语音一定可用。真实延迟和音色需在此服务器验证。
 - 增加 aiortc/WebRTC 依赖；不新增 Whisper/TTS 模型。依赖用独立 Docker 层安装，尽量复用原有 Whisper 层。首次重建仍需留出磁盘空间。

@@ -58,9 +58,10 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="ready"){
     int actual=d["channel"]|0;
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
-    else{backendError=false;diagnosticError("");diagnosticStage("ready");ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
+    else{backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
   }
   if(type=="connecting"||type=="offline"||type=="error"){ready=tx=false;thinking=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
+  if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle")thinking=false;
   if(type=="audio_start"){thinking=false;played=0;ending=false;playing=true;}
