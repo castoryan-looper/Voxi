@@ -143,7 +143,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   if(method=="config")fillConfig(out);
   else if(method=="status"){
     out["firmware"]="voxi-c6-web-2";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;
-    out["usbConnected"]=HWCDC::isPlugged();out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
+    out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
     diagnosticsJson(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
@@ -202,7 +202,14 @@ void setupBegin(){
 void setupTick(bool busy,bool cloudReady,int channel){
   busyNow=busy;cloudNow=cloudReady;currentChannel=channel;bleTick(busy);wifiTick();
   if(restartAt&&(int32_t)(millis()-restartAt)>=0){restartAt=0;Serial.println("VOXI_CONFIG_REBOOT");ESP.restart();}
-  bool usb=HWCDC::isPlugged();if(usb!=usbWas){usbWas=usb;if(usb&&ap){closeAp();if(configView)showSetup();}else if(configView)openSetup();}
+  bool usb=HWCDC::isPlugged();
+  static bool usbCandidate=false;static uint32_t usbChangedAt=0;
+  if(usb!=usbCandidate){usbCandidate=usb;usbChangedAt=millis();}
+  if(usbCandidate!=usbWas&&millis()-usbChangedAt>=400){
+    usbWas=usbCandidate;
+    if(usbWas){closeAp();configView=true;showSetup();}
+    else{configView=false;displayChannel(currentChannel,cloudNow);}
+  }
   if(ap){dns.processNextRequest();web.handleClient();}
   bool chord=digitalRead(9)==LOW&&digitalRead(2)==LOW;
   if(chord&&!busy){if(!chordAt)chordAt=millis();if(!chordTriggered&&millis()-chordAt>3000){openSetup();chordTriggered=true;}}

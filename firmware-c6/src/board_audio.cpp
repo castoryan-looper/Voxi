@@ -83,7 +83,7 @@ static void screenTask(void*){
         screen.setTextSize(2);screen.setCursor(12,65);screen.print(state.name);
         screen.setTextSize(1);screen.setCursor(12,100);
         if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,125);screen.printf("KEY: %s",state.key);}
-        else{screen.print("Open on your computer:");screen.setCursor(12,120);screen.print("http://127.0.0.1:8788/");screen.setCursor(12,145);screen.print("Click Connect USB");}
+        else{screen.print("Open on your computer:");screen.setCursor(12,120);screen.print("http://127.0.0.1:8788/");screen.setCursor(12,145);screen.print("Chrome / Edge: Connect USB");screen.setCursor(12,168);screen.print("Unplug USB: radio standby");}
       }else{
         screen.setTextSize(4);screen.setCursor(18,64);screen.printf("CH %02d",state.channel+1);
         screen.setTextSize(2);screen.drawRoundRect(8,109,184,32,5,GxEPD_BLACK);screen.setCursor(12,118);screen.print(state.label[0]?state.label:state.online?"READY":"CONNECTING");

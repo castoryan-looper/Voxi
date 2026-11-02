@@ -86,7 +86,7 @@ void encoder(){
     if(abs(encSteps)>=4){pendingChannel=(pendingChannel+(encSteps>0?1:3))%4;encSteps=0;encAt=millis();}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
   if(!stable&&pendingChannel!=channel&&millis()-encAt>180){
-    tx=false;ready=false;flushAudio();channel=pendingChannel;displayChannel(channel,false);
+    tx=false;ready=false;flushAudio();channel=pendingChannel;if(!setupScreenActive())displayChannel(channel,false);
     JsonDocument d;d["type"]="channel";d["channel"]=channel;String s;serializeJson(d,s);sendText(s);
   }
 }
