@@ -32,6 +32,28 @@ async def main():
         await original(self, packet)
     voxi.VoiceSession.notification = notification
 
+    original_event = voxi.VoiceSession.on_event
+    async def on_event(self, event):
+        if event.get('type') == 'error':
+            error = event.get('error') or {}
+            print('RTC control error:', flush=True)
+            for key in ('code', 'type', 'param', 'message'):
+                if key in error:
+                    print(key+':', safe_text(error[key]), flush=True)
+        elif event.get('type') in ('session.created', 'session.updated'):
+            session = event.get('session') or {}
+            # Print only schema/capability fields, never instructions or IDs.
+            input_config = (session.get('audio') or {}).get('input') or {}
+            print('RTC session:', safe_text({
+                'event': event['type'], 'type': session.get('type'),
+                'input_audio_format': session.get('input_audio_format'),
+                'input_format': input_config.get('format'),
+                'turn_detection': input_config.get('turn_detection',session.get('turn_detection')),
+                'tools_count': len(session['tools']) if isinstance(session.get('tools'),list) else None,
+            }), flush=True)
+        await original_event(self, event)
+    voxi.VoiceSession.on_event = on_event
+
     class Socket:
         closed = False
         async def send_json(self, packet):
