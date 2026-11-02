@@ -50,4 +50,5 @@ jobs:
           python-version: '3.12'
       - run: pip install platformio==6.2.0
       - run: cp firmware-c6/include/config.example.h firmware-c6/include/config.h
+      - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6

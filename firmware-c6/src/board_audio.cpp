@@ -1,4 +1,5 @@
 #include "board_audio.h"
+#include "diagnostics.h"
 #if __has_include("config.h")
 #include "config.h"
 #else
@@ -24,15 +25,19 @@ static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
 struct ScreenState{int channel=0;bool online=false,setup=false,hotspot=false;char name[24]={},key[16]={};};
 static QueueHandle_t screenQueue;
 static void screenTask(void*){
+  pinMode(7,OUTPUT);pinMode(11,OUTPUT);pinMode(15,OUTPUT);
   SPI.begin(6,4,5,7);
-  screen.init(115200,true,20,false);
-  ScreenState state;
+  screen.init(0,true,20,false);
+  ScreenState state,previous;bool drawn=false;unsigned refreshes=0;
   while(true){
     if(xQueueReceive(screenQueue,&state,portMAX_DELAY)!=pdTRUE)continue;
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
     vTaskDelay(pdMS_TO_TICKS(1000));ScreenState next;
     while(xQueueReceive(screenQueue,&next,0)==pdTRUE)state=next;
-    screen.setFullWindow();screen.firstPage();
+    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key))continue;
+    previous=state;
+    if(!drawn||++refreshes>=20){screen.setFullWindow();refreshes=0;}else screen.setPartialWindow(0,0,200,200);
+    drawn=true;screen.firstPage();
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
       screen.setCursor(18,25);screen.print("AI RADIO");
@@ -47,7 +52,7 @@ static void screenTask(void*){
         screen.setTextSize(1);screen.setCursor(18,170);screen.print("Hold BOOT to talk");
       }
     }while(screen.nextPage());
-    screen.hibernate();
+    screen.powerOff();
   }
 }
 #endif
@@ -97,10 +102,13 @@ void boardInit(){
 }
 void audioFlush(){
   // Stop DMA and replace the whole four-descriptor queue with silence.
-  ESP_ERROR_CHECK(i2s_channel_disable(output));
+  if(!output)return;
+  esp_err_t stopped=i2s_channel_disable(output);
+  if(stopped!=ESP_OK&&stopped!=ESP_ERR_INVALID_STATE){diagnosticError("audio disable failed");return;}
   static const uint8_t silence[3840]={};size_t loaded=0;
-  ESP_ERROR_CHECK(i2s_channel_preload_data(output,silence,sizeof(silence),&loaded));
-  ESP_ERROR_CHECK(i2s_channel_enable(output));
+  if(i2s_channel_preload_data(output,silence,sizeof(silence),&loaded)!=ESP_OK)diagnosticError("audio preload failed");
+  esp_err_t enabled=i2s_channel_enable(output);
+  if(enabled!=ESP_OK&&enabled!=ESP_ERR_INVALID_STATE)diagnosticError("audio enable failed");
 }
 size_t audioRead(int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);size_t bytes=0;
