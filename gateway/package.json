@@ -1,0 +1,1 @@
+{"name":"esp32-ai-radio-gateway","private":true,"type":"module","scripts":{"start":"node --env-file-if-exists=.env server.mjs","test":"node --test"},"dependencies":{"ws":"^8.18.3"},"engines":{"node":">=22"}}

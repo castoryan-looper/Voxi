@@ -1,1 +1,53 @@
-# Voxi
+# Voxi · AI 对讲机
+
+基于 **微雪 ESP32-C6-ePaper-1.54**：按住 BOOT 讲话，松开听 AI；EC11 旋钮切换四个 AI 频道。复用板载麦克风、ES8311、功放与墨水屏，云端语音网关部署在腾讯云 Linux 主机。
+
+仓库：https://github.com/castoryan-looper/Voxi
+
+## 先看这里
+
+- [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
+- [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
+- [开发计划与验收](docs/PLAN.md)
+- [音频设备协议](docs/PROTOCOL.md)
+
+## 工程
+
+| 目录 | 用途 |
+|---|---|
+| firmware-c6/ | 当前微雪 C6 固件，Arduino 3.3.3 / PlatformIO |
+| firmware/ | 历史 S3 外接音频原型，不能刷到 C6 |
+| gateway/ | Node.js 22+ 流式网关，mock / OpenAI Realtime |
+| deploy/ | Docker Compose、TLS、首次部署、自动拉取与健康检查 |
+| .github/workflows/ | 网关测试、镜像构建与 C6 编译 CI |
+
+## 本地模拟
+
+```powershell
+cd gateway
+Copy-Item .env.example .env
+# 修改 DEVICE_TOKEN
+npm ci
+npm test
+npm start
+```
+
+本地固件用 `GATEWAY_TLS=0`、电脑局域网 IP 和 8787 端口，仅用于可信局域网。mock 返回约 300ms 测试音，不调用识别或合成接口。云端默认使用 WSS 和设备信任的根 CA。
+
+## 自动更新
+
+首次执行 `deploy/bootstrap.sh` 后，服务器每分钟从 main 拉取。新提交会触发镜像构建、测试、候选健康检查，再重建服务。部署失败会保留旧版本或尝试网关镜像回退。手动 `git pull --ff-only` 通过 post-merge hook 触发相同步骤。重启期间设备重连，当前对话会中断。
+
+更新影响网关与部署容器，**ESP32 固件仍需手动烧录**，本轮没有无线 OTA。
+
+## 对话与声音
+
+四个虚构角色：营地、巡逻、夜航、探索。当前共用 marin 音色，回复短、自然接话，网关加无线电带通与软限幅。关闭 VAD，以物理松键提交，24kHz PCM 流式传输。默认模型 `gpt-realtime-2.1` 需要账号具备权限，模型与声音可在服务器配置。
+
+API Key、设备令牌和 TLS 私钥不能提交仓库。服务器配置在 `/etc/voxi`，设备配置为被忽略的 `config.h`。
+
+## 验证边界
+
+网关具备 mock 自动化测试；CI 检查网关、镜像和 C6 编译。尚未连接实体 C6 或使用真实 Key 联调；GPIO、电源、音频槽、屏幕波形、听感和端到端延迟需要上板确认。热会话松键到首音目标 P50 0.6–1.2 秒，属于待实测指标。
+
+依据：[微雪资料](https://docs.waveshare.com/ESP32-C6-ePaper-1.54)、[OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations)、[腾讯云 Docker](https://intl.cloud.tencent.com/document/product/213/37516?lang=en)。

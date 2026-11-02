@@ -1,0 +1,5 @@
+Espressif esp_codec_dev (Apache-2.0), vendored from Waveshare ESP32-C6-ePaper-1.54
+Commit c4c47b6a8001f9daa50b38912393c158371e03be
+Path: 02_Example/arduino_v3.3.0/08_Audio_Test/src/esp_codec_dev
+Original SPDX headers retained. Only trailing whitespace normalized.
+https://github.com/waveshareteam/ESP32-C6-ePaper-1.54

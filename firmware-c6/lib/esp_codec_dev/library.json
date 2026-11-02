@@ -1,0 +1,1 @@
+{"name":"waveshare-esp-codec-dev","version":"1.0.0","license":"Apache-2.0","build":{"srcDir":".","includeDir":"include","srcFilter":["+<*.c>","+<platform/*.c>","+<device/es8311/*.c>"],"flags":["-I include","-I interface","-I device/include"]},"frameworks":"arduino","platforms":"espressif32"}

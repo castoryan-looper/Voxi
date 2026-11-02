@@ -1,0 +1,9 @@
+**/node_modules
+**/.pio
+**/config.h
+**/.env
+.git
+.deploy
+firmware
+firmware-c6
+work

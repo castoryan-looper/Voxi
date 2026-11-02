@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root=$(git rev-parse --show-toplevel)
+if [[ -f /etc/voxi/gateway.env ]]; then
+  bash "$root/deploy/deploy.sh" --no-pull
+fi

@@ -1,0 +1,41 @@
+name: Verify Voxi
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gateway/package-lock.json
+      - run: npm ci && npm test
+        working-directory: gateway
+      - run: for script in deploy/*.sh .githooks/post-merge; do bash -n "$script"; done
+      - run: docker build -t voxi-gateway:ci .
+      - run: |
+          mkdir -p /tmp/tls
+          printf 'DEVICE_TOKEN=ci-test\nMODE=mock\n' > /tmp/gateway.env
+          docker run -d --name voxi-test --env-file /tmp/gateway.env -p 127.0.0.1:8787:8787 voxi-gateway:ci
+          for i in {1..20}; do
+            if curl -fsS http://127.0.0.1:8787/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs voxi-test
+          exit 1
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install platformio==6.2.0
+      - run: cp firmware-c6/include/config.example.h firmware-c6/include/config.h
+      - run: pio run --project-dir firmware-c6

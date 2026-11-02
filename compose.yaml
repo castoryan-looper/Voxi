@@ -1,0 +1,30 @@
+name: voxi
+services:
+  gateway:
+    image: voxi-gateway:${VOXI_IMAGE_TAG:-local}
+    env_file: /etc/voxi/gateway.env
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    ports: ["127.0.0.1:8787:8787"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports: ["${VOXI_HTTPS_PORT:-9443}:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /etc/voxi/tls:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  caddy_data:
+  caddy_config:
