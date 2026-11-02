@@ -105,7 +105,7 @@ void audioTick(){
     d["ms"]=played>960?(played-960)/24:0;String s;serializeJson(d,s);if(ready)sendText(s);}
 }
 void setup(){
-  Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
+  Serial.setRxBufferSize(16384);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
   pinMode(2,INPUT_PULLUP);
   encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
   diagnosticsBegin();boardInit();setupBegin();

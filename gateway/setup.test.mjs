@@ -29,3 +29,19 @@ test('invalid form gives visible feedback without sending',async()=>{
 test('remembered Wi-Fi selection reuses stored password',()=>{
  const {get}=page();get('savedWifi').value='home';get('password').value='old';get('savedWifi').onchange();assert.equal(get('ssid').value,'home');assert.equal(get('password').value,'');
 });
+
+test('USB sends certificate-sized requests in bounded chunks and preserves response',async()=>{
+ const {context}=page();const chunks=[];
+ context.capture=bytes=>{chunks.push(Uint8Array.from(bytes));return Promise.resolve();};
+ const operation=vm.runInContext("writer={write:capture};api('save',{ca:'x'.repeat(6000)})",context);
+ let bytes=Buffer.alloc(0);
+ for(let i=0;i<200;i++){
+   bytes=Buffer.concat(chunks.map(v=>Buffer.from(v)));
+   if(bytes.at(-1)===10)break;
+   await new Promise(r=>setTimeout(r,10));
+ }
+ assert.ok(chunks.length>40);assert.ok(chunks.every(v=>v.length<=128));
+ const req=JSON.parse(bytes.toString());assert.equal(req.body.ca.length,6000);
+ vm.runInContext(`{const p=pending.get(${req.id});clearTimeout(p.timer);pending.delete(${req.id});p.resolve({saved:true});}`,context);
+ assert.equal((await operation).saved,true);
+});

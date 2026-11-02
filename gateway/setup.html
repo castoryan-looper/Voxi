@@ -11,7 +11,7 @@
 <form id="form" hidden novalidate>
 <section><h2>1 · 连接 Wi‑Fi</h2><button type="button" id="scan">扫描附近网络</button><select id="networks" aria-label="附近 Wi-Fi"><option value="">扫描后选择，或在下方手动填写</option></select><label>已记住的 Wi-Fi（最多8个）</label><select id="savedWifi"></select><button type="button" id="forgetWifi">忘记所选网络</button><label for="ssid">2.4 GHz Wi‑Fi 名称</label><input id="ssid" maxlength="32" required autocomplete="off"><label for="password">Wi‑Fi 密码</label><input id="password" type="password" maxlength="63" autocomplete="new-password" placeholder="同一网络留空保留已有密码"><label class="check"><input id="clearWifiPassword" type="checkbox">这是开放网络，清除已存密码</label></section>
 <section><h2>2 · 云端连接</h2><label for="import">导入连接配置 JSON（可选）</label><input id="import" type="file" accept=".json,application/json"><div class="row"><div><label for="host">云端 IP 或域名</label><input id="host" value="43.160.215.253" maxlength="253" required></div><div><label for="port">端口</label><input id="port" type="number" min="1" max="65535" value="9443" required></div></div><label class="check"><input id="tls" type="checkbox" checked>使用 TLS 加密（云端保持开启）</label><label for="token">设备令牌</label><input id="token" type="password" autocomplete="new-password" placeholder="已有令牌时留空保留"><label for="ca">服务器根 CA 证书（PEM）</label><textarea id="ca" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>填写设备令牌，不是 OpenAI API Key。Pocket 账户模式无需 OpenAI API Key。</small></section>
-<section><h2>3 · 蓝牙旋钮</h2><p>旋转切换频道，按住设备 BOOT 对讲。先唤醒旋钮并断开其他主机。</p><button type="button" id="bleScan">搜索蓝牙设备</button><select id="bleDevices"></select><button type="button" id="blePair">配对</button><button type="button" id="bleForget">忘记旋钮</button><p id="bleDetail"></p></section><button id="save" class="primary" type="submit">保存并重启设备</button><p class="muted">保存后等待状态变为「云端就绪」，按住 BOOT 说话，松开听回复。服务器处于 mock 时会返回短测试音。</p>
+<section><h2>3 · 蓝牙旋钮</h2><p>旋转切换频道，按住设备 BOOT 对讲。先唤醒旋钮并断开其他主机。</p><button type="button" id="bleScan">搜索蓝牙设备</button><select id="bleDevices"></select><button type="button" id="blePair">配对</button><button type="button" id="bleForget">忘记旋钮</button><p id="bleDetail"></p></section><button id="save" class="primary" type="submit">保存并重启设备</button><p id="saveMessage" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></p><p class="muted">保存后等待状态变为「云端就绪」，按住 BOOT 说话，松开听回复。服务器处于 mock 时会返回短测试音。</p>
 </form>
 <details><summary>没有 USB 时如何配置？</summary><p>设备上同时按住 BOOT + PWR 约 3 秒，连接墨水屏显示的 VOXI 热点，在浏览器打开 http://192.168.4.1/，使用屏幕 KEY 登录。检测到 USB 主机时优先使用 USB，配置热点关闭。</p></details>
 <script>
@@ -19,7 +19,7 @@
 const $=id=>document.getElementById(id),apMode=location.protocol==='http:'&&!['localhost','127.0.0.1','[::1]'].includes(location.hostname);
 let port,reader,writer,buffer='',nextId=0,pending=new Map(),writing=Promise.resolve(),polling=false,saving=false,loaded=false,connecting=false;
 const decoder=new TextDecoder();
-function message(s){$('message').textContent=s;}
+function message(s){$('message').textContent=s;$('saveMessage').textContent=s;}
 function rejectPending(){for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('USB 已断开，请重新连接'));}pending.clear();}
 async function readUsb(){
  try{while(port&&port.readable){reader=port.readable.getReader();try{while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});if(buffer.length>40000)buffer=buffer.slice(-16000);let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n).trim();buffer=buffer.slice(n+1);if(!line.startsWith('VOXI_USB '))continue;let r;try{r=JSON.parse(line.slice(9));}catch{continue;}const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.status>=400?p.reject(Error(r.data?.error||'设备操作失败')):p.resolve(r.data);}}}}finally{reader.releaseLock();reader=null;}break;}}
@@ -46,8 +46,12 @@ async function api(method,body){
    const post=['save','scan_start','wifi_forget','bluetooth_scan_start','bluetooth_pair','bluetooth_forget'].includes(method);const r=await fetch(routes[method],{method:post?'POST':'GET',headers:{'X-Setup-Key':$('setupKey').value,'Content-Type':'application/json'},body:post?JSON.stringify(body||{}):undefined,cache:'no-store'});
    const d=await r.json();if(!r.ok)throw Error(d.error||'设备操作失败');return d;}
  if(!writer)throw Error('请先连接 USB 设备');const id=++nextId;
- return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('设备响应超时，请稍后重试或重新连接'));},8000);pending.set(id,{resolve,reject,timer});
-   const bytes=new TextEncoder().encode(JSON.stringify({type:'voxi_config',id,method,body})+'\n');writing=writing.then(()=>writer.write(bytes)).catch(e=>{const p=pending.get(id);if(p){clearTimeout(p.timer);pending.delete(id);p.reject(e);}});
+ return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('设备响应超时，请稍后重试或重新连接'));},12000);pending.set(id,{resolve,reject,timer});
+   const bytes=new TextEncoder().encode(JSON.stringify({type:'voxi_config',id,method,body})+'\n');const activeWriter=writer;writing=writing.then(async()=>{
+     // Hardware USB CDC defaults to a 256-byte RX queue. Pace larger PEM/JSON
+     // requests so existing firmware can drain it without dropping the line.
+     for(let offset=0;offset<bytes.length;offset+=128){if(writer!==activeWriter)throw Error('USB 已断开');await activeWriter.write(bytes.subarray(offset,offset+128));await new Promise(r=>setTimeout(r,20));}
+   }).catch(e=>{const p=pending.get(id);if(p){clearTimeout(p.timer);pending.delete(id);p.reject(e);}});
  });
 }
 function wifiList(c){const selected=$('savedWifi').value;$('savedWifi').replaceChildren(new Option('选择已保存网络',''));for(const n of c.wifiProfiles||[])$('savedWifi').add(new Option(n.ssid+(n.connected?' · 已连接':n.preferred?' · 优先':''),n.ssid));$('savedWifi').value=selected;}
