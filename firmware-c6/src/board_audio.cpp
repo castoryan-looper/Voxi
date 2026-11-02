@@ -2,6 +2,7 @@
 #include "diagnostics.h"
 #include <WiFi.h>
 #include <HWCDC.h>
+#include <math.h>
 #if __has_include("config.h")
 #include "config.h"
 #else
@@ -162,6 +163,7 @@ void boardInit(){
   ESP_ERROR_CHECK(esp_codec_dev_open(codec,&fs));
   ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(codec,80));
   ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(codec,MICROPHONE_GAIN_DB));
+  ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(codec,false));
   audioFlush();expWrite(1,0x2B); // enable amplifier after clocks/codec are stable
 #if ENABLE_EPAPER
   screenQueue=xQueueCreate(1,sizeof(ScreenState));assert(screenQueue);
@@ -184,8 +186,30 @@ size_t audioRead(int16_t* mono,size_t samples){
   for(size_t i=0;i<bytes/4;i++)mono[i]=stereo[2*i+MIC_SLOT];
   return bytes/4;
 }
+static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
+void speakerTestRequest(){testPending=true;}
+bool speakerTestPending(){return testPending;}
+void speakerDiagnostics(JsonDocument& out){out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
   for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=(int32_t)mono[i]*SPEAKER_VOLUME/100;
-  size_t bytes=0;i2s_channel_write(output,stereo,samples*4,&bytes,0);return bytes/4;
+  size_t bytes=0;esp_err_t err=i2s_channel_write(output,stereo,samples*4,&bytes,0);
+  if(err!=ESP_OK&&err!=ESP_ERR_TIMEOUT){outputErrors++;diagnosticError("I2S speaker write failed");}
+  size_t written=bytes/4;outputSamples+=written;
+  for(size_t i=0;i<written;i++)outputPeak=max(outputPeak,(unsigned)abs((int)stereo[2*i]));
+  return written;
+}
+void speakerTestRun(){
+  testPending=false;radioDebug("SPEAKER TEST","Local test: 2 quiet tones");
+  audioFlush();esp_codec_dev_set_out_mute(codec,false);esp_codec_dev_set_out_vol(codec,80);expWrite(1,0x2B);
+  outputPeak=0;uint32_t start=millis();size_t position=0;
+  while(position<18000&&millis()-start<3000){
+    int16_t block[240];size_t n=min((size_t)240,18000-position);
+    for(size_t i=0;i<n;i++){
+      size_t t=position+i;int frequency=t<6000?660:t<12000?0:880;
+      block[i]=frequency?(int16_t)(3500*sin(2*3.141592653589793*frequency*t/24000)):0;
+    }
+    position+=audioWrite(block,n);delay(1);
+  }
+  delay(50);radioDebug(position==18000?"TEST DONE":"TEST ERROR",position==18000?"2 tones written to speaker":"Local tone write timeout");
 }

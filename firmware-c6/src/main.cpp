@@ -131,6 +131,7 @@ void setup(){
 }
 void loop(){
   displayDebugTick();boardStatusTick();setupTick(tx||playing||thinking,ready,channel);
+  if(speakerTestPending()&&!tx&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){
     button();
     static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());}

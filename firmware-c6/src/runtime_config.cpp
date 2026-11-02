@@ -145,8 +145,9 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     out["firmware"]="voxi-c6-web-3";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
-    diagnosticsJson(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
+    diagnosticsJson(out);speakerDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
+  else if(method=="speaker_test"){if(busyNow){out["error"]="请先等待录音或回复结束";return 409;}speakerTestRequest();out["message"]="即将播放两声本地测试音（不经过云端）";}
   else if(method=="storage_test"){
     uint8_t* bytes=(uint8_t*)malloc(5000);bool ok=storageReady&&bytes;
     if(ok){for(unsigned i=0;i<5000;i++)bytes[i]=(uint8_t)(i*31+7);ok=prefs.putBytes("probe",bytes,5000)==5000;
@@ -191,6 +192,7 @@ void setupBegin(){
   web.on("/api/wifi/scan",HTTP_GET,[](){webCall("scan_results");});web.on("/api/wifi/scan",HTTP_POST,[](){webCall("scan_start");});web.on("/api/wifi/forget",HTTP_POST,[](){webCall("wifi_forget");});
   web.on("/api/bluetooth/scan",HTTP_POST,[](){webCall("bluetooth_scan_start");});web.on("/api/bluetooth/scan",HTTP_GET,[](){webCall("bluetooth_scan_results");});
   web.on("/api/bluetooth/pair",HTTP_POST,[](){webCall("bluetooth_pair");});web.on("/api/bluetooth/forget",HTTP_POST,[](){webCall("bluetooth_forget");});
+  web.on("/api/speaker/test",HTTP_POST,[](){webCall("speaker_test");});
   web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(false);

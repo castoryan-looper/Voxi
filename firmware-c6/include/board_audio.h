@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <ArduinoJson.h>
 void boardInit();
 void audioFlush();
 size_t audioRead(int16_t* mono,size_t samples);
@@ -14,3 +15,8 @@ int batteryPercent();
 int batteryMillivolts();
 
 void displayDebugTick();
+
+void speakerTestRequest();
+bool speakerTestPending();
+void speakerTestRun();
+void speakerDiagnostics(JsonDocument& out);
