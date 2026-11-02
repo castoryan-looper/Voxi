@@ -6,6 +6,6 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/voxi
-ExecStart=/usr/bin/bash /opt/voxi/deploy/deploy.sh
+WorkingDirectory=/etc/voxi/repo
+ExecStart=/usr/bin/bash /etc/voxi/repo/deploy/deploy.sh
 TimeoutStartSec=900

@@ -4,8 +4,16 @@ set -euo pipefail
 for command in docker git openssl curl flock;do command -v "$command" >/dev/null || { echo "Missing $command";exit 1; };done
 docker compose version >/dev/null
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-[[ "$root" == /opt/voxi ]] || { echo 'Clone repository to /opt/voxi first';exit 1; }
 install -d -m 700 /etc/voxi
+# The service follows this stable link, independent of the clone directory.
+if [[ -e /etc/voxi/repo && ! -L /etc/voxi/repo ]]; then
+  echo '/etc/voxi/repo exists and is not a symlink; stopping';exit 1
+fi
+ln -sfnT "$root" /etc/voxi/repo
+# sudo/systemd operate as root even when the clone belongs to the login user.
+if ! git config --global --get-all safe.directory | grep -Fxq "$root"; then
+  git config --global --add safe.directory "$root"
+fi
 if [[ ! -f /etc/voxi/gateway.env ]]; then
   umask 077
   printf 'MODE=mock\nPORT=8787\nDEVICE_TOKEN=%s\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-realtime-2.1\nOPENAI_VOICE=marin\nMAX_CONNECTIONS=2\n' "$(openssl rand -hex 32)" > /etc/voxi/gateway.env

@@ -25,14 +25,14 @@ sudo systemctl enable --now docker
 首次部署：
 
 ```bash
-sudo git clone https://github.com/castoryan-looper/Voxi.git /opt/voxi
-cd /opt/voxi
+cd ~/Voxi
+git pull --ff-only
 sudo bash deploy/bootstrap.sh 43.160.215.253
 ```
 
-如果 `/opt/voxi` 已存在，先查看内容，已有本仓库则 `cd /opt/voxi && sudo git pull --ff-only`；不要删除已有目录。
+仓库已放在 `~/Voxi`，不需要重新 clone。必须先 `cd ~/Voxi`，再执行 sudo；这样 `~` 会按当前登录用户展开。bootstrap 会把实际绝对路径记录为 `/etc/voxi/repo` 符号链接，systemd 跟随此链接，不再要求固定目录。
 
-脚本会创建随机设备令牌、IP 证书、构建模拟网关、启动 Caddy TLS 代理，安装每分钟更新一次的 systemd timer。需要能访问 GitHub、npm 和 Docker 镜像源。首次下载工具和镜像可能较慢。
+脚本会为 root 信任这个准确的 Git 仓库路径，以便 sudo/systemd 更新用户目录中的仓库；不会信任所有目录。脚本会创建随机设备令牌、IP 证书、构建模拟网关、启动 Caddy TLS 代理，安装每分钟更新一次的 systemd timer。需要能访问 GitHub、npm 和 Docker 镜像源。首次下载工具和镜像可能较慢。
 
 在腾讯云安全组/轻量服务器防火墙放行 **TCP 9443**。主机防火墙如也启用，增加相同端口规则。**8787 不对公网放行**。
 
@@ -41,7 +41,7 @@ sudo bash deploy/bootstrap.sh 43.160.215.253
 ```bash
 curl -fsS http://127.0.0.1:8787/healthz
 sudo curl --cacert /etc/voxi/tls/ca.crt https://43.160.215.253:9443/healthz
-sudo docker compose --env-file /etc/voxi/deploy.env -f /opt/voxi/compose.yaml ps
+sudo docker compose --env-file /etc/voxi/deploy.env -f "$HOME/Voxi/compose.yaml" ps
 sudo systemctl list-timers voxi-update.timer
 ```
 
@@ -75,7 +75,7 @@ sudo nano /etc/voxi/gateway.env
 修改 `MODE=openai`，填入 `OPENAI_API_KEY`，保留随机 `DEVICE_TOKEN`。默认模型 `gpt-realtime-2.1`、声音 `marin` 可按账号权限修改。Key 仅在服务器本地保存，不上传仓库。
 
 ```bash
-cd /opt/voxi
+cd ~/Voxi
 sudo bash deploy/deploy.sh --force
 sudo docker compose --env-file /etc/voxi/deploy.env logs --tail=100 gateway
 ```
@@ -89,7 +89,7 @@ sudo docker compose --env-file /etc/voxi/deploy.env logs --tail=100 gateway
 也支持管理终端手动拉取：
 
 ```bash
-cd /opt/voxi
+cd ~/Voxi
 sudo git pull --ff-only
 ```
 
@@ -116,7 +116,7 @@ sudo systemctl stop voxi-update.timer
 
 ```bash
 sudo docker image ls voxi-gateway
-cd /opt/voxi
+cd ~/Voxi
 # 替换 OLD_SHA 为上条命令中的旧版本标签
 sudo env VOXI_IMAGE_TAG=OLD_SHA docker compose --env-file /etc/voxi/deploy.env up -d --no-deps gateway
 ```
