@@ -51,5 +51,6 @@ jobs:
       - run: pip install platformio==6.2.0
       - run: cp firmware-c6/include/config.example.h firmware-c6/include/config.h
       - run: g++ -std=c++17 tools/test_ptt_hold.cpp -o /tmp/voxi-ptt && /tmp/voxi-ptt
+      - run: g++ -std=c++17 tools/test_output_gain.cpp -o /tmp/voxi-output && /tmp/voxi-output
       - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6

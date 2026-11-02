@@ -1,5 +1,6 @@
 #include "board_audio.h"
 #include "diagnostics.h"
+#include "output_gain.h"
 #include <WiFi.h>
 #include <HWCDC.h>
 #include <math.h>
@@ -197,10 +198,10 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["speakerBoostDb"]=12;out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
-  for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=(int32_t)mono[i]*volumePercent/100;
+  for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=speakerSample(mono[i],volumePercent);
   size_t bytes=0;esp_err_t err=i2s_channel_write(output,stereo,samples*4,&bytes,0);
   if(err!=ESP_OK&&err!=ESP_ERR_TIMEOUT){outputErrors++;diagnosticError("I2S speaker write failed");}
   size_t written=bytes/4;outputSamples+=written;

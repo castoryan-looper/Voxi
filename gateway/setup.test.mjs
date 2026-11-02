@@ -74,7 +74,7 @@ test('volume controls load actual saved level and retain an unsaved edit during 
  const {context,get}=page();
  vm.runInContext("loaded=true;writer={};api=async()=>({speakerVolume:75,busy:false});",context);
  await vm.runInContext('status()',context);
- assert.equal(get('speakerVolume').value,'75');assert.equal(get('volumeSlider').value,'75');assert.equal(get('volumeValue').textContent,'75%');
+ assert.equal(get('audio').hidden,false);assert.equal(get('speakerVolume').value,'75');assert.equal(get('volumeSlider').value,'75');assert.equal(get('volumeValue').textContent,'75%');
  get('volumeSlider').value='88';get('volumeSlider').oninput();
  await vm.runInContext('status()',context);
  assert.equal(get('speakerVolume').value,'88');assert.match(get('volumeMessage').textContent,/待保存音量：88/);
@@ -85,4 +85,13 @@ test('volume save sends selected level and displays persistent success beside co
  vm.runInContext('api=saveRequest;',context);get('speakerVolume').value='82';
  await get('saveVolume').onclick();
  assert.equal(received.method,'speaker_volume');assert.equal(received.body.volume,82);assert.match(get('volumeMessage').textContent,/已保存.*82%/);assert.equal(get('volumeSlider').value,'82');
+});
+
+test('USB disconnect hides the volume section and disables its controls',async()=>{
+ const {context,get}=page();get('audio').hidden=false;
+ vm.runInContext("loaded=true;port={readable:{getReader(){return {read:async()=>({done:true}),releaseLock(){}}}}};",context);
+ await vm.runInContext('readUsb()',context);
+ assert.equal(get('audio').hidden,true);
+ assert.equal(get('saveVolume').disabled,true);
+ assert.equal(get('speakerTest').disabled,true);
 });
