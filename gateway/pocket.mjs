@@ -6,8 +6,9 @@ import {RadioFilter} from './radio.mjs';
 export function attachPocket(device,{url,token,ca}) {
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
     headers:{Authorization:`Bearer ${token}`},...(ca?{ca}:{})});
-  let ready=false,recording=false,bytes=0,filter=new RadioFilter();
+  let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
   const error=message=>{
+    if(failed)return;failed=true;
     if(device.readyState===1){device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
@@ -44,7 +45,18 @@ export function attachPocket(device,{url,token,ca}) {
     else if(e.type==='channel'){ready=false;recording=false;}
     if(['ptt_down','ptt_up','channel','played'].includes(e.type))upstream.send(JSON.stringify(e));
   });
-  upstream.on('error',()=>error('Cannot connect to Pocket native voice; verify backend deployment and device bearer'));
+  upstream.on('unexpected-response',(_,response)=>{
+    const code=response.statusCode;
+    console.error(JSON.stringify({event:'pocket_handshake_failed',status:code}));
+    response.resume();upstream.terminate();
+    error(code===401||code===403?'Pocket authentication rejected (HTTP '+code+'); rerun connect-pocket.sh':code===404?'Pocket /voxi endpoint missing (HTTP 404); upgrade Pocket Cloud':'Pocket handshake failed (HTTP '+code+')');
+  });
+  upstream.on('error',e=>{
+    if(failed)return;
+    const labels={ENOTFOUND:'Pocket Docker hostname not found; check shared network',ECONNREFUSED:'Pocket voice port refused; check relay service on port 8789',ETIMEDOUT:'Pocket connection timed out',EHOSTUNREACH:'Pocket network unreachable',ECONNRESET:'Pocket connection reset'};
+    console.error(JSON.stringify({event:'pocket_connection_failed',code:labels[e.code]?e.code:'OTHER'}));
+    error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
+  });
   upstream.on('close',()=>{if(device.readyState===1){device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
   device.on('close',()=>upstream.close());
   return upstream;

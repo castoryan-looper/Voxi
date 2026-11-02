@@ -22,7 +22,7 @@ static void expWrite(uint8_t reg,uint8_t value){uint8_t b[]={reg,value};ESP_ERRO
 
 #if ENABLE_EPAPER
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
-struct ScreenState{int channel=0;bool online=false,setup=false,hotspot=false;char name[24]={},key[16]={};};
+struct ScreenState{int channel=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};};
 static QueueHandle_t screenQueue;
 static void screenTask(void*){
   pinMode(7,OUTPUT);pinMode(11,OUTPUT);pinMode(15,OUTPUT);
@@ -34,7 +34,7 @@ static void screenTask(void*){
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
     vTaskDelay(pdMS_TO_TICKS(1000));ScreenState next;
     while(xQueueReceive(screenQueue,&next,0)==pdTRUE)state=next;
-    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key))continue;
+    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label))continue;
     previous=state;
     if(!drawn||++refreshes>=20){screen.setFullWindow();refreshes=0;}else screen.setPartialWindow(0,0,200,200);
     drawn=true;screen.firstPage();
@@ -47,9 +47,12 @@ static void screenTask(void*){
         if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,125);screen.printf("KEY: %s",state.key);}
         else{screen.print("Open on your computer:");screen.setCursor(12,120);screen.print("http://127.0.0.1:8788/");screen.setCursor(12,145);screen.print("Click Connect USB");}
       }else{
-        screen.setTextSize(4);screen.setCursor(18,70);screen.printf("CH %02d",state.channel+1);
-        screen.setTextSize(2);screen.setCursor(18,125);screen.print(state.online?"READY":"CONNECTING");
-        screen.setTextSize(1);screen.setCursor(18,170);screen.print("Hold BOOT to talk");
+        screen.setTextSize(4);screen.setCursor(18,60);screen.printf("CH %02d",state.channel+1);
+        screen.setTextSize(2);screen.setCursor(10,96);screen.print(state.label[0]?state.label:state.online?"READY":"CONNECTING");
+        screen.setTextSize(1);screen.setCursor(10,120);screen.printf("WiFi:%s  Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
+        screen.setCursor(10,140);screen.print(state.online?"Hold BOOT to talk":"AI not ready - see USB web");
+        screen.setCursor(10,164);screen.print(state.usb?"USB: 127.0.0.1:8788":"BOOT+PWR 3s: setup");
+        screen.setCursor(10,182);screen.print("BOOT+PWR 3s: settings");
       }
     }while(screen.nextPage());
     screen.powerOff();
@@ -59,6 +62,11 @@ static void screenTask(void*){
 void displayChannel(int channel,bool online){
 #if ENABLE_EPAPER
   if(screenQueue){ScreenState s{channel,online};xQueueOverwrite(screenQueue,&s);}
+#endif
+}
+void displayConnection(int channel,const char* label,bool wifi,bool gateway,bool usb){
+#if ENABLE_EPAPER
+  if(screenQueue){ScreenState s;s.channel=channel;s.wifi=wifi;s.gateway=gateway;s.usb=usb;s.online=!strcmp(label,"READY");strlcpy(s.label,label,sizeof(s.label));xQueueOverwrite(screenQueue,&s);}
 #endif
 }
 void displaySetup(const char* name,const char* key,bool hotspot){

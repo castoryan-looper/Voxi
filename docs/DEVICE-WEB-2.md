@@ -16,3 +16,16 @@
 验证：本地 C6 编译，管理页保存成功/失败/校验交互测试，网关与部署回归测试。真实旋钮配对、家庭网络自动切换和云端语音需在相应设备与有效配置下验证。
 
 烧录修正：工厂分区固件不再写入 Arduino 默认的 boot_app0.bin（0xe000–0xffff），避免覆盖已有 NVS/PHY；保持原分区地址，避免迁移配置。
+
+## 保存后的屏幕
+
+配置有效时开机进入对讲主页，这是正常行为。主页显示 WiFi / Gateway 状态、USB 管理地址，BOOT+PWR 同按约 3 秒可再次显示设置页。管理网页也提供“设备屏幕显示设置入口 / 返回对讲”按钮。
+
+- WIFI CONNECT：尚未连上无线网络。
+- SYNC TIME：等待校时，以验证 TLS 证书。
+- CLOUD CONNECT：尚未完成网关 WebSocket 连接。
+- AI CONNECTING：网关已连接，正在等待原生语音会话握手。
+- BACKEND ERROR：网关返回后端错误；具体原因看管理网页。
+- READY：AI 会话已完成握手，可按 BOOT 对讲。
+
+网关 healthz 的 ok 只表示服务进程存活，不代表 Pocket 原生语音已可用。网关会将 Pocket 的 HTTP 403/404/503 或 DNS/端口连接错误分别报告，避免统一显示 CONNECTING。

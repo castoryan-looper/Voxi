@@ -1,3 +1,4 @@
+import http from 'node:http';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {WebSocketServer,WebSocket} from 'ws';
@@ -32,3 +33,16 @@ test('Pocket proxy preserves credentials, PCM, PTT and channel controls without 
   device.send(JSON.stringify({type:'channel',channel:2}));await until(()=>seen.some(e=>e.channel===2));
   device.close();
 });
+
+for(const [code,pattern] of [[403,/authentication rejected/],[404,/endpoint missing/],[503,/handshake failed/]]){
+ test(`Pocket HTTP ${code} produces actionable device error`,async t=>{
+  const backend=http.createServer((req,res)=>{res.writeHead(code);res.end();});
+  await new Promise(r=>backend.listen(0,'127.0.0.1',r));
+  const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();backend.close();});
+  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only'}});
+  const result=await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('No error reported')),2000);device.on('message',raw=>{const e=JSON.parse(raw);if(e.type==='error'){clearTimeout(timeout);resolve(e);}});device.on('error',reject);});
+  assert.match(result.message,pattern);assert.match(result.message,new RegExp(String(code)));device.close();
+ });
+}

@@ -191,6 +191,7 @@ void setupBegin(){
   web.on("/api/wifi/scan",HTTP_GET,[](){webCall("scan_results");});web.on("/api/wifi/scan",HTTP_POST,[](){webCall("scan_start");});web.on("/api/wifi/forget",HTTP_POST,[](){webCall("wifi_forget");});
   web.on("/api/bluetooth/scan",HTTP_POST,[](){webCall("bluetooth_scan_start");});web.on("/api/bluetooth/scan",HTTP_GET,[](){webCall("bluetooth_scan_results");});
   web.on("/api/bluetooth/pair",HTTP_POST,[](){webCall("bluetooth_pair");});web.on("/api/bluetooth/forget",HTTP_POST,[](){webCall("bluetooth_forget");});
+  web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(false);
   WiFi.onEvent([](arduino_event_id_t event,arduino_event_info_t info){if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED)wifiReason=info.wifi_sta_disconnected.reason;});

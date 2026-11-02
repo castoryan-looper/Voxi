@@ -3,6 +3,7 @@
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <HWCDC.h>
 #include "board_audio.h"
 #if __has_include("config.h")
 #include "config.h"
@@ -18,7 +19,7 @@ WebSocketsClient ws;
 String authorizationHeader;
 constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
-bool ready=false,tx=false,ending=false,playing=false;
+bool ready=false,tx=false,ending=false,playing=false,gatewayLinked=false,backendError=false;
 uint32_t played=0,lastReport=0,pressAt=0;
 int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
@@ -43,8 +44,8 @@ void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJ
 void flushAudio(){head=tail=used=0;ending=playing=false;played=0;audioFlush();}
 void fault(){ready=tx=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED){diagnosticStage("disconnected");ready=tx=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
-  if(t==WStype_CONNECTED){diagnosticStage("cloud_handshake");ready=false;return;}
+  if(t==WStype_DISCONNECTED){gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
+  if(t==WStype_CONNECTED){gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     if(tx)return;
     if(len%2||len>CAP-used){Serial.println("Audio overflow");fault();return;}
@@ -56,9 +57,9 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="ready"){
     int actual=d["channel"]|0;
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
-    else{diagnosticStage("ready");ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
+    else{backendError=false;diagnosticError("");diagnosticStage("ready");ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
   }
-  if(type=="connecting"||type=="offline"||type=="error"){ready=tx=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
+  if(type=="connecting"||type=="offline"||type=="error"){ready=tx=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
   if(type=="flush")flushAudio();
   if(type=="audio_start"){played=0;ending=false;playing=true;}
   if(type=="audio_end")ending=true;
@@ -122,5 +123,13 @@ void loop(){
   Packet p;for(int i=0;i<8&&xQueueReceive(incoming,&p,0)==pdTRUE;i++)onWs(p.type,p.data,p.len);
   if(queueFault){queueFault=false;diagnosticError("audio network queue overflow");fault();}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=tx=false;diagnosticStage("wifi_connecting");}
-  button();encoder();audioTick();delay(1);
+  button();encoder();audioTick();
+  static uint32_t lastScreen=0;
+  if(millis()-lastScreen>500){lastScreen=millis();
+    bool wifi=WiFi.status()==WL_CONNECTED;
+    const char* label=!wifi?"WIFI CONNECT":radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
+    if(!ready)diagnosticStage(!wifi?"wifi_connecting":radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
+    if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
+  }
+  delay(1);
 }
