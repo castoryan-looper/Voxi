@@ -5,3 +5,4 @@ void audioFlush();
 size_t audioRead(int16_t* mono,size_t samples);
 size_t audioWrite(const int16_t* mono,size_t samples);
 void displayChannel(int channel,bool online);
+void displaySetup(const char* name,const char* key,bool hotspot);

@@ -55,15 +55,15 @@ sudo grep '^DEVICE_TOKEN=' /etc/voxi/gateway.env
 sudo cat /etc/voxi/tls/ca.crt
 ```
 
-将令牌写入本地 `firmware-c6/include/config.h`，把 **ca.crt 公共证书完整内容**放入 `GATEWAY_ROOT_CA`。服务器私钥 `ca.key`、`server.key` 不离开主机。设备地址为：
+在本机 USB 管理网页中填写设备令牌，把 **ca.crt 公共证书完整内容**粘贴到“根 CA 证书”。无需修改 config.h；详见 [网页配置](WEB-SETUP.md)。服务器私钥 `ca.key`、`server.key` 不离开主机。网页中的设备地址为：
 
-```cpp
-#define GATEWAY_HOST "43.160.215.253"
-#define GATEWAY_PORT 9443
-#define GATEWAY_TLS 1
+```text
+主机：43.160.215.253
+端口：9443
+TLS：开启
 ```
 
-`GATEWAY_HOST` 不带协议或路径。固件通过 SNTP 校时后再建立带 CA 校验的 WSS；允许设备访问 NTP（UDP 123）。墨水屏仍显示 CONNECTING 时先查看串口。不要把本地 config.h 提交到 GitHub。
+主机字段不带协议或路径。固件通过 SNTP 校时后再建立带 CA 校验的 WSS；允许设备访问 NTP（UDP 123）。墨水屏仍显示 CONNECTING 时先查看串口。不要把本地 config.h 提交到 GitHub。
 
 ## 4. 切换真实 AI
 

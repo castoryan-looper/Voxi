@@ -1,5 +1,9 @@
 #include "board_audio.h"
+#if __has_include("config.h")
 #include "config.h"
+#else
+#include "config.example.h"
+#endif
 #include <driver/i2s_std.h>
 #include <driver/i2c_master.h>
 #include <esp_codec_dev.h>
@@ -17,7 +21,7 @@ static void expWrite(uint8_t reg,uint8_t value){uint8_t b[]={reg,value};ESP_ERRO
 
 #if ENABLE_EPAPER
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
-struct ScreenState{int channel;bool online;};
+struct ScreenState{int channel=0;bool online=false,setup=false,hotspot=false;char name[24]={},key[16]={};};
 static QueueHandle_t screenQueue;
 static void screenTask(void*){
   SPI.begin(6,4,5,7);
@@ -32,9 +36,16 @@ static void screenTask(void*){
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
       screen.setCursor(18,25);screen.print("AI RADIO");
-      screen.setTextSize(4);screen.setCursor(18,70);screen.printf("CH %02d",state.channel+1);
-      screen.setTextSize(2);screen.setCursor(18,125);screen.print(state.online?"READY":"CONNECTING");
-      screen.setTextSize(1);screen.setCursor(18,170);screen.print("Hold BOOT to talk");
+      if(state.setup){
+        screen.setTextSize(2);screen.setCursor(12,65);screen.print(state.name);
+        screen.setTextSize(1);screen.setCursor(12,100);
+        if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,125);screen.printf("KEY: %s",state.key);}
+        else{screen.print("Open on your computer:");screen.setCursor(12,120);screen.print("http://127.0.0.1:8788/");screen.setCursor(12,145);screen.print("Click Connect USB");}
+      }else{
+        screen.setTextSize(4);screen.setCursor(18,70);screen.printf("CH %02d",state.channel+1);
+        screen.setTextSize(2);screen.setCursor(18,125);screen.print(state.online?"READY":"CONNECTING");
+        screen.setTextSize(1);screen.setCursor(18,170);screen.print("Hold BOOT to talk");
+      }
     }while(screen.nextPage());
     screen.hibernate();
   }
@@ -43,6 +54,11 @@ static void screenTask(void*){
 void displayChannel(int channel,bool online){
 #if ENABLE_EPAPER
   if(screenQueue){ScreenState s{channel,online};xQueueOverwrite(screenQueue,&s);}
+#endif
+}
+void displaySetup(const char* name,const char* key,bool hotspot){
+#if ENABLE_EPAPER
+  if(screenQueue){ScreenState s;s.setup=true;s.hotspot=hotspot;strlcpy(s.name,name,sizeof(s.name));strlcpy(s.key,key,sizeof(s.key));xQueueOverwrite(screenQueue,&s);}
 #endif
 }
 void boardInit(){

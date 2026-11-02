@@ -1,5 +1,6 @@
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
+import {readFileSync} from 'node:fs';
 import WebSocket,{WebSocketServer} from 'ws';
 import {channels,instructions,RadioFilter} from './radio.mjs';
 
@@ -8,6 +9,10 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   if(!['mock','openai'].includes(mode)) throw Error('MODE must be mock or openai');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
   const server=http.createServer((req,res)=>{
+    if(req.url==='/setup/'||req.url==='/setup'){
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY'});
+      res.end(readFileSync(new URL('./setup.html',import.meta.url)));return;
+    }
     if(req.url!=='/healthz'){res.writeHead(404);res.end();return;}
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision}));
   });

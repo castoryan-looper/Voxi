@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voxi 设备管理</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#233128;background:#f2f4ee}body{max-width:760px;margin:36px auto;padding:0 18px 50px}h1{font-size:30px;margin-bottom:6px}p{line-height:1.65}.muted,small{color:#667367}section{background:white;border:1px solid #dbe2d6;border-radius:16px;padding:24px;margin:20px 0}h2{font-size:19px;margin:0 0 18px}label{display:block;margin:16px 0 6px}input,textarea,select,button{font:inherit;border:1px solid #becab8;border-radius:8px;padding:11px;box-sizing:border-box}input,textarea,select{width:100%;background:#fff}textarea{min-height:150px;font:12px monospace}button{cursor:pointer;background:#e2ebdb;color:#233128;margin:8px 8px 0 0}button.primary{background:#305b43;color:white;border-color:#305b43}button:disabled{opacity:.5;cursor:wait}.row{display:grid;grid-template-columns:1fr 130px;gap:14px}.check{display:flex;gap:10px;align-items:center}.check input{width:auto}.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}.card{background:#f2f4ee;border-radius:8px;padding:14px;overflow-wrap:anywhere}.card b{display:block;margin-top:8px}#message{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}summary{cursor:pointer}a{color:#305b43}[hidden]{display:none!important}@media(max-width:480px){body{margin-top:22px}section{padding:18px}.row,.cards{grid-template-columns:1fr}}
+</style></head><body>
+<h1>Voxi 设备管理</h1><p class="muted">设置一次，按下就能对讲。配置直接写入设备。</p>
+<section id="usb"><h2>通过 USB 连接</h2><p>用数据线连接 ESP32，在 Chrome 或 Edge 中打开此页。网页通过 USB 直接配置设备，Wi‑Fi 密码和设备令牌不会发送到云端。</p><button class="primary" id="connect">连接 USB 设备</button><button id="disconnect" disabled>断开连接</button><p><small>烧录前请先断开。首次设置不需要编辑 config.h。</small></p></section>
+<section id="ap" hidden><h2>设备热点登录</h2><p>填写墨水屏 KEY 行显示的配置密码。</p><input id="setupKey" type="password" autocomplete="current-password" aria-label="配置密码"><button id="login">打开设置</button></section>
+<p id="message" role="status" aria-live="polite"></p>
+<section id="live" hidden><h2>当前状态</h2><div class="cards" id="status"></div><p id="detail" class="muted"></p></section>
+<form id="form" hidden>
+<section><h2>1 · 连接 Wi‑Fi</h2><button type="button" id="scan">扫描附近网络</button><select id="networks" aria-label="附近 Wi-Fi"><option value="">扫描后选择，或在下方手动填写</option></select><label for="ssid">2.4 GHz Wi‑Fi 名称</label><input id="ssid" maxlength="32" required autocomplete="off"><label for="password">Wi‑Fi 密码</label><input id="password" type="password" maxlength="63" autocomplete="new-password" placeholder="同一网络留空保留已有密码"><label class="check"><input id="clearWifiPassword" type="checkbox">这是开放网络，清除已存密码</label></section>
+<section><h2>2 · 云端连接</h2><label for="import">导入连接配置 JSON（可选）</label><input id="import" type="file" accept=".json,application/json"><div class="row"><div><label for="host">云端 IP 或域名</label><input id="host" value="43.160.215.253" maxlength="253" required></div><div><label for="port">端口</label><input id="port" type="number" min="1" max="65535" value="9443" required></div></div><label class="check"><input id="tls" type="checkbox" checked>使用 TLS 加密（云端保持开启）</label><label for="token">设备令牌</label><input id="token" type="password" autocomplete="new-password" placeholder="已有令牌时留空保留"><label for="ca">服务器根 CA 证书（PEM）</label><textarea id="ca" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>填写设备令牌，不是 OpenAI API Key。API Key 仍只保存在服务器。</small></section>
+<button id="save" class="primary" type="submit">保存并重启设备</button><p class="muted">保存后等待状态变为「云端就绪」，按住 BOOT 说话，松开听回复。服务器处于 mock 时会返回短测试音。</p>
+</form>
+<details><summary>没有 USB 时如何配置？</summary><p>设备上同时按住 BOOT + PWR 约 3 秒，连接墨水屏显示的 VOXI 热点，在浏览器打开 http://192.168.4.1/，使用屏幕 KEY 登录。检测到 USB 主机时优先使用 USB，配置热点关闭。</p></details>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),apMode=location.protocol==='http:'&&!['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+let port,reader,writer,buffer='',nextId=0,pending=new Map(),writing=Promise.resolve(),polling=false,saving=false,loaded=false,connecting=false;
+const decoder=new TextDecoder();
+function message(s){$('message').textContent=s;}
+function rejectPending(){for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('USB 已断开，请重新连接'));}pending.clear();}
+async function readUsb(){
+ try{while(port&&port.readable){reader=port.readable.getReader();try{while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});if(buffer.length>40000)buffer=buffer.slice(-16000);let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n).trim();buffer=buffer.slice(n+1);if(!line.startsWith('VOXI_USB '))continue;let r;try{r=JSON.parse(line.slice(9));}catch{continue;}const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.status>=400?p.reject(Error(r.data?.error||'设备操作失败')):p.resolve(r.data);}}}}finally{reader.releaseLock();reader=null;}break;}}
+ catch{message('USB 连接中断，请点击连接 USB 设备重连。');}
+ finally{rejectPending();}
+}
+async function connect(){
+ if(connecting)return;connecting=true;
+ try{if(!navigator.serial)throw Error('请在桌面 Chrome / Edge 中通过 localhost 或受信任的 HTTPS 打开此页');
+   await disconnect(false);port=await navigator.serial.requestPort({filters:[{usbVendorId:0x303a}]});
+   await port.open({baudRate:115200,bufferSize:16384});await port.setSignals({dataTerminalReady:true,requestToSend:false});
+   writer=port.writable.getWriter();readUsb();$('disconnect').disabled=false;
+   await new Promise(r=>setTimeout(r,500));await load();message('USB 已连接。请填写设置并保存。');
+ }catch(e){message(e.message);await disconnect(false);}finally{connecting=false;}
+}
+async function disconnect(notify=true){
+ rejectPending();if(reader)await reader.cancel().catch(()=>{});if(writer){try{writer.releaseLock();}catch{}writer=null;}
+ if(port){await port.close().catch(()=>{});port=null;}
+ buffer='';writing=Promise.resolve();loaded=false;$('disconnect').disabled=true;
+ if(notify)message('USB 已断开，可以烧录固件。');
+}
+async function api(method,body){
+ if(apMode){const routes={config:'/api/config',status:'/api/status',save:'/api/config',scan_start:'/api/wifi/scan',scan_results:'/api/wifi/scan'};
+   const post=method==='save'||method==='scan_start';const r=await fetch(routes[method],{method:post?'POST':'GET',headers:{'X-Setup-Key':$('setupKey').value,'Content-Type':'application/json'},body:post?JSON.stringify(body||{}):undefined,cache:'no-store'});
+   const d=await r.json();if(!r.ok)throw Error(d.error||'设备操作失败');return d;}
+ if(!writer)throw Error('请先连接 USB 设备');const id=++nextId;
+ return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('设备响应超时，请稍后重试或重新连接'));},8000);pending.set(id,{resolve,reject,timer});
+   const bytes=new TextEncoder().encode(JSON.stringify({type:'voxi_config',id,method,body})+'\n');writing=writing.then(()=>writer.write(bytes)).catch(e=>{const p=pending.get(id);if(p){clearTimeout(p.timer);pending.delete(id);p.reject(e);}});
+ });
+}
+function fill(c){for(const k of ['ssid','host','ca'])if(typeof c[k]==='string')$(k).value=c[k];if(Number.isInteger(c.port))$('port').value=c.port;if(typeof c.tls==='boolean')$('tls').checked=c.tls;
+ if(typeof c.token==='string')$('token').value=c.token;$('token').placeholder=c.tokenConfigured?'已保存，留空保留':'首次设置请填写设备令牌';}
+async function load(){fill(await api('config'));loaded=true;$('form').hidden=false;$('live').hidden=false;await status();}
+async function status(){if(polling||saving||(!writer&&!apMode)||(!loaded))return;polling=true;
+ try{const s=await api('status');$('status').replaceChildren();for(const [label,value] of [['Wi-Fi',s.wifiConnected?'已连接':'等待连接'],['云端',s.cloudReady?'就绪':'未就绪'],['USB',s.usbConnected?'已连接':'未连接'],['频道',String(s.channel)]]){const d=document.createElement('div');d.className='card';d.textContent=label;const b=document.createElement('b');b.textContent=value;d.append(b);$('status').append(d);}
+ $('detail').textContent=[s.firmware,s.wifiConnected?s.ip:'请保存网络设置',s.timeReady?'时间已同步':'等待校时'].join(' · ');
+ $('save').disabled=!!s.busy;if(s.configured&&s.cloudReady)message('设备已就绪，可以按住 BOOT 测试对讲。');
+ }catch(e){message(e.message);}finally{polling=false;}}
+$('connect').onclick=connect;$('disconnect').onclick=()=>disconnect();
+$('login').onclick=()=>load().then(()=>message('设置已打开')).catch(e=>message(e.message));
+$('clearWifiPassword').onchange=()=>{$('password').disabled=$('clearWifiPassword').checked;};
+$('networks').onchange=()=>{if($('networks').value){$('ssid').value=$('networks').value;$('password').value='';}};
+$('import').onchange=async e=>{try{const f=e.target.files[0];if(!f||f.size>10000)throw Error('请选择小于 10KB 的连接配置 JSON');fill(JSON.parse(await f.text()));message('配置已填入，保存后生效');}catch(e){message(e.message);}};
+$('scan').onclick=async()=>{$('scan').disabled=true;try{await api('scan_start');let r;for(let i=0;i<30;i++){await new Promise(resolve=>setTimeout(resolve,500));r=await api('scan_results');if(r.state!=='scanning')break;}if(r?.state!=='done')throw Error('扫描失败，请重试或手动填写 Wi-Fi');$('networks').replaceChildren(new Option('请选择网络',''));const seen=new Set();for(const n of r.networks||[]){if(!n.ssid||seen.has(n.ssid))continue;seen.add(n.ssid);$('networks').add(new Option(n.ssid+' · '+n.rssi+' dBm'+(n.secure?'':' · 开放'),n.ssid));}message('扫描完成，也可以手动填写隐藏网络');}catch(e){message(e.message);}finally{$('scan').disabled=false;}};
+$('form').onsubmit=async e=>{e.preventDefault();saving=true;$('save').disabled=true;try{const body={};for(const k of ['ssid','password','host','token','ca'])body[k]=$(k).value;body.port=Number($('port').value);body.tls=$('tls').checked;body.clearWifiPassword=$('clearWifiPassword').checked;message((await api('save',body)).message);$('password').value='';$('token').value='';}catch(e){message(e.message);}finally{saving=false;$('save').disabled=false;}};
+$('usb').hidden=apMode;$('ap').hidden=!apMode;setInterval(status,2500);
+</script></body></html>

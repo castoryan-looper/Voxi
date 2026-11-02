@@ -27,7 +27,7 @@ PA 在 codec 和时钟稳定后打开。断开或打断时重置播放 DMA 为�
 
 墨水屏低优先级独立任务显示频道和 READY/CONNECTING，不在按下或松开时刷新，避免刷新 BUSY 阻塞语音主循环。使用 GxEPD2 的 200×200 D67 驱动作为当前软件适配；屏幕型号/波形与真机尚需验证。若音频联调时出现显示异常，先把 `ENABLE_EPAPER` 设为 0，独立确认屏幕版本后再调波形。
 
-BOOT 按住发射、松开接收；轻点不足 100ms 音频丢弃。EC11 默认四相变化换一档，停稳 180ms 生效，按住发射时换台延迟到松开。当前不做 PWR 长按关机，也不使用 TF/RTC/温湿度数据。
+USB 网页配网和云端配置见 [WEB-SETUP.md](WEB-SETUP.md)。无 USB 时 BOOT + PWR 双键约 3 秒进入热点设置。BOOT 按住发射、松开接收；轻点不足 100ms 音频丢弃。EC11 默认四相变化换一档，停稳 180ms 生效，按住发射时换台延迟到松开。当前不做 PWR 长按关机，也不使用 TF/RTC/温湿度数据。
 
 ## 编译
 
@@ -36,8 +36,9 @@ BOOT 按住发射、松开接收；轻点不足 100ms 音频丢弃。EC11 默认
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install platformio==6.2.0
-Copy-Item firmware-c6/include/config.example.h firmware-c6/include/config.h
-# 填 Wi-Fi、设备令牌和服务器根 CA
+# 不需要预填 config.h；烧录后通过 USB 网页配置网络与云端连接
+$env:PYTHONUTF8='1'
+$env:PYTHONIOENCODING='utf-8'
 .\.venv\Scripts\python.exe -m platformio run --project-dir firmware-c6
 .\.venv\Scripts\python.exe -m platformio run --project-dir firmware-c6 --target upload
 .\.venv\Scripts\python.exe -m platformio device monitor --project-dir firmware-c6

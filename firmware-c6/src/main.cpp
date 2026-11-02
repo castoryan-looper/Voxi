@@ -4,10 +4,16 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include "board_audio.h"
+#if __has_include("config.h")
 #include "config.h"
+#else
+#include "config.example.h"
+#endif
+#include "runtime_config.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 WebSocketsClient ws;
+String authorizationHeader;
 constexpr size_t CAP=48000; // one second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
 bool ready=false,tx=false,ending=false,playing=false;
@@ -40,6 +46,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="audio_end")ending=true;
 }
 void button(){
+  if(digitalRead(2)==LOW){if(tx){tx=false;control("ptt_up");}return;}
   bool down=digitalRead(PIN_PTT)==LOW;
   if(down!=candidate){candidate=down;changedAt=millis();}
   if(candidate!=stable&&millis()-changedAt>=15){
@@ -80,24 +87,24 @@ void audioTick(){
 }
 void setup(){
   Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
+  pinMode(2,INPUT_PULLUP);
   encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
-  boardInit();displayChannel(channel,false);WiFi.mode(WIFI_STA);WiFi.begin(WIFI_SSID,WIFI_PASSWORD);WiFi.setSleep(false);
-#if GATEWAY_TLS
+  boardInit();setupBegin();
+  if(!radioConfig.valid)return;
+  displayChannel(channel,false);
+  if(radioConfig.tls){
   // SNTP completes asynchronously. loop() waits before attempting TLS.
   configTime(0,0,"ntp.tencent.com","pool.ntp.org");
-  ws.beginSslWithCA(GATEWAY_HOST,GATEWAY_PORT,"/radio",GATEWAY_ROOT_CA);
-#else
-  ws.begin(GATEWAY_HOST,GATEWAY_PORT,"/radio");
-#endif
-  ws.setExtraHeaders("Authorization: Bearer " DEVICE_TOKEN);ws.onEvent(onWs);ws.setReconnectInterval(1500);ws.enableHeartbeat(15000,3000,2);
+  ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());
+  }else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
+  authorizationHeader="Authorization: Bearer "+radioConfig.token;
+  ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(onWs);ws.setReconnectInterval(1500);ws.enableHeartbeat(15000,3000,2);
 }
 void loop(){
+  setupTick(tx||playing,ready,channel);
+  if(!radioConfig.valid){int16_t discard[240];audioRead(discard,240);delay(1);return;}
   if(WiFi.status()==WL_CONNECTED){
-#if GATEWAY_TLS
-    if(time(nullptr)>1700000000)ws.loop();
-#else
-    ws.loop();
-#endif
+    if(!radioConfig.tls||time(nullptr)>1700000000)ws.loop();
   }
   else{if(ready||tx||playing||used)flushAudio();ready=tx=false;if(millis()-lastWifi>5000){lastWifi=millis();WiFi.reconnect();}}
   button();encoder();audioTick();delay(1);

@@ -6,6 +6,7 @@
 
 ## 先看这里
 
+- [网页配置与本机烧录](docs/WEB-SETUP.md)：USB 网页设置 Wi-Fi/令牌/根 CA，无需预填 config.h。
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
 - [服务器空间与旧 Codex 处理](docs/SERVER-SPACE.md)
@@ -45,7 +46,7 @@ npm start
 
 四个虚构角色：营地、巡逻、夜航、探索。当前共用 marin 音色，回复短、自然接话，网关加无线电带通与软限幅。关闭 VAD，以物理松键提交，24kHz PCM 流式传输。默认模型 `gpt-realtime-2.1` 需要账号具备权限，模型与声音可在服务器配置。
 
-API Key、设备令牌和 TLS 私钥不能提交仓库。服务器配置在 `/etc/voxi`，设备配置为被忽略的 `config.h`。
+API Key、设备令牌和 TLS 私钥不能提交仓库。服务器配置在 `/etc/voxi`，设备连接配置保存在 NVS，USB 网页直接读写；可选 config.h 只保留硬件覆盖。
 
 ## 验证边界
 

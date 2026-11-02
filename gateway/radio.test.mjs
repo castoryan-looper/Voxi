@@ -43,6 +43,8 @@ test('cloud health, connection budget and malformed events',async t=>{
   const health=await fetch(`http://127.0.0.1:${port}/healthz`);
   assert.deepEqual(await health.json(),{ok:true,mode:'mock',revision:'test-sha'});
   assert.equal((await fetch(`http://127.0.0.1:${port}/unknown`)).status,404);
+  const setup=await fetch(`http://127.0.0.1:${port}/setup/`);
+  assert.equal(setup.status,200);assert.match(await setup.text(),/navigator\.serial/);
   const options={headers:{Authorization:'Bearer test'}};
   const first=new WebSocket(`ws://127.0.0.1:${port}/radio`,options);
   await new Promise(r=>first.once('open',r));

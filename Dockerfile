@@ -4,6 +4,7 @@ WORKDIR /app
 COPY gateway/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY gateway/*.mjs ./
+COPY gateway/setup.html ./
 RUN node --test
 ARG REVISION=dev
 ENV NODE_ENV=production PORT=8787 REVISION=$REVISION

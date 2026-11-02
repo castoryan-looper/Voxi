@@ -5,6 +5,7 @@ config.h
 __pycache__/
 .deploy/
 .venv/
+setup_page.h
 *.pem
 *.key
 *.crt
