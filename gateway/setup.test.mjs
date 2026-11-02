@@ -69,3 +69,20 @@ test('live radio debug shows capture, network bytes and recent device events',as
  assert.match(get('radioLog').textContent,/TX 47520 B/);
  assert.match(get('radioLog').textContent,/10s REC started/);
 });
+
+test('volume controls load actual saved level and retain an unsaved edit during polling',async()=>{
+ const {context,get}=page();
+ vm.runInContext("loaded=true;writer={};api=async()=>({speakerVolume:75,busy:false});",context);
+ await vm.runInContext('status()',context);
+ assert.equal(get('speakerVolume').value,'75');assert.equal(get('volumeSlider').value,'75');assert.equal(get('volumeValue').textContent,'75%');
+ get('volumeSlider').value='88';get('volumeSlider').oninput();
+ await vm.runInContext('status()',context);
+ assert.equal(get('speakerVolume').value,'88');assert.match(get('volumeMessage').textContent,/待保存音量：88/);
+});
+test('volume save sends selected level and displays persistent success beside controls',async()=>{
+ const {context,get}=page();let received;
+ context.saveRequest=(method,body)=>{received={method,body};return Promise.resolve({speakerVolume:82,message:'音量已保存'});};
+ vm.runInContext('api=saveRequest;',context);get('speakerVolume').value='82';
+ await get('saveVolume').onclick();
+ assert.equal(received.method,'speaker_volume');assert.equal(received.body.volume,82);assert.match(get('volumeMessage').textContent,/已保存.*82%/);assert.equal(get('volumeSlider').value,'82');
+});
