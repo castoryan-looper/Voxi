@@ -110,7 +110,7 @@ void setup(){
   pinMode(2,INPUT_PULLUP);
   encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
   diagnosticsBegin();boardInit();setupBegin();
-  if(!radioConfig.valid)return;
+  if(!radioConfig.valid){displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(6,sizeof(Packet));
@@ -118,8 +118,11 @@ void setup(){
 
 }
 void loop(){
-  setupTick(tx||playing,ready,channel);
-  if(!radioConfig.valid){int16_t discard[240];audioRead(discard,240);delay(1);return;}
+  boardStatusTick();setupTick(tx||playing,ready,channel);
+  if(!radioConfig.valid){
+    static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());}
+    int16_t discard[240];audioRead(discard,240);delay(1);return;
+  }
   Packet p;for(int i=0;i<8&&xQueueReceive(incoming,&p,0)==pdTRUE;i++)onWs(p.type,p.data,p.len);
   if(queueFault){queueFault=false;diagnosticError("audio network queue overflow");fault();}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=tx=false;diagnosticStage("wifi_connecting");}

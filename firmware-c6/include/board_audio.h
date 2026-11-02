@@ -8,3 +8,7 @@ void displayChannel(int channel,bool online);
 void displaySetup(const char* name,const char* key,bool hotspot);
 
 void displayConnection(int channel,const char* label,bool wifi,bool gateway,bool usb);
+
+void boardStatusTick();
+int batteryPercent();
+int batteryMillivolts();

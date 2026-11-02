@@ -145,7 +145,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     out["firmware"]="voxi-c6-web-2";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;
     out["usbConnected"]=HWCDC::isPlugged();out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
-    diagnosticsJson(out);profilesJson(out);bleStatus(out);
+    diagnosticsJson(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
   else if(method=="storage_test"){
     uint8_t* bytes=(uint8_t*)malloc(5000);bool ok=storageReady&&bytes;
@@ -196,7 +196,7 @@ void setupBegin(){
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(false);
   WiFi.onEvent([](arduino_event_id_t event,arduino_event_info_t info){if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED)wifiReason=info.wifi_sta_disconnected.reason;});
   if(known.count)startKnown(knownWifiFind(known,known.preferred));
-  bleBegin();if(!radioConfig.valid)openSetup();
+  bleBegin();
   Serial.printf("VOXI_CONFIG valid=%d profiles=%u storage=%d\n",radioConfig.valid,known.count,storageReady);
 }
 void setupTick(bool busy,bool cloudReady,int channel){
@@ -207,7 +207,7 @@ void setupTick(bool busy,bool cloudReady,int channel){
   bool chord=digitalRead(9)==LOW&&digitalRead(2)==LOW;
   if(chord&&!busy){if(!chordAt)chordAt=millis();if(!chordTriggered&&millis()-chordAt>3000){openSetup();chordTriggered=true;}}
   else{chordAt=0;chordTriggered=false;}
-  if(!usb&&!ap&&!configView&&WiFi.status()!=WL_CONNECTED&&millis()>30000)openSetup();
+  // Standby remains visible offline; BOOT+PWR or the web button opens setup.
   for(int budget=0;budget<1024&&Serial.available();budget++){
     char ch=Serial.read();if(ch=='\r')continue;if(ch!='\n'){if(line.length()<14000)line+=ch;else line="";continue;}
     JsonDocument req,out,data;bool parsed=!deserializeJson(req,line);line="";if(!parsed||String(req["type"]|"")!="voxi_config")continue;
