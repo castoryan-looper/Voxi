@@ -12,3 +12,5 @@ void displayConnection(int channel,const char* label,bool wifi,bool gateway,bool
 void boardStatusTick();
 int batteryPercent();
 int batteryMillivolts();
+
+void displayDebugTick();

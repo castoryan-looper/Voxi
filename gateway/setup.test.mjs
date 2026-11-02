@@ -59,3 +59,13 @@ test('offline AI does not imply remembered cloud settings were lost',async()=>{
  assert.match(get('connectionNotice').textContent,/正在连接云端网关/);
  assert.doesNotMatch(get('connectionNotice').textContent,/未保存|重新填写/);
 });
+
+test('live radio debug shows capture, network bytes and recent device events',async()=>{
+ const {context,get}=page();
+ vm.runInContext("loaded=true;writer={};api=async()=>({configured:true,cloudConfigured:true,tokenConfigured:true,caConfigured:true,cloudReady:true,wifiConnected:true,uptimeMs:10000,radioDebug:{phase:'RECORDING',micBytes:48000,sentBytes:47520,receivedBytes:0,micPeak:2048,events:['10s REC started']}});",context);
+ await vm.runInContext('status()',context);
+ assert.match(get('radioLog').textContent,/RECORDING/);
+ assert.match(get('radioLog').textContent,/MIC 48000 B/);
+ assert.match(get('radioLog').textContent,/TX 47520 B/);
+ assert.match(get('radioLog').textContent,/10s REC started/);
+});

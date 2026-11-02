@@ -41,8 +41,10 @@ void boardStatusTick(){
 
 #if ENABLE_EPAPER
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
-struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};};
+struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};RadioDebugSnapshot debug;};
 static QueueHandle_t screenQueue;
+static ScreenState screenBase;
+static void enqueueScreen(ScreenState s){screenBase=s;s.debug=radioDebugRead();xQueueOverwrite(screenQueue,&s);}
 static void statusIcons(const ScreenState& state){
   const int color=GxEPD_BLACK;
   // Wi-Fi arcs. A slash distinguishes disconnected from a weak signal.
@@ -69,29 +71,32 @@ static void screenTask(void*){
   while(true){
     if(xQueueReceive(screenQueue,&state,portMAX_DELAY)!=pdTRUE)continue;
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
-    vTaskDelay(pdMS_TO_TICKS(1000));ScreenState next;
+    vTaskDelay(pdMS_TO_TICKS(100));ScreenState next;
     while(xQueueReceive(screenQueue,&next,0)==pdTRUE)state=next;
-    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label))continue;
+    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
     previous=state;
-    if(!drawn||++refreshes>=20){screen.setFullWindow();refreshes=0;}else screen.setPartialWindow(0,0,200,200);
+    if(!drawn||++refreshes>=60){screen.setFullWindow();refreshes=0;}else screen.setPartialWindow(0,0,200,200);
     drawn=true;screen.firstPage();
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
       statusIcons(state);
       screen.setTextSize(1);screen.setCursor(12,41);screen.print("VOXI / AI RADIO");
       if(state.setup){
-        screen.setTextSize(2);screen.setCursor(12,65);screen.print(state.name);
-        screen.setTextSize(1);screen.setCursor(12,100);
-        if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,125);screen.printf("KEY: %s",state.key);}
-        else{screen.print("Open on your computer:");screen.setCursor(12,120);screen.print("http://127.0.0.1:8788/");screen.setCursor(12,145);screen.print("Chrome / Edge: Connect USB");screen.setCursor(12,168);screen.print("Unplug USB: radio standby");}
+        screen.setTextSize(2);screen.setCursor(12,55);screen.print(state.name);
+        screen.setTextSize(1);screen.setCursor(12,80);
+        if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,94);screen.printf("KEY:%s",state.key);}
+        else{screen.print("http://127.0.0.1:8788/");screen.setCursor(12,94);screen.print("Chrome / Edge: Connect USB");}
       }else{
-        screen.setTextSize(4);screen.setCursor(18,64);screen.printf("CH %02d",state.channel+1);
-        screen.setTextSize(2);screen.drawRoundRect(8,109,184,32,5,GxEPD_BLACK);screen.setCursor(12,118);screen.print(state.label[0]?state.label:state.online?"READY":"CONNECTING");
-        screen.setTextSize(1);screen.setCursor(10,151);screen.printf("WiFi:%s  Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
-        screen.setCursor(10,166);screen.print(state.online?"Hold BOOT >0.5s to talk":"AI not ready - see USB web");
-        screen.setCursor(10,181);screen.print(state.usb?"USB: 127.0.0.1:8788":"BOOT+PWR 3s: setup");
-
+        screen.setTextSize(3);screen.setCursor(18,53);screen.printf("CH %02d",state.channel+1);
+        screen.setTextSize(1);screen.setCursor(10,84);screen.printf("WiFi:%s Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
       }
+      screen.drawRoundRect(8,107,184,22,3,GxEPD_BLACK);
+      screen.setTextSize(2);screen.setCursor(12,110);screen.print(state.debug.phase);
+      screen.setTextSize(1);screen.setCursor(10,133);screen.printf("MIC:%luK TX:%luK RX:%luK",(unsigned long)(state.debug.micBytes/1024),(unsigned long)(state.debug.txBytes/1024),(unsigned long)(state.debug.rxBytes/1024));
+      screen.setCursor(10,145);screen.printf("REC:%lu.%lus PEAK:%u",(unsigned long)(state.debug.micBytes/48000),(unsigned long)(state.debug.micBytes/4800%10),state.debug.peak);
+      for(int i=0;i<3;i++){screen.setCursor(10,158+i*12);screen.print(state.debug.logs[i]);}
+      screen.setCursor(10,190);screen.print(state.usb||state.setup?"USB settings + live debug":"Hold BOOT >0.5s to talk");
+
     }while(screen.nextPage());
     screen.powerOff();
   }
@@ -109,17 +114,23 @@ static int signalBars(bool connected){
 }
 void displayChannel(int channel,bool online){
 #if ENABLE_EPAPER
-  if(screenQueue){ScreenState s;s.channel=channel;s.online=online;s.battery=batteryLevel;s.wifi=WiFi.status()==WL_CONNECTED;s.usb=HWCDC::isPlugged();s.signal=signalBars(s.wifi);xQueueOverwrite(screenQueue,&s);}
+  if(screenQueue){ScreenState s;s.channel=channel;s.online=online;s.battery=batteryLevel;s.wifi=WiFi.status()==WL_CONNECTED;s.usb=HWCDC::isPlugged();s.signal=signalBars(s.wifi);enqueueScreen(s);}
 #endif
 }
 void displayConnection(int channel,const char* label,bool wifi,bool gateway,bool usb){
 #if ENABLE_EPAPER
-  if(screenQueue){ScreenState s;s.channel=channel;s.battery=batteryLevel;s.signal=signalBars(wifi);s.wifi=wifi;s.gateway=gateway;s.usb=usb;s.online=!strcmp(label,"READY");strlcpy(s.label,label,sizeof(s.label));xQueueOverwrite(screenQueue,&s);}
+  if(screenQueue){ScreenState s;s.channel=channel;s.battery=batteryLevel;s.signal=signalBars(wifi);s.wifi=wifi;s.gateway=gateway;s.usb=usb;s.online=!strcmp(label,"READY");strlcpy(s.label,label,sizeof(s.label));enqueueScreen(s);}
 #endif
 }
 void displaySetup(const char* name,const char* key,bool hotspot){
 #if ENABLE_EPAPER
-  if(screenQueue){ScreenState s;s.battery=batteryLevel;s.wifi=WiFi.status()==WL_CONNECTED;s.signal=signalBars(s.wifi);s.setup=true;s.hotspot=hotspot;strlcpy(s.name,name,sizeof(s.name));strlcpy(s.key,key,sizeof(s.key));xQueueOverwrite(screenQueue,&s);}
+  if(screenQueue){ScreenState s;s.battery=batteryLevel;s.wifi=WiFi.status()==WL_CONNECTED;s.signal=signalBars(s.wifi);s.setup=true;s.hotspot=hotspot;strlcpy(s.name,name,sizeof(s.name));strlcpy(s.key,key,sizeof(s.key));enqueueScreen(s);}
+#endif
+}
+void displayDebugTick(){
+#if ENABLE_EPAPER
+  static uint32_t sampled=0;if(!screenQueue||millis()-sampled<1000)return;sampled=millis();
+  ScreenState s=screenBase;s.debug=radioDebugRead();xQueueOverwrite(screenQueue,&s);
 #endif
 }
 void boardInit(){
