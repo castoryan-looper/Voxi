@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('./setup.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0];
 function page(){
  const nodes=new Map(),stored=new Map();
- const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',checked:false,hidden:false,disabled:false,textContent:'',children:[],replaceChildren(...v){this.children=v;},append(v){this.children.push(v);},add(v){this.children.push(v);},reportValidity(){return true;}});return nodes.get(id);};
+ const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',style:{},checked:false,hidden:false,disabled:false,textContent:'',children:[],replaceChildren(...v){this.children=v;},append(v){this.children.push(v);},add(v){this.children.push(v);},reportValidity(){return true;}});return nodes.get(id);};
  const context=vm.createContext({document:{getElementById:get,createElement:()=>({append(){}})},location:{protocol:'http:',hostname:'localhost'},TextDecoder,TextEncoder,Map,Set,Promise,Error,Number,JSON,Math,Option:class{constructor(text,value){this.text=text;this.value=value;}},setInterval(){},setTimeout,clearTimeout,sessionStorage:{setItem:(k,v)=>stored.set(k,v),getItem:k=>stored.get(k),removeItem:k=>stored.delete(k)}});
  vm.runInContext(source,context);return {context,get,stored};
 }
@@ -44,4 +44,18 @@ test('USB sends certificate-sized requests in bounded chunks and preserves respo
  const req=JSON.parse(bytes.toString());assert.equal(req.body.ca.length,6000);
  vm.runInContext(`{const p=pending.get(${req.id});clearTimeout(p.timer);pending.delete(${req.id});p.resolve({saved:true});}`,context);
  assert.equal((await operation).saved,true);
+});
+
+test('remembered credentials are indicated without exposing a token',()=>{
+ const {context,get}=page();
+ vm.runInContext("fill({tokenConfigured:true,caConfigured:true,ca:'certificate',host:'example.com'});",context);
+ assert.equal(get('token').value,'');assert.match(get('token').placeholder,/已记住/);assert.match(get('cloudSaved').textContent,/令牌：已记住/);assert.match(get('cloudSaved').textContent,/证书：已记住/);
+});
+test('offline AI does not imply remembered cloud settings were lost',async()=>{
+ const {context,get}=page();
+ vm.runInContext("loaded=true;writer={};api=async()=>({configured:true,cloudConfigured:true,tokenConfigured:true,caConfigured:true,cloudReady:false,wifiConnected:true,connectionStage:'gateway_connecting',uptimeMs:10000,configRevision:'saved'});",context);
+ await vm.runInContext('status()',context);
+ assert.match(get('detail').textContent,/已从设备读取保存的配置 saved/);
+ assert.match(get('connectionNotice').textContent,/正在连接云端网关/);
+ assert.doesNotMatch(get('connectionNotice').textContent,/未保存|重新填写/);
 });

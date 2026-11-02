@@ -67,7 +67,7 @@ static void loadConfig(){
   // Bring forward only remembered Wi-Fi, never Pocket's unrelated server token.
   if(!known.count){Preferences old;if(old.begin("pocket",true)){String wire=old.isKey("wifi_known")?old.getString("wifi_known",""):String();old.end();JsonDocument networks;if(wire.length()&&!deserializeJson(networks,wire))parseProfiles(networks,known);}}
   int preferred=knownWifiFind(known,known.preferred);if(preferred>=0){radioConfig.ssid=known.profiles[preferred].ssid;radioConfig.password=known.profiles[preferred].password;}
-  radioConfig.valid=configured(radioConfig,known);if(radioConfig.valid)configIssue="";
+  radioConfig.valid=configured(radioConfig,known);if(radioConfig.valid)configIssue="";else if(!radioConfig.token.length()&&!radioConfig.ca.length())configIssue="missing_token_and_ca";else if(!radioConfig.token.length())configIssue="missing_token";else if(radioConfig.tls&&!radioConfig.ca.length())configIssue="missing_ca";
 }
 static void profilesJson(JsonDocument& d){
   d["wifiProfileLimit"]=8;auto rows=d["wifiProfiles"].to<JsonArray>();
@@ -75,7 +75,7 @@ static void profilesJson(JsonDocument& d){
 }
 static void fillConfig(JsonDocument& d){
   d["ssid"]=radioConfig.ssid;d["host"]=radioConfig.host;d["port"]=radioConfig.port;d["tls"]=radioConfig.tls;d["ca"]=radioConfig.ca;
-  d["passwordConfigured"]=radioConfig.password.length()>0;d["tokenConfigured"]=radioConfig.token.length()>0;d["configRevision"]=radioConfig.revision;profilesJson(d);
+  d["cloudConfigured"]=radioConfig.valid;d["caConfigured"]=radioConfig.ca.length()>0;d["passwordConfigured"]=radioConfig.password.length()>0;d["tokenConfigured"]=radioConfig.token.length()>0;d["configRevision"]=radioConfig.revision;profilesJson(d);
 }
 static void startKnown(int i){
   if(i<0||i>=(int)known.count)return;
@@ -119,7 +119,7 @@ static int fail(JsonDocument& out,const char* message){out["error"]=message;retu
 static int saveConfig(JsonVariantConst body,JsonDocument& out){
   if(busyNow){out["error"]="请先结束对讲和播放";return 409;}
   if(!body.is<JsonObjectConst>())return fail(out,"配置格式不正确");
-  RadioConfig c=radioConfig;c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");
+  RadioConfig c=radioConfig;c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");if(!c.ca.length())c.ca=radioConfig.ca;if(!c.host.length())c.host=radioConfig.host;if(!c.ssid.length())c.ssid=radioConfig.ssid;
   String password=body["password"]|"";if(!c.token.length())c.token=radioConfig.token;
   int saved=knownWifiFind(known,c.ssid.c_str());
   if(body["clearWifiPassword"]|false)c.password="";
@@ -142,7 +142,7 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
 static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out){
   if(method=="config")fillConfig(out);
   else if(method=="status"){
-    out["firmware"]="voxi-c6-web-2";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;
+    out["firmware"]="voxi-c6-web-3";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
     diagnosticsJson(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
