@@ -43,4 +43,4 @@ Copy-Item firmware-c6/include/config.example.h firmware-c6/include/config.h
 .\.venv\Scripts\python.exe -m platformio device monitor --project-dir firmware-c6
 ```
 
-板型使用通用 C6 DevKitC 定义，覆盖 Flash 为板载 16MB；硬件引脚由本项目板级驱动指定。先 USB 供电联调，接好板载扬声器接口，从保守音量开始。编译成功不代表已经验证板载电源、电池续航、左右槽、屏幕与真实语音延迟。
+板型使用通用 C6 DevKitC 定义，覆盖 Flash 为板载 16MB，分配 4MB factory 应用分区；硬件引脚由本项目板级驱动指定。先 USB 供电联调，接好板载扬声器接口，从保守音量开始。编译成功不代表已经验证板载电源、电池续航、左右槽、屏幕与真实语音延迟。
