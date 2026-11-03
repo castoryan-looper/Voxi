@@ -1,3 +1,4 @@
+#include "standby.h"
 #include "board_profile.h"
 #include "runtime_config.h"
 #include "board_audio.h"
@@ -143,12 +144,13 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
   out["saved"]=true;out["configRevision"]=c.revision;out["message"]="已写入并回读校验成功，设备即将重启。";restartAt=millis()+1800;return 200;
 }
 static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out){
+  standbyActivity();
   if(method=="config")fillConfig(out);
   else if(method=="status"){
     out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
-    diagnosticsJson(out);radioTransportDiagnostics(out);speakerDiagnostics(out);playbackDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
+    standbyDiagnostics(out);diagnosticsJson(out);radioTransportDiagnostics(out);speakerDiagnostics(out);playbackDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
   else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}

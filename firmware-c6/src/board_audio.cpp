@@ -29,6 +29,7 @@ static i2s_chan_handle_t output,input;
 static i2c_master_bus_handle_t bus;
 static i2c_master_dev_handle_t expander;
 static esp_codec_dev_handle_t codec;
+static volatile bool standbyRequested=false,standbyDisplayReady=false;
 static int volumePercent=45;static int codecDacRegister=-1;
 int speakerVolume(){return volumePercent;}
 bool speakerSetVolume(int percent){
@@ -91,7 +92,8 @@ static void screenTask(void*){
   screen.init(0,true,20,false);
   ScreenState state,previous;bool drawn=false;unsigned refreshes=0;uint32_t refreshCompletedAt=0;
   while(true){
-    if(xQueueReceive(screenQueue,&state,portMAX_DELAY)!=pdTRUE)continue;
+    if(standbyRequested){screen.powerOff();standbyDisplayReady=true;vTaskSuspend(nullptr);}
+    if(xQueueReceive(screenQueue,&state,pdMS_TO_TICKS(25))!=pdTRUE)continue;
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
 #ifdef VOXI_BOARD_S3G
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -296,4 +298,21 @@ void speakerTestRun(){
 
 bool boardPowerPressed(){return digitalRead(BOARD_POWER_KEY)==LOW;}
 bool boardTouchPttPressed(){return false;}
+bool boardTouchActive(){return false;}
+int boardTouchWakePin(){return -1;}
+bool boardPrepareStandby(){
+ standbyRequested=true;
+#if ENABLE_EPAPER
+ uint32_t began=millis();while(!standbyDisplayReady&&millis()-began<35000)delay(10);
+ if(!standbyDisplayReady)return false;
+#endif
+ esp_codec_dev_set_out_mute(codec,true);esp_codec_dev_close(codec);
+ i2s_channel_disable(output);i2s_channel_disable(input);
+#ifdef VOXI_BOARD_S3G
+ digitalWrite(46,LOW);digitalWrite(42,HIGH); // PA off, audio rail off; retain battery latch.
+#else
+ expWrite(1,0x20); // Keep battery latch only, turn off audio/PA/e-paper supplies.
+#endif
+ return true;
+}
 #endif

@@ -1,4 +1,5 @@
 #include "board_profile.h"
+#include "standby.h"
 #include <Arduino.h>
 // USB status serialization and audio/file bookkeeping share the Arduino task.
 SET_LOOP_TASK_STACK_SIZE(16384);
@@ -78,7 +79,7 @@ int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
 struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
 struct TxPacket{WStype_t type;size_t len;uint8_t data[2048];};
 static QueueHandle_t incoming,outgoing;
-static volatile bool resetLink=false,queueFault=false,networkBusy=false;
+static volatile bool resetLink=false,queueFault=false,networkBusy=false,standbyNetworkRequested=false,standbyNetworkReady=false;
 static volatile uint32_t networkLoopMaxMs=0,networkSendMaxMs=0,probeStallUntil=0;
 static uint8_t micBatch[1920],uploadBlock[1920];static size_t micBatchUsed=0,uploadBlockUsed=0;
 static bool uploadEof=false,submitQueued=false;
@@ -169,7 +170,8 @@ static void networkTask(void*){
 #endif
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
-  while(true){if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
+  while(true){if(standbyNetworkRequested){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
+    if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
     if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
       if(probeStallUntil&&(int32_t)(millis()-probeStallUntil)<0){vTaskDelay(pdMS_TO_TICKS(10));continue;}
       bool connected=ws.isConnected();
@@ -195,6 +197,13 @@ static void networkTask(void*){
     else xQueueReset(outgoing);
     vTaskDelay(pdMS_TO_TICKS(2));
   }
+}
+bool radioPrepareStandby(){
+ if(!incoming||!outgoing)return true;
+ standbyNetworkReady=false;standbyNetworkRequested=true;uint32_t at=millis();
+ while(!standbyNetworkReady&&millis()-at<5000)delay(10);
+ if(!standbyNetworkReady){standbyNetworkRequested=false;return false;}
+ return true;
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
@@ -272,6 +281,7 @@ static void cachedUploadTick(){
 }
 static PttHold ptt;
 void button(){
+  if(standbySuppressInput())return;
   if(probeActive||probeFinishing||(uploading&&!tx))return;
   bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
   if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
@@ -295,7 +305,7 @@ void button(){
   }
 }
 
-void requestChannelDelta(int delta){pendingChannel=(pendingChannel+delta+4)%4;encAt=millis();}
+void requestChannelDelta(int delta){standbyActivity();pendingChannel=(pendingChannel+delta+4)%4;encAt=millis();}
 void encoder(){
   int action=bleAction();if(action&1){pendingChannel=(pendingChannel+1)%4;encAt=millis();}if(action&2){pendingChannel=(pendingChannel+3)%4;encAt=millis();}
   static const int8_t table[]={0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
@@ -354,7 +364,7 @@ void setup(){
   Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
   if(BOARD_POWER_KEY>=0)pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
   encPrev=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):0;
-  diagnosticsBegin();boardInit();audioCacheInit();setupBegin();
+  diagnosticsBegin();boardInit();audioCacheInit();setupBegin();standbyBegin();
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
@@ -411,5 +421,6 @@ void loop(){
     else diagnosticStage(!wifi?"wifi_connecting":radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
+  standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));
   delay(1);
 }

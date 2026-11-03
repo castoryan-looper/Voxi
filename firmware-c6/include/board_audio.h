@@ -26,3 +26,6 @@ int speakerVolume();
 
 bool boardPowerPressed();
 bool boardTouchPttPressed();
+bool boardTouchActive();
+int boardTouchWakePin();
+bool boardPrepareStandby();

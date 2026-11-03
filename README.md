@@ -58,3 +58,5 @@ API Key、设备令牌和 TLS 私钥不能提交仓库。服务器配置在 `/et
 依据：[微雪资料](https://docs.waveshare.com/ESP32-C6-ePaper-1.54)、[OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations)、[腾讯云 Docker](https://intl.cloud.tencent.com/document/product/213/37516?lang=en)。
 
 公网设备管理：见 [部署和使用说明](docs/CLOUD-ADMIN.md)，支持在线连接查看与数量上限实时调整。
+
+设备自动待机：空闲60秒关闭无线、音频和显示，通过按键/AMOLED触摸唤醒，详见 [待机设计与验收](docs/STANDBY.md)。

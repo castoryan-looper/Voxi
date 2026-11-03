@@ -24,7 +24,8 @@ static i2c_master_dev_handle_t expander,pmuDevice,touchDevice,touch38Device;
 static esp_codec_dev_handle_t codec;
 static XPowersPMU pmu;
 static int volumePercent=45,codecDacRegister=-1,batteryMv=-1,batteryLevel=-1;
-static bool pmuReady=false,touchReady=false,displayReady=false,touchPtt=false;
+static bool pmuReady=false,touchReady=false,displayReady=false,touchPtt=false,touchActive=false;
+static volatile bool standbyRequested=false,standbyDisplayReady=false;
 static volatile uint32_t displayFrames=0,touchSamples=0;
 static int touchX=-1,touchY=-1,expanderOutput=-1,expanderConfig=-1;
 static bool expanderReady=false,touch38Present=false;
@@ -45,6 +46,8 @@ int batteryPercent(){return batteryLevel;}
 int batteryMillivolts(){return batteryMv;}
 bool boardPowerPressed(){return false;} // PWR is PMIC-managed; use on-screen SETUP.
 bool boardTouchPttPressed(){return touchPtt;}
+bool boardTouchActive(){return touchActive;}
+int boardTouchWakePin(){return touchReady?21:-1;}
 
 
 struct View{int channel=0,battery=-1,rssi=0;bool setup=false,hotspot=false,wifi=false,usb=false,pressed=false;char name[24]={},key[16]={};RadioDebugSnapshot debug;};
@@ -70,12 +73,12 @@ void boardStatusTick(){
  if(touchReady&&now-touchAt>=25){
   touchAt=now;uint8_t data[5];static bool was=false;
   if(regRead(touch38Present?0x38:0x15,2,data,5)==0){
-   bool down=(data[0]&15)>0;touchX=((data[1]&15)<<8)|data[2];touchY=((data[3]&15)<<8)|data[4];
+   bool down=(data[0]&15)>0;touchActive=down;touchX=((data[1]&15)<<8)|data[2];touchY=((data[3]&15)<<8)|data[4];
    if(down)touchSamples++;
    auto action=amoledTouchAction(down,touchX,touchY);touchPtt=action==AmoledAction::Ptt;
    if(down&&!was){if(action==AmoledAction::Previous)requestChannelDelta(-1);else if(action==AmoledAction::Next)requestChannelDelta(1);else if(action==AmoledAction::Setup)requestSetupScreen();}
    was=down;
-  }else{touchPtt=false;was=false;}
+  }else{touchPtt=false;touchActive=false;was=false;}
  }
 }
 static void screenTask(void*){
@@ -88,7 +91,8 @@ static void screenTask(void*){
  View s,previous;bool drawn=false;
  const uint16_t bg=0x0843,card=0x10a5,white=0xffff,muted=0x8c92,accent=0x4f5b,orange=0xfd20;
  for(;;){
-  if(xQueueReceive(views,&s,portMAX_DELAY)!=pdTRUE)continue;
+  if(standbyRequested){activePanel->setBrightness(0);activePanel->displayOff();standbyDisplayReady=true;vTaskSuspend(nullptr);}
+  if(xQueueReceive(views,&s,pdMS_TO_TICKS(25))!=pdTRUE)continue;
   View next;while(xQueueReceive(views,&next,0)==pdTRUE)s=next;
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
   canvas.fillScreen(bg);canvas.setTextSize(3);canvas.setTextColor(white);canvas.setCursor(18,17);canvas.print("VOXI");
@@ -175,6 +179,14 @@ void boardInit(){
 
   audioFlush();digitalWrite(46,HIGH);
  views=xQueueCreate(1,sizeof(View));assert(views);xTaskCreatePinnedToCore(screenTask,"amoled",6144,nullptr,1,nullptr,0);boardStatusTick();
+}
+bool boardPrepareStandby(){
+ standbyRequested=true;uint32_t began=millis();while(!standbyDisplayReady&&millis()-began<5000)delay(10);
+ if(!standbyDisplayReady)return false;
+ digitalWrite(46,LOW);esp_codec_dev_set_out_mute(codec,true);esp_codec_dev_close(codec);
+ i2s_channel_disable(output);i2s_channel_disable(input);
+ // Keep PMU, touch rail and GPIO21 interrupt alive for touch wake.
+ return true;
 }
 void audioFlush(){
   // Stop DMA and replace the whole six-descriptor queue with silence.
