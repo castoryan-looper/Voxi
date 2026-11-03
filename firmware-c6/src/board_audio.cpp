@@ -48,6 +48,7 @@ void boardStatusTick(){
   if(batteryLevel<0||abs(estimate-batteryLevel)>=3)batteryLevel=estimate;
 }
 
+static volatile uint32_t screenFullRefreshes=0,screenPartialRefreshes=0;
 #if ENABLE_EPAPER
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
 struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};RadioDebugSnapshot debug;};
@@ -82,9 +83,17 @@ static void screenTask(void*){
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
     vTaskDelay(pdMS_TO_TICKS(100));ScreenState next;
     while(xQueueReceive(screenQueue,&next,0)==pdTRUE)state=next;
+    // Progress counters and jitter events remain live in USB status, but do
+    // not repaint e-paper every second during the same interaction phase.
+    if(!strcmp(state.debug.phase,"BUFFERING")||!strcmp(state.debug.phase,"DRAINING"))strlcpy(state.debug.phase,"PLAYING",sizeof(state.debug.phase));
+    bool active=!strcmp(state.debug.phase,"PLAYING")||!strcmp(state.debug.phase,"RECORDING")||!strcmp(state.debug.phase,"SENDING")||!strcmp(state.debug.phase,"WAIT AI");
+    bool samePage=drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key);
+    if(active&&samePage&&!strcmp(state.debug.phase,previous.debug.phase))continue;
     if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
     previous=state;
-    if(!drawn||++refreshes>=60){screen.setFullWindow();refreshes=0;}else screen.setPartialWindow(0,0,200,200);
+    refreshes++;
+    // Ghosting maintenance waits until idle; never flash a full refresh in speech.
+    if(!drawn||(refreshes>=60&&!active)){screen.setFullWindow();refreshes=0;screenFullRefreshes++;}else{screen.setPartialWindow(0,0,200,200);screenPartialRefreshes++;}
     drawn=true;screen.firstPage();
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
@@ -207,7 +216,7 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["codecDacRegister"]=codecDacRegister;out["codecExtraGainDb"]=6;out["pttHoldMs"]=300;out["speakerBoostDb"]=18;out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["screenFullRefreshes"]=(uint32_t)screenFullRefreshes;out["screenPartialRefreshes"]=(uint32_t)screenPartialRefreshes;out["codecDacRegister"]=codecDacRegister;out["codecExtraGainDb"]=6;out["pttHoldMs"]=300;out["speakerBoostDb"]=18;out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
   for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=speakerSample(mono[i],volumePercent);
