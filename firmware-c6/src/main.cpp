@@ -129,7 +129,7 @@ static void batchAudio(uint8_t* bytes,size_t n){
   while(n&&!queueFault){size_t count=min(n,sizeof(micBatch)-micBatchUsed);memcpy(micBatch+micBatchUsed,bytes,count);micBatchUsed+=count;bytes+=count;n-=count;if(micBatchUsed==sizeof(micBatch))flushMicBatch();}
 }
 static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
-static void pumpSocket(){uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
+static void pumpSocket(){if(uxQueueSpacesAvailable(incoming)<2)return;uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
 static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
   authorizationHeader="Authorization: Bearer "+radioConfig.token;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
@@ -325,7 +325,14 @@ void loop(){
     static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());}
     int16_t discard[240];audioRead(discard,240);delay(1);return;
   }
-  Packet p;for(int i=0;i<8&&xQueueReceive(incoming,&p,0)==pdTRUE;i++)onWs(p.type,p.data,p.len);
+  Packet p;
+  for(int i=0;i<8&&xQueuePeek(incoming,&p,0)==pdTRUE;i++){
+    // Leave a valid PCM frame queued until playback frees room. This pauses
+    // socket reads via the bounded incoming queue, instead of discarding audio.
+    if(p.type==WStype_BIN&&p.len%2==0&&p.len<=CAP&&p.len>CAP-used)break;
+    if(xQueueReceive(incoming,&p,0)!=pdTRUE)break;
+    onWs(p.type,p.data,p.len);
+  }
   if(queueFault){queueFault=false;fault();}
   if(probeRequested&&ready&&!audioCacheBusy()&&!tx&&!uploading&&!playing&&!thinking){
     probeRequested=false;

@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import {RadioFilter} from './radio.mjs';
+import {PcmPacer} from './pcm-pacer.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
@@ -8,28 +9,37 @@ export function attachPocket(device,{url,token,ca}) {
     headers:{Authorization:`Bearer ${token}`},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
   const error=message=>{
-    if(failed)return;failed=true;
+    if(failed)return;failed=true;pacer.clear();
     console.error(JSON.stringify({event:'pocket_relay_error',reason:message,inputBytes:bytes}));
     if(device.readyState===1){device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
+  const deliver=(data,binary)=>{
+    if(device.readyState!==1)return;
+    if(!binary){const e=JSON.parse(data);
+      if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
+      if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
+    }
+    device.send(data,{binary});
+  };
+  const pacer=new PcmPacer({send:deliver,fail:error,
+    canSend:()=>device.readyState===1&&device.bufferedAmount<4800});
+  const pacing=setInterval(()=>pacer.tick(),5);
   upstream.on('message',(raw,binary)=>{
     if(device.readyState!==1)return;
-    if(device.bufferedAmount>48000)return error('Device playback network too slow');
     if(binary){
       if(!ready||recording)return;
       if(raw.length%2)return error('Pocket returned invalid PCM');
       const pcm=filter.process(raw);
-      for(let i=0;i<pcm.length;i+=960)device.send(pcm.subarray(i,i+960));
+      pacer.audio(pcm);
     }else{
       let e;try{e=JSON.parse(raw);}catch{return error('Pocket returned invalid control data');}
       if(!e||typeof e!=='object')return error('Pocket returned invalid event');
-      if(e.type==='ready'){ready=true;device.radioBusy=false;}
-      if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
-      if(['audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
+      if(e.type==='ready')ready=true;
       if(['connecting','offline','error'].includes(e.type)){ready=false;recording=false;}
       if(e.type==='audio_start'||e.type==='flush')filter=new RadioFilter();
-      device.send(raw.toString());
+      if(['flush','connecting','offline','error'].includes(e.type))pacer.clear();
+      pacer.control(raw.toString());
     }
   });
   device.on('message',(raw,binary)=>{
@@ -45,7 +55,7 @@ export function attachPocket(device,{url,token,ca}) {
     if(!e||typeof e!=='object'||Array.isArray(e))return;
     if(e.type==='ptt_down'&&ready){recording=true;bytes=0;device.radioBusy=true;}
     else if(e.type==='ptt_up')recording=false;
-    else if(e.type==='channel'){ready=false;recording=false;}
+    else if(e.type==='channel'){ready=false;recording=false;pacer.clear();}
     if(['ptt_down','ptt_up','channel','played'].includes(e.type))upstream.send(JSON.stringify(e));
   });
   upstream.on('unexpected-response',(_,response)=>{
@@ -61,6 +71,6 @@ export function attachPocket(device,{url,token,ca}) {
     error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
   });
   upstream.on('close',(code)=>{console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
-  device.on('close',()=>upstream.close());
+  device.on('close',()=>{clearInterval(pacing);pacer.clear();upstream.close();});
   return upstream;
 }
