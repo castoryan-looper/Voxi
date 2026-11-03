@@ -1,3 +1,4 @@
+import {encodeMulaw} from './mulaw.mjs';
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
@@ -39,6 +40,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
   wss.on('connection',(device,req)=>{
+    const audioFormat=req.headers['x-voxi-audio-format']==='mulaw8-24000'?'mulaw8-24000':'pcm16-24000';
     const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
     const connection=++connectionSequence;let inputBytes=0;
     let observedChannel=null,observedBusy=false;
@@ -59,7 +61,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
     if([...wss.clients].filter(c=>c.authenticated).length>=admin.limit){device.closeOrigin='device_limit';admin.record({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
     device.authenticated=true;
-    connected.set(connection,{device,snapshot:()=>({connection,deviceId,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
+    connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));
@@ -73,14 +75,14 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
-      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId});
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,audioFormat});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }
     let upstream,channel=0,ready=false,recording=false,bytes=0,epoch=0,timer,deadline,turn=0,responseId=null;
     let item=null,playedMs=0,responding=false,acceptOutput=false,filter=new RadioFilter(),released=0,first=true;
     let queued=Buffer.alloc(0),pump,sourceDone=false;
-    const send=o=>{if(device.readyState===1)device.send(JSON.stringify(o));};
+    const send=o=>{if(o.type==='ready')o={...o,audioFormat};if(device.readyState===1)device.send(JSON.stringify(o));};
     const fail=message=>{clearTimeout(deadline);clearInterval(timer);clearInterval(pump);queued=Buffer.alloc(0);recording=false;ready=false;acceptOutput=false;send({type:'error',message});upstream?.close();};
     const api=o=>{if(upstream?.readyState===1)upstream.send(JSON.stringify(o));};
     function interrupt(){
@@ -134,7 +136,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
         if(queued.length){
           if(first){first=false;console.log(JSON.stringify({event:'first_audio',channel,ms:Date.now()-released}));}
           const frame=queued.subarray(0,960);queued=queued.subarray(frame.length);
-          if(device.readyState===1)device.send(frame);
+          if(device.readyState===1)device.send(audioFormat==='mulaw8-24000'?encodeMulaw(frame):frame);
         }else if(sourceDone){clearInterval(pump);pump=null;acceptOutput=false;send({type:'audio_end'});}
       },20);
     }

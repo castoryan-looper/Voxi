@@ -18,6 +18,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "ble_knob.h"
 #include "ptt_hold.h"
 #include "playback_gate.h"
+#include "mulaw.h"
 #include "playback_envelope.h"
 #include "audio_cache.h"
 #include "upload_recovery.h"
@@ -25,6 +26,8 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "radio_squelch.h"
 #include <esp_rom_crc.h>
 #include <esp_heap_caps.h>
+#include <esp_mac.h>
+#include "device_identity.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
@@ -51,6 +54,8 @@ static uint8_t* playback=nullptr;
 constexpr size_t CAP=96000;
 static uint8_t playback[CAP];
 #endif
+static void deviceIdentity(char* target,size_t size){uint8_t mac[6]={};if(esp_efuse_mac_get_default(mac)!=ESP_OK){if(size)target[0]=0;return;}formatDeviceIdentity(mac,target,size);}
+static size_t replyBytesPerSample=2;
 size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
@@ -63,7 +68,7 @@ static PlaybackGate playbackGate(4*48000,8*48000,48000,true);
 static PlaybackGate playbackGate;
 #endif
 static size_t fadeRemaining=120;
-void playbackDiagnostics(JsonDocument& out){out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
+void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyBytesPerSample==1?"mulaw8-24000":"pcm16-24000";out["replyWireBytesPerSecond"]=replyBytesPerSample*24000;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -157,8 +162,12 @@ static void pumpSocket(){
 uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
 static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
-  char identity[32];uint64_t chipId=ESP.getEfuseMac();snprintf(identity,sizeof(identity),"esp32-%012llx",(unsigned long long)(chipId&0xffffffffffffULL));
-  authorizationHeader="Authorization: Bearer "+radioConfig.token+"\r\nX-Voxi-Device-Id: "+identity;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
+  char identity[32];deviceIdentity(identity,sizeof(identity));
+  authorizationHeader="Authorization: Bearer "+radioConfig.token+"\r\nX-Voxi-Device-Id: "+identity;
+#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)
+  authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
+#endif
+  ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
   while(true){if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
     if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
@@ -205,7 +214,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     radioDebugRx(len);
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
-    if(len%2||len>CAP-used){diagnosticError(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
+    if(len%replyBytesPerSample||len>CAP-used){diagnosticError(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
     replyRxCrc=esp_rom_crc32_le(replyRxCrc,data,len);replyRxBytes+=len;
     for(size_t i=0;i<len;i++){playback[head]=data[i];head=(head+1)%CAP;}used+=len;playbackPeakBytes=max(playbackPeakBytes,used);return;
   }
@@ -214,6 +223,10 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   String type=d["type"]|"";
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
+#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)
+    size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
+    if(negotiated!=replyBytesPerSample){replyBytesPerSample=negotiated;if(negotiated==1)playbackGate.configure(72000,86400,7200,true);else playbackGate.configure(67200,81600,7200,true);}
+#endif
     if(uploading||replyPending)return;
     int actual=d["channel"]|0;
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
@@ -315,17 +328,17 @@ void audioTick(){
   uint32_t previousRefills=playbackGate.rebuffers;
   for(int budget=0;budget<6&&!tx&&playing&&!cueActive&&playbackGate.canWrite(used,ending);budget++){
     if(replyCuePending){replyCuePending=false;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
-    size_t count=min(used/2,(size_t)240);int16_t mono[240];
-    for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=playbackEnvelope((int16_t)(lo|(hi<<8)),i,fadeRemaining,used/2);}
+    size_t count=min(used/replyBytesPerSample,(size_t)240);int16_t mono[240];
+    for(size_t i=0;i<count;i++){int16_t sample;if(replyBytesPerSample==1)sample=decodeMulaw(playback[(tail+i)%CAP]);else{uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];sample=(int16_t)(lo|(hi<<8));}mono[i]=playbackEnvelope(sample,i,fadeRemaining,used/replyBytesPerSample);}
     size_t written=count?audioWrite(mono,count):0;
     if(!written)break; // DMA full: retry next loop without consuming any PCM.
     if(written&&!turnTiming.voice)turnTiming.voice=millis();
     fadeRemaining=written>=fadeRemaining?0:fadeRemaining-written;
-    size_t consumed=written*2;
+    size_t consumed=written*replyBytesPerSample;
     size_t first=min(consumed,CAP-tail);replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback+tail,first);
     if(first<consumed)replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback,consumed-first);
     replyConsumedBytes+=consumed;
-    tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;if(used==0)fadeRemaining=120;
+    tail=(tail+consumed)%CAP;used-=consumed;played+=written;if(used==0)fadeRemaining=120;
     if(ending&&used==0){replyIntegrityComplete=true;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
   if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
@@ -370,7 +383,7 @@ void loop(){
   for(int i=0;i<8&&xQueuePeek(incoming,&p,0)==pdTRUE;i++){
     // Leave a valid PCM frame queued until playback frees room. This pauses
     // socket reads via the bounded incoming queue, instead of discarding audio.
-    if(p.type==WStype_BIN&&p.len%2==0&&p.len<=CAP&&p.len>CAP-used)break;
+    if(p.type==WStype_BIN&&p.len%replyBytesPerSample==0&&p.len<=CAP&&p.len>CAP-used)break;
     if(xQueueReceive(incoming,&p,0)!=pdTRUE)break;
     onWs(p.type,p.data,p.len);
   }

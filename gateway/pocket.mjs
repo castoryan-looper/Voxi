@@ -1,10 +1,11 @@
+import {encodeMulaw} from './mulaw.mjs';
 import WebSocket from 'ws';
 import {RadioFilter} from './radio.mjs';
 import {PcmPacer} from './pcm-pacer.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
-export function attachPocket(device,{url,token,ca,deviceId}) {
+export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24000'}) {
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
     headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
@@ -16,7 +17,8 @@ export function attachPocket(device,{url,token,ca,deviceId}) {
   };
   const deliver=(data,binary)=>{
     if(device.readyState!==1)return;
-    if(!binary){const e=JSON.parse(data);
+    if(binary&&audioFormat==='mulaw8-24000')data=encodeMulaw(data);
+    if(!binary){const e=JSON.parse(data);if(e.type==='ready'){e.audioFormat=audioFormat;data=JSON.stringify(e);}
       if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
       if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
     }
