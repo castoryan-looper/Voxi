@@ -9,6 +9,7 @@
 - [复用已登录的 Pocket Cloud，无需 API Key](docs/POCKET-BACKEND.md)
 - [网页配置与本机烧录](docs/WEB-SETUP.md)：USB 网页设置 Wi-Fi/令牌/根 CA，无需预填 config.h。
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
+- [正辰 MiniCam 2.0 英寸适配进度](docs/zhengchen-minicam-2.0.md)：独立构建、ES8388 / ST7789，已实测显示和出声；4G 传输尚未启用。
 - [AMOLED 1.8 V2 支持](docs/WAVESHARE-AMOLED18-V2.md)：实时状态、触摸对讲、CO5300/CST820。
 - [S3G 四彩屏编译与接线](docs/WAVESHARE-S3G.md)：8MB PSRAM、独立构建目标和静态彩屏。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
@@ -20,7 +21,7 @@
 
 | 目录 | 用途 |
 |---|---|
-| firmware-c6/ | 共用微雪 C6 / S3G / AMOLED V2 源码，三个 PlatformIO 构建目标 |
+| firmware-c6/ | 共用 C6 / S3G / AMOLED V2 / MiniCam 源码，四个 PlatformIO 构建目标 |
 | firmware/ | 历史 S3 外接音频原型，不能刷到 C6 |
 | gateway/ | Node.js 22+ 流式网关，mock / OpenAI Realtime |
 | deploy/ | Docker Compose、TLS、首次部署、自动拉取与健康检查 |

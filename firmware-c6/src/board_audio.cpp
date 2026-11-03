@@ -1,4 +1,4 @@
-#ifndef VOXI_BOARD_AMOLED
+#if !defined(VOXI_BOARD_AMOLED) && !defined(VOXI_BOARD_MINICAM)
 #include "board_profile.h"
 #include "board_audio.h"
 #include "diagnostics.h"

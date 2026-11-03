@@ -48,7 +48,7 @@ public:
 };
 RadioSocket ws;
 String authorizationHeader;
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
 constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not internal DMA RAM.
 static uint8_t* playback=nullptr;
 #else
@@ -61,7 +61,7 @@ size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
 static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
 // The measured link has 2–3s gaps. Use PSRAM reserve and keep learned jitter
 // protection across turns rather than resetting to the C6's small watermark.
 static PlaybackGate playbackGate(4*48000,8*48000,48000,true);
@@ -165,7 +165,7 @@ static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
   char identity[32];deviceIdentity(identity,sizeof(identity));
   authorizationHeader="Authorization: Bearer "+radioConfig.token+"\r\nX-Voxi-Device-Id: "+identity;
-#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)
+#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
   authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
 #endif
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
@@ -232,7 +232,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   String type=d["type"]|"";
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
-#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)
+#if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
     size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
     if(negotiated!=replyBytesPerSample){replyBytesPerSample=negotiated;if(negotiated==1)playbackGate.configure(72000,86400,7200,true);else playbackGate.configure(67200,81600,7200,true);}
 #endif
@@ -283,7 +283,12 @@ static PttHold ptt;
 void button(){
   if(standbySuppressInput())return;
   if(probeActive||probeFinishing||(uploading&&!tx))return;
+#ifdef VOXI_BOARD_MINICAM
+  // The MiniCam main button is also a hardware power button: do not require a long hold.
+  bool down=boardTouchPttPressed();
+#else
   bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
+#endif
   if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
   auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,boardPowerPressed());
@@ -365,7 +370,7 @@ void setup(){
   if(BOARD_POWER_KEY>=0)pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
   encPrev=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):0;
   diagnosticsBegin();boardInit();audioCacheInit();setupBegin();standbyBegin();
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
 #endif
@@ -373,7 +378,7 @@ void setup(){
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
   BaseType_t networkStarted=incoming&&outgoing?xTaskCreatePinnedToCore(networkTask,"radio-network",12288,nullptr,2,nullptr,0):pdFAIL;
 #else
   BaseType_t networkStarted=incoming&&outgoing?xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr):pdFAIL;

@@ -3,3 +3,8 @@ Commit c4c47b6a8001f9daa50b38912393c158371e03be
 Path: 02_Example/arduino_v3.3.0/08_Audio_Test/src/esp_codec_dev
 Original SPDX headers retained. Only trailing whitespace normalized.
 https://github.com/waveshareteam/ESP32-C6-ePaper-1.54
+
+ES8388 driver/header additions: espressif/esp-adf release/v2.x
+Commit 74e6be93f007faa411dab985a2b7613725506790
+Path components/esp_codec_dev/device/{es8388,include/es8388_codec.h}
+Apache-2.0; original SPDX headers retained. es_common.h include adapted to vendored layout.

@@ -1,5 +1,19 @@
 #pragma once
-#if defined(VOXI_BOARD_AMOLED)
+#if defined(VOXI_BOARD_MINICAM)
+#define BOARD_NAME "zhengchen-minicam-2.0-ml307"
+#define BOARD_BOOT_KEY 11
+#define BOARD_POWER_KEY -1
+#define BOARD_BAT_ADC 3
+#define BOARD_I2C_SDA 1
+#define BOARD_I2C_SCL 2
+#define BOARD_I2S_MCLK 38
+#define BOARD_I2S_BCLK 14
+#define BOARD_I2S_WS 13
+#define BOARD_I2S_DOUT 45
+#define BOARD_I2S_DIN 12
+#define BOARD_ENCODER_A -1
+#define BOARD_ENCODER_B -1
+#elif defined(VOXI_BOARD_AMOLED)
 #define BOARD_NAME "waveshare-s3-touch-amoled-1.8-v2"
 #define BOARD_BOOT_KEY 0
 #define BOARD_POWER_KEY -1

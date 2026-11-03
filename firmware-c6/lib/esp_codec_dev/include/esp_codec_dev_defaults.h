@@ -12,6 +12,7 @@
 #include "../interface/audio_codec_gpio_if.h"
 
 #include "../device/include/es8311_codec.h"
+#include "../device/include/es8388_codec.h"
 
 #include "../device/include/es7210_adc.h"
 
