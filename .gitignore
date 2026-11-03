@@ -9,3 +9,6 @@ setup_page.h
 *.pem
 *.key
 *.crt
+
+# Local device storage backups may contain private recordings.
+backups/
