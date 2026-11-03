@@ -139,7 +139,11 @@ void displaySetup(const char* name,const char* key,bool hotspot){
 void displayDebugTick(){
 #if ENABLE_EPAPER
   static uint32_t sampled=0;if(!screenQueue||millis()-sampled<1000)return;sampled=millis();
-  ScreenState s=screenBase;s.debug=radioDebugRead();xQueueOverwrite(screenQueue,&s);
+  // Setup stays open across Wi-Fi transitions; refresh live icons as well as logs.
+  ScreenState s=screenBase;
+  s.wifi=WiFi.status()==WL_CONNECTED;s.signal=signalBars(s.wifi);
+  s.battery=batteryLevel;s.usb=HWCDC::isPlugged();
+  enqueueScreen(s);
 #endif
 }
 void boardInit(){
