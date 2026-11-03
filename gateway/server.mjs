@@ -29,6 +29,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   let connectionSequence=0;
   const connected=new Map();
   const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+    deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
     memoryConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),

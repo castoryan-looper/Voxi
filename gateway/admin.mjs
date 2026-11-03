@@ -2,7 +2,7 @@ import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 
-export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,memoryConfiguration,username,passwordHash,accountFile,secureCookies=true}={}) {
+export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,memoryConfiguration,deviceRegistry,username,passwordHash,accountFile,secureCookies=true}={}) {
   const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const valid=n=>Number.isInteger(n)&&n>=1&&n<=capacity;
   if(!valid(initialLimit))throw Error(`MAX_CONNECTIONS must be an integer from 1 to ${capacity}`);
@@ -35,6 +35,10 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
       if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return json(401,{error:'管理密钥不正确'});
     }
     if(req.method==='GET'&&req.url==='/api/admin/status')return json(200,{...snapshot(),maxConnections:limit,capacity,persistent:Boolean(stateFile),events});
+    if(req.method==='GET'&&req.url==='/api/admin/devices'){
+      if(!deviceRegistry)return json(409,{error:'设备档案未启用'});
+      try{return json(200,await deviceRegistry());}catch(error){return json(502,{error:error.message});}
+    }
     if(req.method==='GET'&&req.url==='/api/admin/memory'){
       if(!memoryConfiguration)return json(409,{error:'当前模式未启用用户记忆'});
       try{return json(200,await memoryConfiguration());}catch(error){return json(502,{error:error.message});}

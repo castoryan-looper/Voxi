@@ -3,7 +3,7 @@ import https from 'node:https';
 
 // Only the dedicated voice configuration endpoint; never proxy console/account APIs.
 export function pocketSettings({url,token,ca},endpoint='config') {
-  if(!['config','memory'].includes(endpoint))throw Error('Unsupported Pocket settings endpoint');
+  if(!['config','memory','devices'].includes(endpoint))throw Error('Unsupported Pocket settings endpoint');
   return value=>new Promise((resolve,reject)=>{
     const target=new URL(url);target.protocol=target.protocol==='wss:'?'https:':'http:';target.pathname='/voxi/'+endpoint;target.search='';target.hash='';
     const body=value===undefined?undefined:JSON.stringify(value);

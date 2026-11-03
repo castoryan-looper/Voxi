@@ -14,7 +14,7 @@ test('admin login renders status and count controls, saves live change and keeps
   const {context,get}=page();const requests=[];
   context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/login')?{csrf:'session-csrf'}:{maxConnections:3}};};
   get('secret').value='admin-secret';await get('loginForm').onsubmit({preventDefault(){}});
-  assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,1);assert.equal(get('devices').children[0].children[0].textContent,'#12');
+  assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,1);assert.equal(get('devices').children[0].children[0].textContent,'连接 #12');
   assert.match(get('events').children[0].textContent,/数量达到上限/);
   get('limit').value='3';await get('limitForm').onsubmit({preventDefault(){}});
   assert.equal(JSON.parse(requests.find(r=>r.path.endsWith('/limit')).options.body).maxConnections,3);
@@ -55,4 +55,8 @@ test('save failure remains visible and re-enables button',async()=>{
  const {context,get}=page();const uid='user-one';const data={users:[{id:uid,name:'Castor',profile:'喜欢科普',enabled:1}],devices:[{id:'esp32-111111111111',user_id:uid}],memories:[{id:'m1',user_id:uid,text:'我喜欢故事',source:'用户转写',created:1}],turns:[{id:'t1',user_id:uid,text:'<script>test</script>',created:1}]};let submitted;
  context.fetch=async(path,options)=>{if(options.body)submitted=JSON.parse(options.body);return {ok:true,json:async()=>data};};vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('memoryPanel').hidden,false);assert.equal(get('memoryName').value,'Castor');assert.match(get('memoryTurns').children[0].children[0].textContent,/<script>/);
  get('memoryName').value='Castor Yan';get('profileForm').onsubmit({preventDefault(){}});await new Promise(r=>setTimeout(r,5));assert.equal(submitted.userId,uid);assert.equal(submitted.name,'Castor Yan');
+ });
+
+ test('device memory entry selects owner by immutable ID and keeps offline devices visible',async()=>{
+ const {context,get}=page();const data={users:[{id:'one',name:'甲',profile:'',enabled:1},{id:'two',name:'乙',profile:'',enabled:1}],devices:[{id:'esp32-111111111111',user_id:'one',name:'桌面设备'},{id:'esp32-222222222222',user_id:'two',name:'床头设备'}],memories:[],turns:[]};context.fetch=async()=>({ok:true,json:async()=>data});vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('devices').children.length,2);assert.equal(get('devices').children[1].children[0].textContent,'床头设备');assert.equal(get('devices').children[1].children[4].textContent,'离线');await get('devices').children[1].children[5].children[0].onclick();assert.equal(get('memoryUser').value,'two');assert.equal(get('memoryName').value,'乙');assert.match(get('memoryTitle').textContent,/床头设备/);
  });
