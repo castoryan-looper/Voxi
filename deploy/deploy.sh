@@ -16,12 +16,15 @@ export VOXI_IMAGE_TAG="$tag"
 compose=(docker compose --env-file /etc/voxi/deploy.env -f "$root/compose.yaml")
 if [[ -f /etc/voxi/pocket.enabled ]];then compose+=(-f "$root/compose.pocket.yaml");fi
 healthy(){
+  local expected=${1:-$tag}
   "${compose[@]}" exec -T gateway node -e \
-    "fetch('http://127.0.0.1:8787/healthz').then(async r=>{const h=await r.json();if(!r.ok||h.revision!==process.argv[1])process.exit(1)}).catch(()=>process.exit(1))" "$tag" >/dev/null 2>&1
+    "fetch('http://127.0.0.1:8787/healthz').then(async r=>{const h=await r.json();if(!r.ok||h.revision!==process.argv[1])process.exit(1)}).catch(()=>process.exit(1))" "$expected" >/dev/null 2>&1
 }
-if [[ "$tag" == "$previous" && "${1:-}" != --force ]]; then
-  if healthy; then
-    echo "Already running $tag"; exit 0
+runtime_key=$(bash "$root/deploy/runtime-key.sh" "$root" "$tag" /etc/voxi)
+previous_key=$(cat .deploy/runtime-key 2>/dev/null || true)
+if [[ -n "$previous" && "$runtime_key" == "$previous_key" && "${1:-}" != --force ]]; then
+  if healthy "$previous"; then
+    echo "Cloud inputs unchanged; keeping $previous (source $tag)";exit 0
   fi
 fi
 # Free only this project's obsolete image tags before downloading/building.
@@ -50,11 +53,14 @@ for attempt in {1..15}; do
 done
 [[ "$ok" == true ]] || { echo 'Candidate failed: existing version kept'; exit 1; }
 cleanup
-if "${compose[@]}" up -d --force-recreate --wait --wait-timeout 60; then
+recreate=()
+[[ "${1:-}" != --force ]] || recreate=(--force-recreate)
+if "${compose[@]}" up -d "${recreate[@]}" --wait --wait-timeout 60; then
   if [[ -n "$previous" && "$previous" != "$tag" ]]; then
     printf '%s\n' "$previous" > .deploy/previous-tag
   fi
   printf '%s\n' "$tag" > .deploy/active-tag
+  printf '%s\n' "$runtime_key" > .deploy/runtime-key
   bash "$root/deploy/space.sh" --clean-voxi || echo 'Image cleanup deferred'
   echo "Deployed $tag"
 else

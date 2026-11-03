@@ -133,3 +133,9 @@ MCU 前级保留 8 倍小信号增益，ES8311 音量曲线的 100 点从 0dB �
 ## 回复中断诊断
 
 status 的 turnFailure / turnFailureAtMs 保留本轮第一次回复中断原因，新的录音开始才清除，不被后续重连 503 覆盖；lastFault 仍表示最近故障。对齐错误和播放环形缓存溢出会给出明确原因。网页过程日志显示本轮首次中断。Voxi 日志增加 Pocket 关闭码和中继错误，Pocket Cloud 增加不含任意异常文本的 WebRTC 异常类型、peer 状态和实时会话关闭类别。这些改动提高定位能力，不代表已修复未知上游断线。
+
+## 自动部署与语音会话
+
+部署脚本按云端输入指纹决定是否更新服务：Dockerfile、gateway、Compose、deploy 和 /etc/voxi 下环境/模式/证书配置参与计算，firmware-c6 和 docs 不参与。健康服务的指纹没有改变就保留当前容器与镜像，active-tag 仍指向实际运行的服务器版本，可能不同于最新固件提交。首次启用指纹机制会更新一次服务并记录 .deploy/runtime-key。
+
+默认 Compose 更新不再使用 --force-recreate，避免连带重建未变化的代理。只有显式 --force 仍请求强制重建。服务器执行普通 bash ~/Voxi/deploy/deploy.sh 即可应用真正的云端变更；部署本身仍会断开旧网关上的语音会话。容器被替换后 RestartCount 可以为 0，应结合 Created/StartedAt 和部署日志检查时间。
