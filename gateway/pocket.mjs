@@ -24,7 +24,9 @@ export function attachPocket(device,{url,token,ca}) {
     }else{
       let e;try{e=JSON.parse(raw);}catch{return error('Pocket returned invalid control data');}
       if(!e||typeof e!=='object')return error('Pocket returned invalid event');
-      if(e.type==='ready')ready=true;
+      if(e.type==='ready'){ready=true;device.radioBusy=false;}
+      if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
+      if(['audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
       if(['connecting','offline','error'].includes(e.type)){ready=false;recording=false;}
       if(e.type==='audio_start'||e.type==='flush')filter=new RadioFilter();
       device.send(raw.toString());
@@ -41,7 +43,7 @@ export function attachPocket(device,{url,token,ca}) {
     }
     let e;try{e=JSON.parse(raw);}catch{return;}
     if(!e||typeof e!=='object'||Array.isArray(e))return;
-    if(e.type==='ptt_down'&&ready){recording=true;bytes=0;}
+    if(e.type==='ptt_down'&&ready){recording=true;bytes=0;device.radioBusy=true;}
     else if(e.type==='ptt_up')recording=false;
     else if(e.type==='channel'){ready=false;recording=false;}
     if(['ptt_down','ptt_up','channel','played'].includes(e.type))upstream.send(JSON.stringify(e));

@@ -38,10 +38,13 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;});
     const heartbeat=setInterval(()=>{if(!device.isAlive)return device.terminate();device.isAlive=false;device.ping();},30000);
     // A stale idle session must not keep a paid model connection forever.
-    const lifetime=setTimeout(()=>device.close(1000,'Session rotation'),30*60*1000);
+    const lifetime=setInterval(()=>{
+      if(mode==='pocket'&&device.radioBusy)return;
+      device.close(1000,'Session rotation');
+    },30*60*1000);
     if(mode==='pocket'){
       attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa});
-      device.on('close',()=>{clearInterval(heartbeat);clearTimeout(lifetime);});
+      device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }
     let upstream,channel=0,ready=false,recording=false,bytes=0,epoch=0,timer,deadline,turn=0,responseId=null;
@@ -133,7 +136,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
         }
       }
     });
-    device.on('close',()=>{epoch++;clearInterval(heartbeat);clearTimeout(lifetime);clearInterval(timer);clearInterval(pump);clearTimeout(deadline);upstream?.close();});
+    device.on('close',()=>{epoch++;clearInterval(heartbeat);clearInterval(lifetime);clearInterval(timer);clearInterval(pump);clearTimeout(deadline);upstream?.close();});
     device.on('error',()=>{});
     connect();
   });
