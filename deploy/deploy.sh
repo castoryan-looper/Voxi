@@ -10,6 +10,7 @@ if [[ "${1:-}" != --no-pull ]]; then
   [[ "$(git branch --show-current)" == main ]] || { echo 'Expected main branch'; exit 1; }
   git -c core.hooksPath=/dev/null pull --ff-only origin main
 fi
+python3 "$root/deploy/admin-env.py" /etc/voxi/gateway.env
 tag=$(git rev-parse HEAD)
 previous=$(cat .deploy/active-tag 2>/dev/null || true)
 export VOXI_IMAGE_TAG="$tag"

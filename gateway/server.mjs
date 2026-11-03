@@ -4,13 +4,19 @@ import {readFileSync} from 'node:fs';
 import WebSocket,{WebSocketServer} from 'ws';
 import {channels,instructions,RadioFilter} from './radio.mjs';
 import {attachPocket} from './pocket.mjs';
+import {createAdmin} from './admin.mjs';
 
-export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa}={}) {
+export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
   if(!['mock','openai','pocket'].includes(mode)) throw Error('MODE must be mock, openai or pocket');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
   if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const server=http.createServer((req,res)=>{
+    if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
+    if(req.url==='/admin/'||req.url==='/admin'){
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
+      res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
+    }
     if(req.url==='/setup/'||req.url==='/setup'){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY'});
       res.end(readFileSync(new URL('./setup.html',import.meta.url)));return;
@@ -20,8 +26,14 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   });
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
+  const connected=new Map();
+  const admin=createAdmin({token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+    snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
+    disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
+  });
   wss.on('connection',(device,req)=>{
     const connection=++connectionSequence;let inputBytes=0;
+    let observedChannel=null,observedBusy=false;
     const openedAt=Date.now();let sentPings=0,pongs=0,pings=0,lastPongAt=openedAt,lastPingAt=0;
     const connectionMetrics=()=>({ageMs:Date.now()-openedAt,sentPings,pongs,pings,lastPongAgoMs:Date.now()-lastPongAt,lastPingAgoMs:lastPingAt?Date.now()-lastPingAt:null,queuedPcmBytes:device.downlinkQueuedBytes?.()??0,tcpBufferedBytes:device.bufferedAmount});
     // ws emits 'error' for malformed frames. Handle it before authentication
@@ -30,13 +42,17 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     device.on('message',(raw,binary)=>{
       if(binary){inputBytes+=raw.length;return;}
       let control;try{control=JSON.parse(raw);}catch{return;}
+      if(control?.type==='channel'&&Number.isInteger(control.channel)&&channels[control.channel])observedChannel=control.channel;
+      if(control?.type==='ptt_down')observedBusy=true;if(control?.type==='ptt_up')observedBusy=false;
       if(['ptt_down','ptt_up'].includes(control?.type))console.log(JSON.stringify({event:'device_ptt',connection,type:control.type,inputBytes}));
     });
-    device.on('close',(code)=>console.log(JSON.stringify({event:'device_closed',connection,code,inputBytes,origin:device.closeOrigin||'peer_or_transport',...connectionMetrics()})));
+    device.on('close',(code)=>{connected.delete(connection);const event={event:'device_closed',connection,code,inputBytes,origin:device.closeOrigin||'peer_or_transport',...connectionMetrics()};if(device.authenticated)admin.record(event);console.log(JSON.stringify(event));});
 
-    if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
-    if([...wss.clients].filter(c=>c.authenticated).length>=maxConnections){device.closeOrigin='device_limit';console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
+    if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
+    if([...wss.clients].filter(c=>c.authenticated).length>=admin.limit){device.closeOrigin='device_limit';admin.record({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
     device.authenticated=true;
+    connected.set(connection,{device,snapshot:()=>({connection,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
+    admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));
     const heartbeat=setInterval(()=>{
@@ -149,7 +165,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   return {server,wss};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
-  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev',pocketUrl:process.env.POCKET_URL,pocketToken:process.env.POCKET_DEVICE_TOKEN,pocketCa:process.env.POCKET_CA_FILE?readFileSync(process.env.POCKET_CA_FILE):undefined});
+  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev',adminToken:process.env.ADMIN_TOKEN,adminStateFile:process.env.ADMIN_STATE_FILE,pocketUrl:process.env.POCKET_URL,pocketToken:process.env.POCKET_DEVICE_TOKEN,pocketCa:process.env.POCKET_CA_FILE?readFileSync(process.env.POCKET_CA_FILE):undefined});
   server.listen(Number(process.env.PORT||8787),'0.0.0.0',()=>console.log('Radio gateway listening'));
   process.on('SIGTERM',()=>{
     for(const client of wss.clients)client.close(1012,'Service restarting');

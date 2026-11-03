@@ -8,7 +8,8 @@ if not 16 <= len(token) <= 256 or any(c.isspace() or c in '#$"\'' for c in token
     raise SystemExit('Invalid Pocket device bearer; configuration unchanged')
 path=Path('/etc/voxi/gateway.env')
 lines=path.read_text().splitlines()
-updates={'MODE':'pocket','POCKET_URL':'ws://pocket-backend:8789/voxi','POCKET_DEVICE_TOKEN':token,'MAX_CONNECTIONS':'2'}
+if not any(line.startswith('MAX_CONNECTIONS=') for line in lines):lines.append('MAX_CONNECTIONS=2')
+updates={'MODE':'pocket','POCKET_URL':'ws://pocket-backend:8789/voxi','POCKET_DEVICE_TOKEN':token}
 lines=[s for s in lines if s.split('=',1)[0] not in updates]
 text='\n'.join(lines+[f'{k}={v}' for k,v in updates.items()])+'\n'
 temp=path.with_suffix('.env.tmp')

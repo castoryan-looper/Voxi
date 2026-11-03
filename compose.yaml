@@ -3,6 +3,10 @@ services:
   gateway:
     image: voxi-gateway:${VOXI_IMAGE_TAG:-local}
     env_file: /etc/voxi/gateway.env
+    environment:
+      ADMIN_STATE_FILE: /state/admin.json
+    volumes:
+      - gateway_state:/state
     restart: unless-stopped
     init: true
     read_only: true
@@ -26,5 +30,6 @@ services:
       driver: json-file
       options: {max-size: "5m", max-file: "2"}
 volumes:
+  gateway_state:
   caddy_data:
   caddy_config:
