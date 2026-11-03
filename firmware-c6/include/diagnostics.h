@@ -6,6 +6,7 @@ void diagnosticsJson(JsonDocument& out);
 void diagnosticStage(const char* stage);
 void diagnosticError(const char* error);
 void diagnosticReconnect();
+void diagnosticTurnFailure(const char* reason);
 
 struct RadioDebugSnapshot {
   char phase[24]="WAIT CLOUD",logs[3][32]={};

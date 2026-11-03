@@ -122,13 +122,13 @@ void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJ
 void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 void fault(){replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED){replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
+  if(t==WStype_DISCONNECTED){if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     radioDebugRx(len);
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
-    if(len%2||len>CAP-used){Serial.println("Audio overflow");fault();return;}
+    if(len%2||len>CAP-used){diagnosticError(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
     for(size_t i=0;i<len;i++){playback[head]=data[i];head=(head+1)%CAP;}used+=len;return;
   }
   if(t!=WStype_TEXT)return;
@@ -140,7 +140,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
     else{radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
   }
-  if(type=="connecting"||type=="offline"||type=="error"){if(type!="connecting"){replyPending=false;audioCacheClose();uploading=false;}ready=false;tx=false;thinking=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){radioDebug("ERROR","Cloud error: see USB web");backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
+  if(type=="connecting"||type=="offline"||type=="error"){if(type!="connecting"&&(playing||thinking||replyPending))diagnosticTurnFailure(d["message"]|"Pocket disconnected during reply");if(type!="connecting"){replyPending=false;audioCacheClose();uploading=false;}ready=false;tx=false;thinking=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){radioDebug("ERROR","Cloud error: see USB web");backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
   if(type=="recording")radioDebug("SENDING","Gateway recording ACK");
   if(type=="thinking")radioDebug("WAIT AI","Gateway submitted audio");
   if(type=="busy"){ready=false;thinking=true;}

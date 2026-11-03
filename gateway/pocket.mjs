@@ -9,6 +9,7 @@ export function attachPocket(device,{url,token,ca}) {
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
   const error=message=>{
     if(failed)return;failed=true;
+    console.error(JSON.stringify({event:'pocket_relay_error',reason:message,inputBytes:bytes}));
     if(device.readyState===1){device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
@@ -57,7 +58,7 @@ export function attachPocket(device,{url,token,ca}) {
     console.error(JSON.stringify({event:'pocket_connection_failed',code:labels[e.code]?e.code:'OTHER'}));
     error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
   });
-  upstream.on('close',()=>{if(device.readyState===1){device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
+  upstream.on('close',(code)=>{console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
   device.on('close',()=>upstream.close());
   return upstream;
 }
