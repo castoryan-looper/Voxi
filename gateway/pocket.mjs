@@ -35,7 +35,7 @@ export function attachPocket(device,{url,token,ca}) {
     if(binary){
       if(!ready||!recording)return;
       bytes+=raw.length;
-      if(raw.length%2||bytes>30*48000)return error('Invalid/overlong PCM');
+      if(raw.length%2||bytes>20*48000)return error('Invalid/overlong PCM');
       upstream.send(raw,{binary:true});return;
     }
     let e;try{e=JSON.parse(raw);}catch{return;}

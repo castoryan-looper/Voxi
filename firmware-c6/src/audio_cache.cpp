@@ -1,4 +1,5 @@
 #include "audio_cache.h"
+#include "recording_policy.h"
 #include "diagnostics.h"
 #include <SPIFFS.h>
 #include <LittleFS.h>
@@ -29,10 +30,14 @@ bool audioCacheInit(){
 }
 bool audioCacheStart(){
   audioCacheClose();if(!cacheFs)return false;
+  // Reserve enough room for a whole turn plus filesystem metadata before recording.
+  size_t freeBytes=cacheFs==&SPIFFS?SPIFFS.totalBytes()-SPIFFS.usedBytes():LittleFS.totalBytes()-LittleFS.usedBytes();
+  File old=cacheFs->open(path,FILE_READ);size_t reclaim=old?old.size():0;old.close();
+  if(freeBytes+reclaim<RECORDING_MAX_BYTES+65536){diagnosticError("Recording cache needs 1MB free");return false;}
   writing=cacheFs->open(path,FILE_WRITE);cacheBytes=0;return (bool)writing;
 }
 bool audioCacheWrite(const uint8_t* data,size_t n){
-  if(!writing||n%2||cacheBytes+n>30*48000)return false;
+  if(!writing||n%2||n>RECORDING_MAX_BYTES-cacheBytes)return false;
   if(writing.write(data,n)!=n)return false;cacheBytes+=n;return true;
 }
 bool audioCacheFinish(){if(!writing)return false;writing.flush();writing.close();return cacheBytes>0;}
@@ -41,4 +46,4 @@ size_t audioCacheRead(uint8_t* data,size_t capacity){if(!reading)return 0;int n=
 bool audioCacheEnd(){return reading&&reading.position()==cacheBytes;}
 void audioCacheClose(){if(writing)writing.close();if(reading)reading.close();}
 void audioCacheRemove(){audioCacheClose();if(cacheFs)cacheFs->remove(path);}
-void audioCacheDiagnostics(JsonDocument& out){out["audioCacheReady"]=cacheFs!=nullptr;out["audioCacheBytes"]=cacheBytes;}
+void audioCacheDiagnostics(JsonDocument& out){out["recordingMaxMs"]=RECORDING_MAX_MS;out["audioCacheCapacityBytes"]=RECORDING_MAX_BYTES;out["audioCacheReady"]=cacheFs!=nullptr;out["audioCacheBytes"]=cacheBytes;}

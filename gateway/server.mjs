@@ -110,7 +110,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
         if(!recording||!ready)return;
         if(raw.length%2)return fail('PCM must contain complete samples');
         bytes+=raw.length;
-        if(bytes>48000*30)return fail('PTT exceeded 30 seconds; reconnect');
+        if(bytes>48000*20)return fail('PTT exceeded 20 seconds; reconnect');
         if(mode==='openai'){
           if(upstream.bufferedAmount>48000)return fail('Upload network too slow');
           api({type:'input_audio_buffer.append',audio:raw.toString('base64')});

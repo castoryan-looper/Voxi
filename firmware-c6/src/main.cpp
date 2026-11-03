@@ -1,4 +1,6 @@
 #include <Arduino.h>
+// USB status serialization and audio/file bookkeeping share the Arduino task.
+SET_LOOP_TASK_STACK_SIZE(16384);
 #include <WiFi.h>
 #include <WebSocketsClient.h>
 #include <ArduinoJson.h>
@@ -50,7 +52,7 @@ static volatile uint32_t networkLoopMaxMs=0,networkSendMaxMs=0,probeStallUntil=0
 static uint8_t micBatch[1920],uploadBlock[1920];static size_t micBatchUsed=0,uploadBlockUsed=0;
 static bool uploadEof=false,submitQueued=false;
 static volatile bool submitSent=false;
-static uint32_t uploadAt=0;
+static uint32_t uploadAt=0,uploadProgressAt=0,uploadProgressBytes=0;
 static bool probeRequested=false,probePassed=false;
 static volatile bool probeActive=false,probeFinishing=false;
 static uint32_t probeAt=0;static const char* probeState="idle";
@@ -135,20 +137,22 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
 }
 static bool startCachedUpload(bool test){
   if(!audioCacheOpenUpload()){diagnosticError("Cannot reopen recording cache");fault();return false;}
-  uploading=true;ready=false;thinking=false;uploadBlockUsed=0;uploadEof=false;submitQueued=false;submitSent=false;uploadAt=millis();
+  uploading=true;ready=false;thinking=false;uploadBlockUsed=0;uploadEof=false;submitQueued=false;submitSent=false;uploadAt=uploadProgressAt=millis();uploadProgressBytes=0;
   if(test)probeStallUntil=millis()+3500;
   control("ptt_down");radioDebug("SENDING",test?"Test: 3.5s network stall":"Local recording saved: upload");return true;
 }
 static void cachedUploadTick(){
   if(!uploading)return;
-  if(millis()-uploadAt>90000){diagnosticError("Cached upload timed out; recording kept");fault();return;}
+  auto progress=radioDebugRead();
+  if(progress.txBytes!=uploadProgressBytes){uploadProgressBytes=progress.txBytes;uploadProgressAt=millis();}
+  if(millis()-uploadAt>UPLOAD_MAX_MS||millis()-uploadProgressAt>UPLOAD_STALL_MS){diagnosticError("Cached upload timed out; recording kept");fault();return;}
   if(uxQueueMessagesWaiting(outgoing)<6&&!uploadEof){
     if(!uploadBlockUsed){uploadBlockUsed=audioCacheRead(uploadBlock,sizeof(uploadBlock));if(!uploadBlockUsed){if(!audioCacheEnd()){diagnosticError("Recording cache read failed");fault();return;}uploadEof=true;}}
     if(uploadBlockUsed&&sendAudio(uploadBlock,uploadBlockUsed))uploadBlockUsed=0;
   }
   if(uploadEof&&!uploadBlockUsed&&uxQueueMessagesWaiting(outgoing)<6){
     if(probeFinishing){
-      if(!networkBusy&&uxQueueMessagesWaiting(outgoing)==0){auto d=radioDebugRead();probePassed=d.micBytes>=140000&&d.micBytes<=148000&&d.micBytes==d.txBytes&&captureCrc==sentCrc;probeState=probePassed?"passed":"failed";probeFinishing=false;uploading=false;audioCacheRemove();resetLink=true;radioDebug(probePassed?"UPLOAD PASS":"UPLOAD FAIL","Cached test done: reconnect");}
+      if(!networkBusy&&uxQueueMessagesWaiting(outgoing)==0){auto d=radioDebugRead();probePassed=d.micBytes==RECORDING_MAX_BYTES&&d.micBytes==d.txBytes&&captureCrc==sentCrc;probeState=probePassed?"passed":"failed";probeFinishing=false;uploading=false;audioCacheRemove();resetLink=true;radioDebug(probePassed?"UPLOAD PASS":"UPLOAD FAIL","Cached test done: reconnect");}
     }else{
       if(!submitQueued){replyPending=true;control("ptt_up");submitQueued=true;}
       if(submitSent){uploading=false;thinking=true;audioCacheRemove();radioDebug("WAIT AI","Upload complete: awaiting AI");}
@@ -191,7 +195,13 @@ void encoder(){
 }
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
-  if(tx&&samples){if(probeActive)for(size_t i=0;i<samples;i++){probeRandom=probeRandom*1664525u+1013904223u;mic[i]=(int16_t)((probeRandom>>20)&1023)-512;}unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));captureCrc=esp_rom_crc32_le(captureCrc,(const uint8_t*)mic,samples*2);radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);}
+  if(tx&&samples){samples=min(samples,(size_t)((RECORDING_MAX_BYTES-radioDebugRead().micBytes)/2));if(probeActive)for(size_t i=0;i<samples;i++){probeRandom=probeRandom*1664525u+1013904223u;mic[i]=(int16_t)((probeRandom>>20)&1023)-512;}unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));captureCrc=esp_rom_crc32_le(captureCrc,(const uint8_t*)mic,samples*2);radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);
+    if(tx&&radioDebugRead().micBytes>=RECORDING_MAX_BYTES){
+      tx=false;if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
+      if(probeActive){probeActive=false;probeFinishing=true;probeState="uploading";}
+      radioDebug("SENDING","20s limit: recording stopped");startCachedUpload(probeFinishing);
+    }
+  }
   // Prime with 200ms (adapt up to 360ms after gaps), then continuously drain even below the watermark.
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
@@ -233,10 +243,10 @@ void loop(){
   if(queueFault){queueFault=false;fault();}
   if(probeRequested&&ready&&!tx&&!uploading&&!playing&&!thinking){
     probeRequested=false;
-    if(audioCacheStart()){probeActive=true;probePassed=false;probeState="recording";probeRandom=0x564f5849;probeAt=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;networkLoopMaxMs=networkSendMaxMs=0;radioDebugReset();flushAudio();tx=true;radioDebug("UPLOAD TEST","Recording 3s synthetic PCM");}
+    if(audioCacheStart()){probeActive=true;probePassed=false;probeState="recording";probeRandom=0x564f5849;probeAt=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;networkLoopMaxMs=networkSendMaxMs=0;radioDebugReset();flushAudio();tx=true;radioDebug("UPLOAD TEST","Recording 20s synthetic PCM");}
     else{probeState="failed";diagnosticError("Audio cache start failed");}
   }
-  if(probeActive&&millis()-probeAt>=3000){tx=false;probeActive=false;if(flushMicBatch()&&audioCacheFinish()){probeFinishing=true;probeState="uploading";startCachedUpload(true);}else fault();}
+  if(probeActive&&millis()-probeAt>30000){diagnosticError("Recording probe capture stalled");fault();}
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=false;tx=false;diagnosticStage("wifi_connecting");}
