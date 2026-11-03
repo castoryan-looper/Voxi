@@ -23,7 +23,7 @@ docker exec voxi-gateway-1 printenv ADMIN_USERNAME
 docker exec voxi-gateway-1 printenv ADMIN_INITIAL_PASSWORD
 ```
 
-首次账户版部署自动创建用户名 `admin` 和随机初始密码。上述最后两条命令分别显示用户名和初始密码，直接填入管理页，不要贴到聊天。登录后可在「管理员账户」修改密码（12–128字符）。
+首次账户版部署自动创建用户名 `admin` 和随机初始密码。上述最后两条命令分别显示用户名和初始密码，直接填入管理页，不要贴到聊天。登录后可在「管理员账户」修改密码（8–128字符）。
 
 账户密码使用带随机盐的scrypt哈希验证。修改后的哈希保存在网关持久卷 `/state/admin.json.account`，部署和重启保留，且优先于环境变量的初始哈希。修改密码后 `ADMIN_INITIAL_PASSWORD` 不再有效，只供首次登录；初始密码位于服务器root可读的 `/etc/voxi/gateway.env`。当前账户用户名可用 `ADMIN_USERNAME` 初始化，页面提供改密码，不提供多管理员管理。
 

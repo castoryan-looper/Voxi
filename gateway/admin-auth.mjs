@@ -36,7 +36,7 @@ export function createAdminAuth({username,passwordHash:initialHash,file,secure=t
    if(path==='/api/admin/logout'&&req.method==='POST'){sessions.delete(current.id);res.setHeader('Set-Cookie',cookie('',0));return json(200,{ok:true});}
    if(path==='/api/admin/password'&&req.method==='POST'){
     if(!file)return json(503,{error:'未启用账户持久存储'});
-    if(typeof body.currentPassword!=='string'||body.currentPassword.length>256||typeof body.newPassword!=='string'||body.newPassword.length<12||body.newPassword.length>128)return json(400,{error:'新密码需要 12–128 个字符'});
+    if(typeof body.currentPassword!=='string'||body.currentPassword.length>256||typeof body.newPassword!=='string'||body.newPassword.length<8||body.newPassword.length>128)return json(400,{error:'新密码需要 8–128 个字符'});
     if(checking)return json(429,{error:'请稍后重试'});checking=true;
     try{
      if(!await verify(body.currentPassword,account.passwordHash))return json(401,{error:'当前密码不正确'});
