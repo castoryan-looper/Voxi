@@ -4,7 +4,7 @@ WORKDIR /app
 COPY gateway/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY gateway/*.mjs ./
-COPY gateway/*.html ./
+COPY gateway/*.html gateway/*.css ./
 RUN mkdir /state && chown node:node /state
 RUN node --test
 ARG REVISION=dev

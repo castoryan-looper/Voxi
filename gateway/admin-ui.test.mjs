@@ -2,11 +2,12 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('./admin.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0].replace('restoreSession();','');
+const source=readFileSync(new URL('./admin-app.mjs',import.meta.url),'utf8').replace('restoreSession();','');
 function page(){
   const nodes=new Map();
   const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;}});return nodes.get(id);};
-  const context=vm.createContext({document:{getElementById:get,createElement:()=>({children:[],style:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
+  const location={pathname:'/admin/devices',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;}};
+  const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
   vm.runInContext(source,context);return {context,get};
 }
 const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_rejected',reason:'device_limit',connection:13,maxConnections:2}],maxConnections:2,capacity:4,persistent:true,mode:'pocket'};
@@ -58,5 +59,9 @@ test('save failure remains visible and re-enables button',async()=>{
  });
 
  test('device memory entry selects owner by immutable ID and keeps offline devices visible',async()=>{
- const {context,get}=page();const data={users:[{id:'one',name:'甲',profile:'',enabled:1},{id:'two',name:'乙',profile:'',enabled:1}],devices:[{id:'esp32-111111111111',user_id:'one',name:'桌面设备'},{id:'esp32-222222222222',user_id:'two',name:'床头设备'}],memories:[],turns:[]};context.fetch=async()=>({ok:true,json:async()=>data});vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('devices').children.length,2);assert.equal(get('devices').children[1].children[0].textContent,'床头设备');assert.equal(get('devices').children[1].children[4].textContent,'离线');await get('devices').children[1].children[5].children[0].onclick();assert.equal(get('memoryUser').value,'two');assert.equal(get('memoryName').value,'乙');assert.match(get('memoryTitle').textContent,/床头设备/);
+ const {context,get}=page();const data={users:[{id:'one',name:'甲',profile:'',enabled:1},{id:'two',name:'乙',profile:'',enabled:1}],devices:[{id:'esp32-111111111111',user_id:'one',name:'桌面设备'},{id:'esp32-222222222222',user_id:'two',name:'床头设备'}],memories:[],turns:[]};context.fetch=async()=>({ok:true,json:async()=>data});vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('devices').children.length,2);assert.equal(get('devices').children[1].children[0].textContent,'床头设备');assert.equal(get('devices').children[1].children[4].textContent,'离线');context.location.pathname='/admin/devices/esp32-222222222222/memory';await vm.runInContext("openDeviceMemory('esp32-222222222222',true)",context);assert.equal(get('memoryUser').value,'two');assert.equal(get('memoryName').value,'乙');assert.match(get('memoryTitle').textContent,/床头设备/);
+ });
+
+ test('page navigation separates prompts and voice and guards unsaved changes',async()=>{
+ const {context,get}=page();context.fetch=async()=>({ok:false,status:502,json:async()=>({error:'fixture backend offline'})});vm.runInContext("token='session'",context);vm.runInContext("navigate('/admin/ai/voice')",context);assert.equal(context.location.pathname,'/admin/ai/voice');assert.equal(get('voiceFields').hidden,false);assert.equal(get('promptFields').hidden,true);assert.equal(get('devicesSection').hidden,true);vm.runInContext('aiDirty=true',context);context.confirm=()=>false;assert.equal(vm.runInContext("navigate('/admin/devices')",context),false);assert.equal(context.location.pathname,'/admin/ai/voice');context.confirm=()=>true;assert.equal(vm.runInContext("navigate('/admin/devices')",context),true);assert.equal(get('devicesSection').hidden,false);assert.equal(get('aiSection').hidden,true);
  });

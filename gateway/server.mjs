@@ -14,7 +14,10 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const server=http.createServer((req,res)=>{
     if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
-    if(req.url==='/admin/'||req.url==='/admin'){
+    const path=new URL(req.url,'http://gateway').pathname;
+    const assets={'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8']};
+    if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
+    if(['/admin','/admin/','/admin/devices','/admin/ai/prompts','/admin/ai/voice','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
       res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
     }
