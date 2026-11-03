@@ -106,7 +106,9 @@ static void turnTimingJson(JsonDocument& out){
   if(cloudRtpQueuedMs>=0)o["cloudRtpQueuedMs"]=cloudRtpQueuedMs;
   o["dacQueueUpperBoundMs"]=60;
 }
-void radioTransportDiagnostics(JsonDocument& out){turnTimingJson(out);out["uploadRetries"]=uploadRecovery.attempts;out["uploadRetryPending"]=uploadRecovery.pending;out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;out["uploadProbeTailMs"]=probeTailMs;out["uploadProbeRecoveryEnabled"]=probeAllowRecovery;out["recordingCrc"]=(uint32_t)captureCrc;out["sentCrc"]=(uint32_t)sentCrc;out["uploading"]=uploading;audioCacheDiagnostics(out);}
+static volatile uint32_t wsPings=0,wsPongs=0,wsPingAt=0,wsPongAt=0,wsDisconnectedAt=0,rxPauseAt=0,rxPauseMax=0;
+void radioTransportDiagnostics(JsonDocument& out){out["wsPingCount"]=(uint32_t)wsPings;out["wsPongCount"]=(uint32_t)wsPongs;out["lastWsPingAtMs"]=(uint32_t)wsPingAt;out["lastWsPongAtMs"]=(uint32_t)wsPongAt;out["gatewayDisconnectedAtMs"]=(uint32_t)wsDisconnectedAt;out["rxBackpressureActive"]=rxPauseAt!=0;out["rxBackpressureMaxMs"]=max((uint32_t)rxPauseMax,rxPauseAt?millis()-rxPauseAt:0);
+turnTimingJson(out);out["uploadRetries"]=uploadRecovery.attempts;out["uploadRetryPending"]=uploadRecovery.pending;out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;out["uploadProbeTailMs"]=probeTailMs;out["uploadProbeRecoveryEnabled"]=probeAllowRecovery;out["recordingCrc"]=(uint32_t)captureCrc;out["sentCrc"]=(uint32_t)sentCrc;out["uploading"]=uploading;audioCacheDiagnostics(out);}
 
 static void networkFault(const char* reason){if(!queueFault){diagnosticError(reason);queueFault=true;}}
 static void socketWriteFault(bool binary,size_t bytes,uint32_t elapsed){if(!queueFault){retryableWriteFailure=true;ws.writeFailure(binary,bytes,elapsed);queueFault=true;}}
@@ -128,8 +130,15 @@ static bool flushMicBatch(){
 static void batchAudio(uint8_t* bytes,size_t n){
   while(n&&!queueFault){size_t count=min(n,sizeof(micBatch)-micBatchUsed);memcpy(micBatch+micBatchUsed,bytes,count);micBatchUsed+=count;bytes+=count;n-=count;if(micBatchUsed==sizeof(micBatch))flushMicBatch();}
 }
-static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
-static void pumpSocket(){if(uxQueueSpacesAvailable(incoming)<2)return;uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
+static void socketEvent(WStype_t type,uint8_t* data,size_t len){
+  if(type==WStype_PING){wsPings++;wsPingAt=millis();return;}
+  if(type==WStype_PONG){wsPongs++;wsPongAt=millis();return;}
+  if(type==WStype_DISCONNECTED)wsDisconnectedAt=millis();
+if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
+static void pumpSocket(){
+  if(uxQueueSpacesAvailable(incoming)<2){if(!rxPauseAt)rxPauseAt=millis();return;}
+  if(rxPauseAt){rxPauseMax=max((uint32_t)rxPauseMax,millis()-rxPauseAt);rxPauseAt=0;}
+uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
 static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
   authorizationHeader="Authorization: Bearer "+radioConfig.token;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);

@@ -6,6 +6,7 @@ void diagnosticsJson(JsonDocument& out);
 void diagnosticStage(const char* stage);
 void diagnosticError(const char* error);
 void diagnosticReconnect();
+void diagnosticWifiEvent(bool connected,int reason=0);
 void diagnosticTurnFailure(const char* reason);
 
 struct RadioDebugSnapshot {

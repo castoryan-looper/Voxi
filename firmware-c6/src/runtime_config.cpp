@@ -200,7 +200,7 @@ void setupBegin(){
   web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});
   WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(false);
-  WiFi.onEvent([](arduino_event_id_t event,arduino_event_info_t info){if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED)wifiReason=info.wifi_sta_disconnected.reason;});
+  WiFi.onEvent([](arduino_event_id_t event,arduino_event_info_t info){if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED){wifiReason=info.wifi_sta_disconnected.reason;diagnosticWifiEvent(false,wifiReason);}else if(event==ARDUINO_EVENT_WIFI_STA_GOT_IP)diagnosticWifiEvent(true);});
   if(known.count)startKnown(knownWifiFind(known,known.preferred));
   bleBegin();
   Serial.printf("VOXI_CONFIG valid=%d profiles=%u storage=%d\n",radioConfig.valid,known.count,storageReady);

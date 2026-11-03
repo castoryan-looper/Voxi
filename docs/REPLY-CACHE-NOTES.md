@@ -43,3 +43,15 @@ RAM播放容量从57600B提高到96000B（2秒）；默认起播水位从500ms�
 固件在有效PCM帧暂时放不进播放缓冲时，将其保留在有界接收队列中，先播放已有样本。网络任务在接收队列空间不足时暂停ws.loop读取，让TCP传播反压；仍然保留格式错误/异常超大帧保护。无Flash写入，不扩RAM，不丢掉装不下的音频来假装流畅。
 
 验证：24项Node测试通过，包括集中补包整形、暂停后不突发、PCM逐字节一致、结束标记有序、取消、积压上限及总时长独立性；固件编译通过。生产端仍需更新Voxi并实测长故事；本轮不承诺任意断网时都能不中断。
+
+## 链路断开诊断版
+
+用户贴回的生产日志：2026-11-03 13:32:13.496 UTC设备连接1006关闭，约43ms后Pocket连接1000关闭；两个容器restart=0、oom=false。只能定位设备到Voxi链路先断，不能从1006判断是Wi-Fi/TCP还是心跳主动终止；HTTP503发生在随后的重连，不可当作初始原因。
+
+设备增加持久到下次启动的wifiDisconnectedAtMs/wifiConnectedAtMs/wifiDisconnectReason/wifiDisconnectCount；wifiDisconnectedEpochMs在时间同步后可与服务端UTC日志对照（秒精度）。gatewayDisconnectedAtMs、lastWsPingAtMs/lastWsPongAtMs和计数定位心跳；rxBackpressureMaxMs记录接收队列暂停读取的最长持续时间。不记录SSID、密码、token或音频内容到这些新增诊断字段。
+
+网关增加device_opened事件；device_closed记录主动关闭origin、连接时长、ping/pong计数与间隔、PCM待发积压、TCP发送积压；主动心跳终止前输出device_heartbeat_timeout。pocket_error/pocket_closed/session_rotation也明确标注。不修改原有超时或心跳策略。
+
+操作：更新Voxi服务后，先等设备READY；复现一次长故事卡顿/offline后不要开启新一轮，也不要重启设备。保留两容器最近10分钟带时间戳日志和设备status。若先有wifi断开时间则查本地Wi-Fi链路；若有device_heartbeat_timeout而无Wi-Fi断开则结合接收反压和心跳计数定位；若origin=pocket_closed或pocket_error则继续查上游。peer_or_transport仍不能单独区分TCP中断的根因。
+
+本轮24项网关测试与固件编译通过。该版本只增强诊断，不声称已修复新出现的链路断开。

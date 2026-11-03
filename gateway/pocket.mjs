@@ -11,7 +11,7 @@ export function attachPocket(device,{url,token,ca}) {
   const error=message=>{
     if(failed)return;failed=true;pacer.clear();
     console.error(JSON.stringify({event:'pocket_relay_error',reason:message,inputBytes:bytes}));
-    if(device.readyState===1){device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
+    if(device.readyState===1){device.closeOrigin='pocket_error';device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
   const deliver=(data,binary)=>{
@@ -24,6 +24,7 @@ export function attachPocket(device,{url,token,ca}) {
   };
   const pacer=new PcmPacer({send:deliver,fail:error,
     canSend:()=>device.readyState===1&&device.bufferedAmount<4800});
+  device.downlinkQueuedBytes=()=>pacer.bytes;
   const pacing=setInterval(()=>pacer.tick(),5);
   upstream.on('message',(raw,binary)=>{
     if(device.readyState!==1)return;
@@ -70,7 +71,7 @@ export function attachPocket(device,{url,token,ca}) {
     console.error(JSON.stringify({event:'pocket_connection_failed',code:labels[e.code]?e.code:'OTHER'}));
     error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
   });
-  upstream.on('close',(code)=>{console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
+  upstream.on('close',(code)=>{console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.closeOrigin='pocket_closed';device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
   device.on('close',()=>{clearInterval(pacing);pacer.clear();upstream.close();});
   return upstream;
 }

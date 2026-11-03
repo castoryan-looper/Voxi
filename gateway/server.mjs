@@ -22,6 +22,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   let connectionSequence=0;
   wss.on('connection',(device,req)=>{
     const connection=++connectionSequence;let inputBytes=0;
+    const openedAt=Date.now();let sentPings=0,pongs=0,pings=0,lastPongAt=openedAt,lastPingAt=0;
+    const connectionMetrics=()=>({ageMs:Date.now()-openedAt,sentPings,pongs,pings,lastPongAgoMs:Date.now()-lastPongAt,lastPingAgoMs:lastPingAt?Date.now()-lastPingAt:null,queuedPcmBytes:device.downlinkQueuedBytes?.()??0,tcpBufferedBytes:device.bufferedAmount});
     // ws emits 'error' for malformed frames. Handle it before authentication
     // so one bad/disconnected client cannot terminate the whole gateway.
     device.on('error',error=>console.error(JSON.stringify({event:'device_ws_error',connection,code:/^[A-Z0-9_]+$/.test(error.code||'')?error.code:'OTHER'})));
@@ -30,17 +32,21 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       let control;try{control=JSON.parse(raw);}catch{return;}
       if(['ptt_down','ptt_up'].includes(control?.type))console.log(JSON.stringify({event:'device_ptt',connection,type:control.type,inputBytes}));
     });
-    device.on('close',(code)=>console.log(JSON.stringify({event:'device_closed',connection,code,inputBytes})));
+    device.on('close',(code)=>console.log(JSON.stringify({event:'device_closed',connection,code,inputBytes,origin:device.closeOrigin||'peer_or_transport',...connectionMetrics()})));
 
     if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.close(1008,'Unauthorized');return;}
     if([...wss.clients].filter(c=>c.authenticated).length>=maxConnections){device.close(1013,'Device limit reached');return;}
     device.authenticated=true;
-    device.isAlive=true;device.on('pong',()=>{device.isAlive=true;});
-    const heartbeat=setInterval(()=>{if(!device.isAlive)return device.terminate();device.isAlive=false;device.ping();},30000);
+    device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
+    console.log(JSON.stringify({event:'device_opened',connection}));
+    const heartbeat=setInterval(()=>{
+      if(!device.isAlive){device.closeOrigin='heartbeat_timeout';console.warn(JSON.stringify({event:'device_heartbeat_timeout',connection,...connectionMetrics()}));device.terminate();return;}
+      device.isAlive=false;sentPings++;device.ping();
+    },30000);
     // A stale idle session must not keep a paid model connection forever.
     const lifetime=setInterval(()=>{
       if(mode==='pocket'&&device.radioBusy)return;
-      device.close(1000,'Session rotation');
+      device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
       attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa});
