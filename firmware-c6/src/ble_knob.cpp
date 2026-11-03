@@ -1,25 +1,19 @@
-#include <Arduino.h>
-#include <ArduinoJson.h>
-#include <Preferences.h>
-static volatile bool recording=false,uploadPending=false,captureRequested=false,imageDirty=false;
-#include "bluetooth_knob.h"
 #include "ble_knob.h"
-static bool started=false;
-static void ensureStarted(){if(!started){started=true;initKnob();}}
-void bleBegin(){
-  Preferences p;
-  if(p.begin("voxi-radio",true)){bool saved=p.isKey("bt_knob");p.end();if(saved)ensureStarted();}
+
+// Bluetooth is excluded from this firmware. Keep the USB protocol compatible
+// with older management pages without initializing a BLE stack or task.
+void bleBegin() {}
+void bleTick(bool) {}
+int bleAction() { return 0; }
+int bleCommand(const char*, JsonVariantConst, JsonDocument& out) {
+  out["error"]="Bluetooth is disabled in this firmware";
+  return 410;
 }
-void bleTick(bool busy){recording=busy;}
-int bleAction(){
-  KnobInput input;
-  if(knobQueue&&xQueueReceive(knobQueue,&input,0)==pdTRUE&&input.epoch==knobEpoch&&millis()-input.at<1500)return input.action;
-  return 0;
+void bleStatus(JsonDocument& out) {
+  out["bluetoothEnabled"]=false;
+  out["bluetoothConnected"]=false;
+  out["bluetoothScanning"]=false;
+  out["bluetoothPaired"]=false;
+  out["bluetoothState"]="disabled";
+  out["bluetoothDetail"]="Bluetooth removed to reserve memory for audio";
 }
-int bleCommand(const char* method,JsonVariantConst body,JsonDocument& out){
-  ensureStarted();
-  if(!strcmp(method,"bluetooth_scan_start"))return knobScanStart(out);
-  if(!strcmp(method,"bluetooth_scan_results")){knobScanResults(out);return 200;}
-  return knobCommand(!strcmp(method,"bluetooth_forget"),out,body["address"]|"");
-}
-void bleStatus(JsonDocument& out){knobStatusJson(out);}
