@@ -1,6 +1,7 @@
 #include "standby.h"
 #include "board_profile.h"
 #include "runtime_config.h"
+#include "radio_network.h"
 #include "board_audio.h"
 #include "diagnostics.h"
 #include "ble_knob.h"
@@ -29,7 +30,7 @@ static bool touchSetupRequested=false;
 void requestSetupScreen(){touchSetupRequested=true;}
 static String normalCa(String s){s.replace("\\n","\n");s.replace("\r","");s.trim();if(s.length())s+='\n';return s;}
 static bool validCa(const String& s){mbedtls_x509_crt c;mbedtls_x509_crt_init(&c);int ret=mbedtls_x509_crt_parse(&c,(const unsigned char*)s.c_str(),s.length()+1);mbedtls_x509_crt_free(&c);return ret==0;}
-static bool configured(const RadioConfig& c,const KnownWifiSet& k){return k.count&&c.host.length()&&c.token.length()>=16&&(!c.tls||validCa(c.ca));}
+static bool configured(const RadioConfig& c,const KnownWifiSet& k){return (k.count||c.networkMode=="cellular")&&c.host.length()&&c.token.length()>=16&&(!c.tls||validCa(c.ca));}
 static String readStored(){
   if(!storageReady)return "";
   if(prefs.isKey("config-v2")){
@@ -46,7 +47,7 @@ static void writeProfileJson(JsonDocument& d,const KnownWifiSet& set){
 }
 static bool persist(const RadioConfig& c,const KnownWifiSet& set){
   if(!storageReady)return false;
-  JsonDocument d;d["ssid"]=c.ssid;d["password"]=c.password;d["host"]=c.host;d["port"]=c.port;d["tls"]=c.tls;d["token"]=c.token;d["ca"]=c.ca;d["revision"]=c.revision;writeProfileJson(d,set);
+  JsonDocument d;d["networkMode"]=c.networkMode;d["apn"]=c.apn;d["ssid"]=c.ssid;d["password"]=c.password;d["host"]=c.host;d["port"]=c.port;d["tls"]=c.tls;d["token"]=c.token;d["ca"]=c.ca;d["revision"]=c.revision;writeProfileJson(d,set);
   String json;serializeJson(d,json);
   // NVS strings have a ~4KB limit; store the complete configuration as a blob.
   if(json.length()>10000||prefs.putBytes("config-v2",json.c_str(),json.length())!=json.length())return false;
@@ -63,6 +64,10 @@ static void parseProfiles(JsonDocument& d,KnownWifiSet& set){
 static void loadConfig(){
   JsonDocument d;String stored=readStored();
   if(stored.length()&&!deserializeJson(d,stored)){
+    radioConfig.networkMode=d["networkMode"]|"wifi";radioConfig.apn=d["apn"]|"";
+#ifndef VOXI_BOARD_MINICAM
+    radioConfig.networkMode="wifi";
+#endif
     radioConfig.ssid=d["ssid"]|"";radioConfig.password=d["password"]|"";radioConfig.host=d["host"]|"43.160.215.253";radioConfig.port=d["port"]|9443;
     radioConfig.tls=d["tls"]|true;radioConfig.ca=d["ca"]|"";radioConfig.token=d["token"]|"";radioConfig.revision=d["revision"]|"legacy";parseProfiles(d,known);
     if(!known.count&&radioConfig.ssid.length())knownWifiUpsert(known,radioConfig.ssid.c_str(),radioConfig.password.c_str(),true);
@@ -78,6 +83,12 @@ static void profilesJson(JsonDocument& d){
   for(unsigned i=0;i<known.count;i++){auto r=rows.add<JsonObject>();r["ssid"]=known.profiles[i].ssid;r["passwordSaved"]=known.profiles[i].password[0]!=0;r["preferred"]=!strcmp(known.preferred,known.profiles[i].ssid);r["connected"]=WiFi.status()==WL_CONNECTED&&WiFi.SSID()==known.profiles[i].ssid;}
 }
 static void fillConfig(JsonDocument& d){
+  d["networkMode"]=radioConfig.networkMode;d["apn"]=radioConfig.apn;
+#ifdef VOXI_BOARD_MINICAM
+  d["cellularSupported"]=true;
+#else
+  d["cellularSupported"]=false;
+#endif
   d["ssid"]=radioConfig.ssid;d["host"]=radioConfig.host;d["port"]=radioConfig.port;d["tls"]=radioConfig.tls;d["ca"]=radioConfig.ca;
   d["cloudConfigured"]=radioConfig.valid;d["caConfigured"]=radioConfig.ca.length()>0;d["passwordConfigured"]=radioConfig.password.length()>0;d["tokenConfigured"]=radioConfig.token.length()>0;d["configRevision"]=radioConfig.revision;profilesJson(d);
 }
@@ -88,6 +99,7 @@ static void startKnown(int i){
   WiFi.begin(known.profiles[i].ssid,known.profiles[i].password);
 }
 static void wifiTick(){
+  if(radioUsesCellular())return;
   if(restartAt)return;
   uint32_t now=millis();
   if(WiFi.status()==WL_CONNECTED){
@@ -112,10 +124,10 @@ static void wifiTick(){
   int r=WiFi.scanNetworks(true,false,false,120);if(r==WIFI_SCAN_RUNNING||r>=0){autoScan=true;scanAt=now;}else nextScan=now+15000;
 }
 static void showSetup(){displaySetup(ap?apName.c_str():"USB SETUP",ap?key.c_str():"",ap);}
-static void closeAp(){if(ap){dns.stop();web.stop();WiFi.softAPdisconnect(true);WiFi.mode(WIFI_STA);ap=false;}}
+static void closeAp(){if(ap){dns.stop();web.stop();WiFi.softAPdisconnect(true);WiFi.mode(radioUsesCellular()?WIFI_OFF:WIFI_STA);ap=false;}}
 static void openSetup(){
   configView=true;if(HWCDC::isPlugged()){closeAp();showSetup();return;}
-  if(!ap){WiFi.mode(WIFI_AP_STA);ap=WiFi.softAP(apName.c_str(),key.c_str());if(ap){dns.start(53,"*",WiFi.softAPIP());web.begin();}}
+  if(!ap){WiFi.mode(radioUsesCellular()?WIFI_AP:WIFI_AP_STA);ap=WiFi.softAP(apName.c_str(),key.c_str());if(ap){dns.start(53,"*",WiFi.softAPIP());web.begin();}}
   showSetup();
 }
 bool setupScreenActive(){return configView;}
@@ -123,22 +135,32 @@ static int fail(JsonDocument& out,const char* message){out["error"]=message;retu
 static int saveConfig(JsonVariantConst body,JsonDocument& out){
   if(busyNow){out["error"]="请先结束对讲和播放";return 409;}
   if(!body.is<JsonObjectConst>())return fail(out,"配置格式不正确");
-  RadioConfig c=radioConfig;c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");if(!c.ca.length())c.ca=radioConfig.ca;if(!c.host.length())c.host=radioConfig.host;if(!c.ssid.length())c.ssid=radioConfig.ssid;
+  RadioConfig c=radioConfig;
+  c.networkMode=body["networkMode"]|c.networkMode;c.apn=body["apn"]|c.apn;
+  if(c.networkMode!="wifi"&&c.networkMode!="cellular")return fail(out,"连接模式无效");
+#ifndef VOXI_BOARD_MINICAM
+  if(c.networkMode=="cellular")return fail(out,"当前板型不支持4G模块");
+#endif
+  if(c.apn.length()>63)return fail(out,"APN最长63字符");
+  for(char ch:c.apn)if(!isalnum((unsigned char)ch)&&ch!='.'&&ch!='-')return fail(out,"APN只能含字母、数字、点和短横线");
+  c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");if(!c.ca.length())c.ca=radioConfig.ca;if(!c.host.length())c.host=radioConfig.host;if(!c.ssid.length())c.ssid=radioConfig.ssid;
   String password=body["password"]|"";if(!c.token.length())c.token=radioConfig.token;
   int saved=knownWifiFind(known,c.ssid.c_str());
+  bool keepWifi=c.networkMode=="cellular"&&!body["password"].as<String>().length()&&c.ssid==radioConfig.ssid;
   if(body["clearWifiPassword"]|false)c.password="";
   else if(password.length())c.password=password;
   else if(saved>=0)c.password=known.profiles[saved].password;
-  else return fail(out,"新 Wi-Fi 请填写密码，或勾选开放网络");
+  else if(!keepWifi)return fail(out,"新 Wi-Fi 请填写密码，或勾选开放网络");
   int port=body["port"]|0;c.tls=body["tls"]|true;
-  if(!knownWifiValid(c.ssid.c_str(),c.password.c_str()))return fail(out,"Wi-Fi 名称或密码长度无效");
-  if(c.password.length()&&c.password.length()<8)return fail(out,"Wi-Fi 密码需要 8–63 字符");
+  if(c.networkMode=="wifi"&&!knownWifiValid(c.ssid.c_str(),c.password.c_str()))return fail(out,"Wi-Fi 名称或密码长度无效");
+  if(c.networkMode=="wifi"&&c.password.length()&&c.password.length()<8)return fail(out,"Wi-Fi 密码需要 8–63 字符");
   if(!c.host.length()||c.host.length()>253)return fail(out,"请填写云端域名或 IP");
   for(unsigned i=0;i<c.host.length();i++){char ch=c.host[i];if(!isalnum((unsigned char)ch)&&ch!='.'&&ch!='-')return fail(out,"主机名不能包含协议、路径或端口");}
   if(port<1||port>65535)return fail(out,"端口需要 1–65535");c.port=port;
   if(c.token.length()<16||c.token.length()>256||c.token.indexOf('\n')>=0||c.token.indexOf('\r')>=0)return fail(out,"设备令牌需要 16–256 字符");
   if(c.ca.length()>6000||(c.tls&&!validCa(c.ca)))return fail(out,"请粘贴有效 PEM 根 CA 证书");
-  KnownWifiSet updated=known;knownWifiUpsert(updated,c.ssid.c_str(),c.password.c_str(),true,WiFi.SSID().c_str());
+  if(c.networkMode=="cellular"&&!c.tls)return fail(out,"4G连接必须开启TLS并配置根CA证书");
+  KnownWifiSet updated=known;if(knownWifiValid(c.ssid.c_str(),c.password.c_str()))knownWifiUpsert(updated,c.ssid.c_str(),c.password.c_str(),true,WiFi.SSID().c_str());
   char revision[12];snprintf(revision,sizeof(revision),"%08lX",(unsigned long)esp_random());c.revision=revision;
   if(!persist(c,updated)){out["error"]="设备存储写入或回读失败，未确认保存；请查看存储诊断";return 500;}
   out["saved"]=true;out["configRevision"]=c.revision;out["message"]="已写入并回读校验成功，设备即将重启。";restartAt=millis()+1800;return 200;
@@ -147,11 +169,27 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   standbyActivity();
   if(method=="config")fillConfig(out);
   else if(method=="status"){
-    out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
+    out["networkMode"]=radioConfig.networkMode;out["networkConnected"]=radioNetworkConnected();out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
     standbyDiagnostics(out);diagnosticsJson(out);radioTransportDiagnostics(out);speakerDiagnostics(out);playbackDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
   }else if(method=="save")return saveConfig(body,out);
+  else if(method=="network_select"){
+    if(busyNow){out["error"]="请先结束对讲和播放";return 409;}
+#ifdef VOXI_BOARD_MINICAM
+    RadioConfig c=radioConfig;c.networkMode=body["networkMode"]|"";c.apn=body["apn"]|c.apn;
+    if(c.networkMode!="wifi"&&c.networkMode!="cellular")return fail(out,"连接模式无效");
+    if(c.apn.length()>63)return fail(out,"APN最长63字符");
+    for(char ch:c.apn)if(!isalnum((unsigned char)ch)&&ch!='.'&&ch!='-')return fail(out,"APN格式不正确");
+    if(c.networkMode=="cellular"&&!c.tls)return fail(out,"4G必须使用TLS");
+    if(!configured(c,known))return fail(out,"请先完成令牌、证书和所需网络配置");
+    char revision[12];snprintf(revision,sizeof(revision),"%08lX",(unsigned long)esp_random());c.revision=revision;
+    if(!persist(c,known)){out["error"]="配置保存失败";return 500;}
+    out["saved"]=true;out["networkMode"]=c.networkMode;out["configRevision"]=c.revision;restartAt=millis()+1800;
+#else
+    return fail(out,"此板型不支持4G");
+#endif
+  }
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
   else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}
   else if(method=="squelch_test"){if(busyNow||!radioConfig.valid){out["error"]="请等待设备配置完成且空闲";return 409;}requestRadioCueTest();out["message"]="即将播放220ms无线电开台噪声";}
@@ -204,9 +242,12 @@ void setupBegin(){
   web.on("/api/speaker/test",HTTP_POST,[](){webCall("speaker_test");});
   web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});
-  WiFi.mode(WIFI_STA);WiFi.setSleep(false);WiFi.setAutoReconnect(false);
+#ifdef VOXI_BOARD_MINICAM
+  minicamModemConfigure(radioUsesCellular(),radioConfig.apn.c_str());
+#endif
+  WiFi.mode(radioUsesCellular()?WIFI_OFF:WIFI_STA);if(!radioUsesCellular()){WiFi.setSleep(false);WiFi.setAutoReconnect(false);}
   WiFi.onEvent([](arduino_event_id_t event,arduino_event_info_t info){if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED){wifiReason=info.wifi_sta_disconnected.reason;diagnosticWifiEvent(false,wifiReason);}else if(event==ARDUINO_EVENT_WIFI_STA_GOT_IP)diagnosticWifiEvent(true);});
-  if(known.count)startKnown(knownWifiFind(known,known.preferred));
+  if(known.count&&!radioUsesCellular())startKnown(knownWifiFind(known,known.preferred));
   bleBegin();
   Serial.printf("VOXI_CONFIG valid=%d profiles=%u storage=%d\n",radioConfig.valid,known.count,storageReady);
 }

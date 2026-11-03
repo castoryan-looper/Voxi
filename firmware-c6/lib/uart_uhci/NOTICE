@@ -1,0 +1,5 @@
+78/uart-uhci, Apache-2.0 per upstream idf_component.yml
+https://github.com/78/uart-uhci
+Commit 1c11d04cda80bea945ad14eb29a28ff34e2cbf28
+Source and header retained; source guarded by VOXI_BOARD_MINICAM.
+CMake feature probes resolve to the default APIs in the bundled ESP-IDF 5.5.1 SDK.

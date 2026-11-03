@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 struct RadioConfig {
+  String networkMode="wifi",apn;
   String ssid,password,host="43.160.215.253",token,ca,revision;
   uint16_t port=9443;
   bool tls=true,valid=false;

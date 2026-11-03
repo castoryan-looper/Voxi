@@ -3,6 +3,7 @@
 #include "board_profile.h"
 #include "diagnostics.h"
 #include "runtime_config.h"
+#include "radio_network.h"
 #include "output_gain.h"
 #include "config.example.h"
 #include "standby.h"
@@ -38,7 +39,7 @@ bool boardPowerPressed(){return false;}
 bool boardTouchPttPressed(){return talk.pressed();}
 bool boardTouchActive(){return false;}
 int boardTouchWakePin(){return -1;}
-struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
+struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
 static View baseView;static QueueHandle_t views;
 static Arduino_ESP32SPI displayBus(39,40,46,41,GFX_NOT_DEFINED);
 static Arduino_ST7789 panel(&displayBus,GFX_NOT_DEFINED,0,true,240,320,0,0);
@@ -50,7 +51,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;s.debug=radioDebugRead();s.wifi=WiFi.status()==WL_CONNECTED;s.rssi=s.wifi?WiFi.RSSI():0;s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static void postView(){if(!views)return;View s=baseView;s.debug=radioDebugRead();s.cellular=radioUsesCellular();s.wifi=radioNetworkConnected();s.rssi=s.cellular?(-113+2*minicamSignal()):(s.wifi?WiFi.RSSI():0);s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -79,7 +80,7 @@ static void screenTask(void*){
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
   canvas.fillScreen(0x0843);canvas.setTextColor(0xffff);canvas.setTextSize(3);canvas.setCursor(12,12);canvas.print("VOXI");
   canvas.setTextSize(1);canvas.setCursor(164,24);canvas.print(s.usb?"USB":"RADIO");
-  canvas.setTextSize(2);canvas.setTextColor(s.wifi?0x4f5b:0xfd20);canvas.setCursor(12,48);canvas.printf(s.wifi?"WiFi %ddBm":"WiFi OFF",s.rssi);
+  canvas.setTextSize(2);canvas.setTextColor(s.wifi?0x4f5b:0xfd20);canvas.setCursor(12,48);if(s.cellular)canvas.printf(s.wifi?"4G %ddBm":"4G CONNECT",s.rssi);else canvas.printf(s.wifi?"WiFi %ddBm":"WiFi OFF",s.rssi);
   canvas.fillRoundRect(10,76,220,76,8,0x10a5);canvas.setTextColor(0xffff);canvas.setTextSize(3);canvas.setCursor(20,86);canvas.printf("CH %02d",s.channel+1);
   canvas.setTextSize(2);canvas.setTextColor(!strcmp(s.debug.phase,"READY")?0x4f5b:0xfd20);canvas.setCursor(20,124);canvas.print(s.debug.phase);
   canvas.setTextColor(0x8c92);canvas.setTextSize(1);canvas.setCursor(12,166);canvas.printf("MIC %luK TX %luK RX %luK",(unsigned long)(s.debug.micBytes/1024),(unsigned long)(s.debug.txBytes/1024),(unsigned long)(s.debug.rxBytes/1024));

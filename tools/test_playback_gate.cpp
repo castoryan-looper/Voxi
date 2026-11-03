@@ -32,4 +32,11 @@ int main(){
  s3.reset();assert(s3.targetBytes==5*48000&&s3.rebuffers==0);
  for(int i=0;i<8;i++){assert(s3.canWrite(s3.targetBytes,false));assert(!s3.canWrite(0,false));}
  assert(s3.targetBytes==8*48000);s3.reset();assert(s3.canWrite(480,true));
+ // Cellular reserve covers nearby pauses, not just one isolated 3-second gap.
+ PlaybackGate cell(6*24000,12*24000,2*24000,true);
+ queued=6*24000;
+ for(int i=0;i<557;i++){assert(cell.canWrite(queued,false));queued-=240;}
+ assert(queued>0&&cell.rebuffers==0);
+ assert(!cell.canWrite(0,false));assert(cell.targetBytes==8*24000);
+ cell.reset();assert(cell.targetBytes==8*24000);assert(cell.canWrite(240,true));
 }

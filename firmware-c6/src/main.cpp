@@ -15,6 +15,10 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "config.example.h"
 #endif
 #include "runtime_config.h"
+#include "radio_network.h"
+#ifdef VOXI_BOARD_MINICAM
+#include "cellular_socket.h"
+#endif
 #include "diagnostics.h"
 #include "ble_knob.h"
 #include "ptt_hold.h"
@@ -32,13 +36,39 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
+#ifdef VOXI_BOARD_MINICAM
+  CellularSocket cell;
+#endif
 public:
-  void resumeHeartbeat(){enableHeartbeat(15000,3000,2);_client.lastPing=millis();_client.pongReceived=true;_client.pongTimeoutCount=0;}
+#ifdef VOXI_BOARD_MINICAM
+  void beginSslWithCA(const char* h,uint16_t p,const char* url,const char* ca){if(radioUsesCellular())cell.begin(h,p,url,ca);else WebSocketsClient::beginSslWithCA(h,p,url,ca);}
+  void begin(const char* h,uint16_t p,const char* url){if(radioUsesCellular())cell.begin(h,p,url,nullptr);else WebSocketsClient::begin(h,p,url);}
+  void setExtraHeaders(const char* h){if(radioUsesCellular())cell.setExtraHeaders(h);else WebSocketsClient::setExtraHeaders(h);}
+  void onEvent(WebSocketClientEvent f){if(radioUsesCellular())cell.onEvent(f);else WebSocketsClient::onEvent(f);}
+  void setReconnectInterval(uint32_t n){if(radioUsesCellular())cell.setReconnectInterval(n);else WebSocketsClient::setReconnectInterval(n);}
+  void enableHeartbeat(uint32_t i,uint32_t t,uint8_t n){if(radioUsesCellular())cell.enableHeartbeat(i,t,n);else WebSocketsClient::enableHeartbeat(i,t,n);}
+  void disableHeartbeat(){if(radioUsesCellular())cell.disableHeartbeat();else WebSocketsClient::disableHeartbeat();}
+  void disconnect(){if(radioUsesCellular())cell.disconnect();else WebSocketsClient::disconnect();}
+  bool isConnected(){return radioUsesCellular()?cell.isConnected():WebSocketsClient::isConnected();}
+  void loop(){if(radioUsesCellular())cell.loop();else WebSocketsClient::loop();}
+  bool sendTXT(uint8_t* p,size_t n){return radioUsesCellular()?cell.sendTXT(p,n):WebSocketsClient::sendTXT(p,n);}
+#endif
+  void resumeHeartbeat(){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){cell.resumeHeartbeat();return;}
+#endif
+    enableHeartbeat(15000,3000,2);_client.lastPing=millis();_client.pongReceived=true;_client.pongTimeoutCount=0;}
   bool sendPcm(const uint8_t* data,size_t len){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular())return cell.sendPcm(data,len);
+#endif
     static uint8_t wire[2048+14];if(len>2048)return false;
     memcpy(wire+14,data,len);return sendBIN(wire,len,true);
   }
   void writeFailure(bool binary,size_t bytes,uint32_t elapsed){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){cell.writeFailure(binary,bytes,elapsed);return;}
+#endif
     int sys=errno,code=0;char tls[64]={},message[192];
     if(_client.ssl)code=_client.ssl->lastError(tls,sizeof(tls));
     if(code<0)snprintf(message,sizeof(message),"WS write failed %s %uB %lums errno=%d TLS=%d %.64s",binary?"PCM":"control",(unsigned)bytes,(unsigned long)elapsed,sys,code,tls);
@@ -167,12 +197,14 @@ static void networkTask(void*){
   authorizationHeader="Authorization: Bearer "+radioConfig.token+"\r\nX-Voxi-Device-Id: "+identity;
 #if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
   authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
+#elif defined(VOXI_BOARD_MINICAM)
+  if(radioUsesCellular())authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
 #endif
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
   while(true){if(standbyNetworkRequested){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
     if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
-    if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
+    if(radioNetworkConnected()&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
       if(probeStallUntil&&(int32_t)(millis()-probeStallUntil)<0){vTaskDelay(pdMS_TO_TICKS(10));continue;}
       bool connected=ws.isConnected();
       if(!connected)xQueueReset(outgoing);
@@ -232,6 +264,12 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   String type=d["type"]|"";
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){
+      size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
+      if(negotiated!=replyBytesPerSample||playbackGate.initialBytes!=6*24000*negotiated){replyBytesPerSample=negotiated;playbackGate.configure(6*24000*negotiated,12*24000*negotiated,2*24000*negotiated,true);}
+    }
+#endif
 #if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
     size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
     if(negotiated!=replyBytesPerSample){replyBytesPerSample=negotiated;if(negotiated==1)playbackGate.configure(72000,86400,7200,true);else playbackGate.configure(67200,81600,7200,true);}
@@ -376,9 +414,9 @@ void setup(){
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
 #endif
-  if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
+  if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",radioNetworkConnected(),false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
-  if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
+  if(radioConfig.tls&&!radioUsesCellular())configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
   BaseType_t networkStarted=incoming&&outgoing?xTaskCreatePinnedToCore(networkTask,"radio-network",12288,nullptr,2,nullptr,0):pdFAIL;
@@ -393,7 +431,7 @@ void loop(){
   if(speakerTestPending()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){
     button();
-    static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());}
+    static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",radioNetworkConnected(),false,HWCDC::isPlugged());}
     int16_t discard[240];audioRead(discard,240);delay(1);return;
   }
   Packet p;
@@ -417,15 +455,15 @@ void loop(){
     uploadRecovery.begin();sentCrc=0;radioDebugRestartTx();startCachedUpload(false);
   }
   cachedUploadTick();
-  static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
-  if(WiFi.status()!=WL_CONNECTED){if(uploading)deferUploadRecovery();if(!uploadRecovery.pending){if(ready||tx||playing||used)flushAudio();tx=false;}ready=false;diagnosticStage("wifi_connecting");}
+  static bool wifiWas=false;bool wifiNow=radioNetworkConnected();if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":(radioUsesCellular()?"NO 4G":"NO WIFI"),wifiNow?(radioUsesCellular()?"4G connected":"WiFi connected"):(radioUsesCellular()?"4G disconnected":"WiFi disconnected"));}
+  if(!radioNetworkConnected()){if(uploading)deferUploadRecovery();if(!uploadRecovery.pending){if(ready||tx||playing||used)flushAudio();tx=false;}ready=false;diagnosticStage(radioUsesCellular()?"cellular_connecting":"wifi_connecting");}
   button();encoder();audioTick();
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();
-    bool wifi=WiFi.status()==WL_CONNECTED;
-    const char* label=!wifi?"WIFI CONNECT":radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":uploading?"SENDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
+    bool wifi=radioNetworkConnected();
+    const char* label=!wifi?(radioUsesCellular()?"4G CONNECT":"WIFI CONNECT"):radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":uploading?"SENDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
     if(tx)diagnosticStage("recording");else if(uploading)diagnosticStage("sending");else if(thinking)diagnosticStage("thinking");else if(playing)diagnosticStage("receiving");else if(ready)diagnosticStage("ready");
-    else diagnosticStage(!wifi?"wifi_connecting":radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
+    else diagnosticStage(!wifi?(radioUsesCellular()?"cellular_connecting":"wifi_connecting"):radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
   standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));
