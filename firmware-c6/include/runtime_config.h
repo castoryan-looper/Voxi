@@ -13,6 +13,6 @@ bool setupScreenActive();
 
 void playbackDiagnostics(JsonDocument& out);
 
-void requestUploadTest();
+void requestUploadTest(bool simulateStall=true,bool allowRecovery=false);
 void requestRadioCueTest();
 void radioTransportDiagnostics(JsonDocument& out);

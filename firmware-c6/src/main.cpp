@@ -19,6 +19,8 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "playback_gate.h"
 #include "playback_envelope.h"
 #include "audio_cache.h"
+#include "upload_recovery.h"
+#include <errno.h>
 #include "radio_squelch.h"
 #include <esp_rom_crc.h>
 
@@ -26,10 +28,15 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 class RadioSocket:public WebSocketsClient{
 public:
   void resumeHeartbeat(){enableHeartbeat(15000,3000,2);_client.lastPing=millis();_client.pongReceived=true;_client.pongTimeoutCount=0;}
-  void writeFailure(){
-    char tls[96]={},message[160];int code=0;
+  bool sendPcm(const uint8_t* data,size_t len){
+    static uint8_t wire[2048+14];if(len>2048)return false;
+    memcpy(wire+14,data,len);return sendBIN(wire,len,true);
+  }
+  void writeFailure(bool binary,size_t bytes,uint32_t elapsed){
+    int sys=errno,code=0;char tls[64]={},message[192];
     if(_client.ssl)code=_client.ssl->lastError(tls,sizeof(tls));
-    snprintf(message,sizeof(message),"WebSocket send failed TLS=%d %.96s",code,tls);
+    if(code<0)snprintf(message,sizeof(message),"WS write failed %s %uB %lums errno=%d TLS=%d %.64s",binary?"PCM":"control",(unsigned)bytes,(unsigned long)elapsed,sys,code,tls);
+    else snprintf(message,sizeof(message),"WS write failed %s %uB %lums errno=%d (no TLS error recorded)",binary?"PCM":"control",(unsigned)bytes,(unsigned long)elapsed,sys);
     diagnosticError(message);
   }
 };
@@ -56,6 +63,8 @@ static bool uploadEof=false,submitQueued=false;
 static volatile bool submitSent=false;
 static uint32_t uploadAt=0,uploadProgressAt=0,uploadProgressBytes=0,liveQueuedBytes=0,cachedProducedBytes=0;
 static bool liveFallback=false;
+static UploadRecovery uploadRecovery;static bool captureSealed=false;
+static volatile bool submissionAttempted=false,retryableWriteFailure=false;
 static bool probeRequested=false,probePassed=false;
 static volatile bool probeActive=false,probeFinishing=false;
 static uint32_t probeAt=0;static const char* probeState="idle";
@@ -72,7 +81,8 @@ static void radioCueTick(){
   if(cuePosition==RadioSquelch::samples){cueActive=false;micResumeAt=millis()+100;}
 }
 static uint32_t captureCrc=0;static volatile uint32_t sentCrc=0;
-void requestUploadTest(){probeRequested=true;}
+static bool probeSimulateStall=true,probeAllowRecovery=false;static uint32_t probeTailMs=0;
+void requestUploadTest(bool simulateStall,bool allowRecovery){probeAllowRecovery=allowRecovery;probeSimulateStall=simulateStall;probeTailMs=0;probeRequested=true;}
 struct TurnTiming {uint32_t confirmed=0,recording=0,released=0,upload=0,firstPcm=0,voice=0,finished=0;};
 static TurnTiming turnTiming;static volatile uint32_t turnSubmittedAt=0;
 static uint32_t bytesSentAtRelease=0;
@@ -95,10 +105,10 @@ static void turnTimingJson(JsonDocument& out){
   if(cloudRtpQueuedMs>=0)o["cloudRtpQueuedMs"]=cloudRtpQueuedMs;
   o["dacQueueUpperBoundMs"]=60;
 }
-void radioTransportDiagnostics(JsonDocument& out){turnTimingJson(out);out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;out["recordingCrc"]=(uint32_t)captureCrc;out["sentCrc"]=(uint32_t)sentCrc;out["uploading"]=uploading;audioCacheDiagnostics(out);}
+void radioTransportDiagnostics(JsonDocument& out){turnTimingJson(out);out["uploadRetries"]=uploadRecovery.attempts;out["uploadRetryPending"]=uploadRecovery.pending;out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;out["uploadProbeTailMs"]=probeTailMs;out["uploadProbeRecoveryEnabled"]=probeAllowRecovery;out["recordingCrc"]=(uint32_t)captureCrc;out["sentCrc"]=(uint32_t)sentCrc;out["uploading"]=uploading;audioCacheDiagnostics(out);}
 
 static void networkFault(const char* reason){if(!queueFault){diagnosticError(reason);queueFault=true;}}
-static void socketWriteFault(){if(!queueFault){ws.writeFailure();queueFault=true;}}
+static void socketWriteFault(bool binary,size_t bytes,uint32_t elapsed){if(!queueFault){retryableWriteFailure=true;ws.writeFailure(binary,bytes,elapsed);queueFault=true;}}
 static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
 static bool sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return false;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE){networkFault("TX audio queue full");return false;}return true;}
 static bool flushMicBatch(){
@@ -136,9 +146,10 @@ static void networkTask(void*){
       for(int budget=0;budget<4&&!resetLink&&!queueFault;budget++){
         if(!ws.isConnected()||xQueueReceive(outgoing,&p,0)!=pdTRUE)break;
         networkBusy=true;uint32_t sendAt=millis();
-        bool sent=p.type==WStype_BIN?ws.sendBIN(p.data,p.len):ws.sendTXT(p.data,p.len);
+        if(p.type==WStype_TEXT){String c((const char*)p.data,p.len);if(c.indexOf("ptt_up")>=0)submissionAttempted=true;}
+        bool sent=p.type==WStype_BIN?ws.sendPcm(p.data,p.len):ws.sendTXT(p.data,p.len);
         networkSendMaxMs=max((uint32_t)networkSendMaxMs,millis()-sendAt);
-        if(!sent){networkBusy=false;socketWriteFault();pumpSocket();break;}
+        if(!sent){networkBusy=false;socketWriteFault(p.type==WStype_BIN,p.len,millis()-sendAt);pumpSocket();break;}
         if(p.type==WStype_BIN){sentCrc=esp_rom_crc32_le(sentCrc,p.data,p.len);radioDebugTx(p.len);}
         else{String text((const char*)p.data,p.len);if(text.indexOf("ptt_up")>=0){turnSubmittedAt=millis();submitSent=true;radioDebug("WAIT AI","PTT UP sent to gateway");}}
         networkBusy=false;
@@ -151,9 +162,16 @@ static void networkTask(void*){
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
-void fault(){replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
+static bool deferUploadRecovery(){
+  if(uploadRecovery.pending){ready=false;return true;}
+  if(!uploadRecovery.request(millis(),uploading,submissionAttempted,(probeActive||probeFinishing)&&!probeAllowRecovery))return false;
+  uploading=false;ready=false;thinking=false;replyPending=false;liveFallback=true;resetLink=true;
+  if(!tx)audioCacheClose();
+  radioDebug(tx?"RECORDING":"RETRY LINK","Keep recording: cache retry");return true;
+}
+void fault(){if(retryableWriteFailure){retryableWriteFailure=false;if(deferUploadRecovery())return;}uploadRecovery.pending=false;replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED){if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
+  if(t==WStype_DISCONNECTED){gatewayLinked=false;if(deferUploadRecovery())return;if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     if(!turnTiming.firstPcm)turnTiming.firstPcm=millis();
@@ -171,7 +189,10 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(uploading||replyPending)return;
     int actual=d["channel"]|0;
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
-    else{radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
+    else{if(uploadRecovery.pending&&tx){ready=true;backendError=false;diagnosticError("");radioDebug("RECORDING","Link restored: keep recording");return;}radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
+  }
+  if(uploadRecovery.pending&&(type=="connecting"||type=="offline"||type=="error")){
+    ready=false;if(type!="connecting"){diagnosticError(d["message"]|"Upload reconnect unavailable");resetLink=true;}return;
   }
   if(type=="connecting"||type=="offline"||type=="error"){if(type!="connecting"&&(playing||thinking||replyPending))diagnosticTurnFailure(d["message"]|"Pocket disconnected during reply");if(type!="connecting"){replyPending=false;audioCacheClose();uploading=false;}ready=false;tx=false;thinking=false;flushAudio();Serial.write(data,len);Serial.println();diagnosticStage(type=="connecting"?"cloud_connecting":"cloud_error");if(type!="connecting"){radioDebug("ERROR","Cloud error: see USB web");backendError=true;diagnosticError(d["message"]|"cloud unavailable");resetLink=true;}}
   if(type=="recording")radioDebug(tx?"RECORDING":"SENDING","Gateway recording ACK");
@@ -183,11 +204,11 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static bool startCachedUpload(bool test){
-  liveQueuedBytes=cachedProducedBytes=0;liveFallback=false;
+  submissionAttempted=false;liveQueuedBytes=cachedProducedBytes=0;liveFallback=false;
   if(!tx&&!audioCacheOpenUpload()){diagnosticError("Cannot reopen recording cache");fault();return false;}
   uploading=true;ready=false;thinking=false;uploadBlockUsed=0;uploadEof=false;submitQueued=false;submitSent=false;uploadAt=uploadProgressAt=millis();turnTiming.upload=uploadAt;uploadProgressBytes=0;
-  if(test)probeStallUntil=millis()+3500;
-  control("ptt_down");radioDebug("SENDING",test?"Test: 3.5s network stall":"Local recording saved: upload");return true;
+  probeStallUntil=test&&probeSimulateStall?millis()+3500:0;
+  control("ptt_down");radioDebug("SENDING",test?(probeSimulateStall?"Test: 3.5s network stall":"Test: normal live uplink"):(tx?"Recording: live uplink":"Cache tail: upload"));return true;
 }
 static void cachedUploadTick(){
   if(!uploading)return;
@@ -201,7 +222,7 @@ static void cachedUploadTick(){
   }
   if(uploadEof&&!uploadBlockUsed&&uxQueueMessagesWaiting(outgoing)<6){
     if(probeFinishing){
-      if(!networkBusy&&uxQueueMessagesWaiting(outgoing)==0){auto d=radioDebugRead();probePassed=d.micBytes==RECORDING_MAX_BYTES&&d.micBytes==d.txBytes&&captureCrc==sentCrc;probeState=probePassed?"passed":"failed";probeFinishing=false;uploading=false;audioCacheRemove();resetLink=true;radioDebug(probePassed?"UPLOAD PASS":"UPLOAD FAIL","Cached test done: reconnect");}
+      if(!networkBusy&&uxQueueMessagesWaiting(outgoing)==0){auto d=radioDebugRead();probePassed=d.micBytes==RECORDING_MAX_BYTES&&d.micBytes==d.txBytes&&captureCrc==sentCrc;probeTailMs=turnTiming.released?millis()-turnTiming.released:0;probeState=probePassed?"passed":"failed";probeFinishing=false;uploading=false;audioCacheRemove();resetLink=true;radioDebug(probePassed?"UPLOAD PASS":"UPLOAD FAIL","Cached test done: reconnect");}
     }else{
       if(!submitQueued){replyPending=true;control("ptt_up");submitQueued=true;}
       if(submitSent){uploading=false;thinking=true;audioCacheRemove();radioDebug("WAIT AI","Upload complete: awaiting AI");}
@@ -217,7 +238,7 @@ void button(){
   auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,digitalRead(2)==LOW);
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
-    resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
+    uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
     flushAudio();
     // Never include audio from the initial 0.3s hold threshold.
     int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
@@ -228,6 +249,7 @@ void button(){
     turnTiming.released=millis();bytesSentAtRelease=radioDebugRead().txBytes;tx=false;
     if(!radioDebugRead().micBytes&&!uploading){audioCacheRemove();flushAudio();radioDebug("READY","Released during TX cue");return;}
     if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
+    captureSealed=true;if(uploadRecovery.pending){radioDebug("RETRY LINK","Recording saved: reconnect");return;}
     if(uploading){if(!audioCacheOpenUpload(liveQueuedBytes))fault();}else startCachedUpload(false);
   }
 }
@@ -239,7 +261,7 @@ void encoder(){
   if(now!=encPrev){encSteps+=table[(encPrev<<2)|now];encPrev=now;
     if(abs(encSteps)>=4){pendingChannel=(pendingChannel+(encSteps>0?1:3))%4;encSteps=0;encAt=millis();}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
-  if(!stable&&!uploading&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>180){
+  if(!stable&&!uploading&&!uploadRecovery.pending&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>180){
     tx=false;ready=false;flushAudio();channel=pendingChannel;if(!setupScreenActive())displayChannel(channel,false);
     JsonDocument d;d["type"]="channel";d["channel"]=channel;String s;serializeJson(d,s);sendText(s);
   }
@@ -254,6 +276,7 @@ void audioTick(){
     if(tx&&radioDebugRead().micBytes>=RECORDING_MAX_BYTES){
       turnTiming.released=millis();bytesSentAtRelease=radioDebugRead().txBytes;tx=false;if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
       if(probeActive){probeActive=false;probeFinishing=true;probeState="uploading";}
+      captureSealed=true;if(uploadRecovery.pending){radioDebug("RETRY LINK","20s saved: reconnect");return;}
       radioDebug("SENDING","20s limit: recording stopped");if(uploading){if(!audioCacheOpenUpload(liveQueuedBytes))fault();}else startCachedUpload(probeFinishing);
     }
   }
@@ -292,7 +315,7 @@ void setup(){
 
 }
 void loop(){
-  displayDebugTick();boardStatusTick();setupTick(tx||uploading||playing||thinking||cueActive||audioCacheBusy(),ready,channel);
+  displayDebugTick();boardStatusTick();setupTick(tx||uploading||uploadRecovery.pending||playing||thinking||cueActive||audioCacheBusy(),ready,channel);
   if(speakerTestPending()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){
     button();
@@ -303,14 +326,18 @@ void loop(){
   if(queueFault){queueFault=false;fault();}
   if(probeRequested&&ready&&!audioCacheBusy()&&!tx&&!uploading&&!playing&&!thinking){
     probeRequested=false;
-    if(audioCacheStart()){probeActive=true;probePassed=false;probeState="recording";probeRandom=0x564f5849;probeAt=millis();resetTurnTiming();turnTiming.recording=probeAt;micBatchUsed=0;captureCrc=0;sentCrc=0;networkLoopMaxMs=networkSendMaxMs=0;radioDebugReset();flushAudio();tx=true;radioDebug("UPLOAD TEST","Recording 20s synthetic PCM");startCachedUpload(true);}
+    if(audioCacheStart()){probeActive=true;probePassed=false;probeState="recording";probeRandom=0x564f5849;probeAt=millis();uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.recording=probeAt;micBatchUsed=0;captureCrc=0;sentCrc=0;networkLoopMaxMs=networkSendMaxMs=0;radioDebugReset();flushAudio();tx=true;radioDebug("UPLOAD TEST","Recording 20s synthetic PCM");startCachedUpload(true);}
     else{probeState="failed";diagnosticError("Audio cache start failed");}
   }
   if(probeActive&&millis()-probeAt>30000){diagnosticError("Recording probe capture stalled");fault();}
   if(cueRequested&&!tx&&!uploading&&!playing&&!thinking){cueRequested=false;flushAudio();startRadioCue();radioDebug("SQUELCH TEST","Local 220ms radio static");}
+  if(uploadRecovery.expired(millis())){uploadRecovery.pending=false;diagnosticError("Upload reconnect timed out; cache kept");fault();}
+  if(uploadRecovery.pending&&captureSealed&&!tx&&ready&&!audioCacheBusy()){
+    uploadRecovery.begin();sentCrc=0;radioDebugRestartTx();startCachedUpload(false);
+  }
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
-  if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=false;tx=false;diagnosticStage("wifi_connecting");}
+  if(WiFi.status()!=WL_CONNECTED){if(uploading)deferUploadRecovery();if(!uploadRecovery.pending){if(ready||tx||playing||used)flushAudio();tx=false;}ready=false;diagnosticStage("wifi_connecting");}
   button();encoder();audioTick();
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();

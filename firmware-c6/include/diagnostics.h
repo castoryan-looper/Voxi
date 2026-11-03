@@ -16,5 +16,6 @@ void radioDebug(const char* phase,const char* event);
 void radioDebugReset();
 void radioDebugMic(size_t bytes,unsigned peak);
 void radioDebugTx(size_t bytes);
+void radioDebugRestartTx();
 void radioDebugRx(size_t bytes);
 RadioDebugSnapshot radioDebugRead();

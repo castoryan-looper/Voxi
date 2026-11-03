@@ -15,8 +15,19 @@ static void cleanupWorker(void*){
 }
 
 bool audioCacheInit(){
-  if(SPIFFS.begin(false,"/spiffs",3,"storage"))cacheFs=&SPIFFS;
-  else if(LittleFS.begin(false,"/littlefs",3,"storage"))cacheFs=&LittleFS;
+  if(LittleFS.begin(false,"/littlefs",3,"storage"))cacheFs=&LittleFS;
+  else if(SPIFFS.begin(false,"/spiffs",3,"storage")){
+    // Migrate only this application's disposable cache, never unknown user files.
+    bool ownedOnly=true;File dir=SPIFFS.open("/");
+    if(!dir)ownedOnly=false;
+    for(File entry=dir.openNextFile();entry;entry=dir.openNextFile()){
+      String name=entry.name();if(entry.isDirectory()||(name!="voxi-turn.pcm"&&name!="/voxi-turn.pcm"))ownedOnly=false;
+      entry.close();
+    }
+    dir.close();
+    if(ownedOnly){SPIFFS.end();if(LittleFS.begin(true,"/littlefs",3,"storage"))cacheFs=&LittleFS;}
+    else cacheFs=&SPIFFS;
+  }
   else{
     auto part=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"storage");
     if(!part){diagnosticError("Audio cache partition missing");return false;}
@@ -30,7 +41,7 @@ bool audioCacheInit(){
     }
     free(block);
     // Never format an unrecognised filesystem or any non-blank partition.
-    if(blank&&SPIFFS.begin(true,"/spiffs",3,"storage"))cacheFs=&SPIFFS;
+    if(blank&&LittleFS.begin(true,"/littlefs",3,"storage"))cacheFs=&LittleFS;
   }
   if(!cacheFs){diagnosticError("Audio cache unavailable; existing data left untouched");return false;}
   if(xTaskCreate(cleanupWorker,"cache-cleanup",4096,nullptr,1,&cleanupTask)!=pdPASS){diagnosticError("Cache cleanup task unavailable");cacheFs=nullptr;return false;}
@@ -67,6 +78,6 @@ void audioCacheClose(){if(!cleanupBusy)closeFiles();}
 void audioCacheRemove(){if(!cleanupBusy&&cleanupTask){cleanupBusy=true;xTaskNotifyGive(cleanupTask);}}
 bool audioCacheBusy(){return cleanupBusy;}
 void audioCacheDiagnostics(JsonDocument& out){
-  out["cacheCleanupBusy"]=cleanupBusy;out["cacheWriteMaxMs"]=writeMaxMs;out["cacheReadMaxMs"]=readMaxMs;out["cacheFinishMs"]=finishMs;out["cacheRemoveMs"]=removeMs;
+  out["cacheFilesystem"]=cacheFs==&LittleFS?"littlefs":cacheFs==&SPIFFS?"spiffs":"none";out["cacheCleanupBusy"]=cleanupBusy;out["cacheWriteMaxMs"]=writeMaxMs;out["cacheReadMaxMs"]=readMaxMs;out["cacheFinishMs"]=finishMs;out["cacheRemoveMs"]=removeMs;
   out["recordingMaxMs"]=RECORDING_MAX_MS;out["audioCacheCapacityBytes"]=RECORDING_MAX_BYTES;out["audioCacheReady"]=cacheFs!=nullptr;out["audioCacheBytes"]=cacheBytes;
 }

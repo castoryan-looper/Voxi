@@ -29,6 +29,7 @@ void radioDebug(const char* phase,const char* event){
 }
 void radioDebugReset(){portENTER_CRITICAL(&lock);turnFailure[0]=0;turnFailureAt=0;flow.micBytes=flow.txBytes=flow.rxBytes=0;flow.peak=0;portEXIT_CRITICAL(&lock);}
 void radioDebugMic(size_t bytes,unsigned peak){portENTER_CRITICAL(&lock);flow.micBytes+=bytes;flow.peak=max(flow.peak,peak);portEXIT_CRITICAL(&lock);}
+void radioDebugRestartTx(){portENTER_CRITICAL(&lock);flow.txBytes=0;portEXIT_CRITICAL(&lock);}
 void radioDebugTx(size_t bytes){portENTER_CRITICAL(&lock);flow.txBytes+=bytes;portEXIT_CRITICAL(&lock);}
 void radioDebugRx(size_t bytes){portENTER_CRITICAL(&lock);flow.rxBytes+=bytes;portEXIT_CRITICAL(&lock);}
 RadioDebugSnapshot radioDebugRead(){portENTER_CRITICAL(&lock);auto result=flow;portEXIT_CRITICAL(&lock);return result;}
