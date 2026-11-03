@@ -19,3 +19,9 @@ test('authenticated admin proxies AI settings to dedicated Pocket endpoint witho
  assert.deepEqual(requests.map(r=>r.url),['/voxi/config','/voxi/config']);assert.ok(requests.every(r=>r.auth==='Bearer private-backend'));
  assert.ok(!(await response.text()).includes('private-backend'));
 });
+
+ test('memory editor uses only dedicated backend memory endpoint',async t=>{
+ const {pocketSettings}=await import('./pocket-settings.mjs');let action;
+ const backend=http.createServer(async(req,res)=>{assert.equal(req.url,'/voxi/memory');assert.equal(req.headers.authorization,'Bearer internal');let raw='';for await(const part of req)raw+=part;if(raw)action=JSON.parse(raw);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({users:[],devices:[],memories:[],turns:[]}));});await new Promise(r=>backend.listen(0,'127.0.0.1',r));t.after(()=>backend.close());
+ const api=pocketSettings({url:`ws://127.0.0.1:${backend.address().port}/voxi`,token:'internal'},'memory');assert.deepEqual((await api()).users,[]);await api({action:'clear',userId:'fixture'});assert.equal(action.userId,'fixture');
+ });

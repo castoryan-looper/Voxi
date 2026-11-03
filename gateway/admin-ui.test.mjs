@@ -50,3 +50,9 @@ test('save failure remains visible and re-enables button',async()=>{
  test('incompatible response is reported instead of leaving an empty editor',async()=>{
  const {context,get}=page();get('aiForm').hidden=true;context.fetch=async()=>({ok:true,json:async()=>({settings:{}})});vm.runInContext("token='session'",context);await get('reloadAi').onclick();assert.match(get('aiMessage').textContent,/格式不兼容/);assert.equal(get('reloadAi').disabled,false);
  });
+
+ test('memory manager reads user, edits profile and renders transcript without HTML injection',async()=>{
+ const {context,get}=page();const uid='user-one';const data={users:[{id:uid,name:'Castor',profile:'喜欢科普',enabled:1}],devices:[{id:'esp32-111111111111',user_id:uid}],memories:[{id:'m1',user_id:uid,text:'我喜欢故事',source:'用户转写',created:1}],turns:[{id:'t1',user_id:uid,text:'<script>test</script>',created:1}]};let submitted;
+ context.fetch=async(path,options)=>{if(options.body)submitted=JSON.parse(options.body);return {ok:true,json:async()=>data};};vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('memoryPanel').hidden,false);assert.equal(get('memoryName').value,'Castor');assert.match(get('memoryTurns').children[0].children[0].textContent,/<script>/);
+ get('memoryName').value='Castor Yan';get('profileForm').onsubmit({preventDefault(){}});await new Promise(r=>setTimeout(r,5));assert.equal(submitted.userId,uid);assert.equal(submitted.name,'Castor Yan');
+ });

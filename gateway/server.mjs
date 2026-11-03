@@ -29,11 +29,13 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   let connectionSequence=0;
   const connected=new Map();
   const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+    memoryConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
   wss.on('connection',(device,req)=>{
+    const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
     const connection=++connectionSequence;let inputBytes=0;
     let observedChannel=null,observedBusy=false;
     const openedAt=Date.now();let sentPings=0,pongs=0,pings=0,lastPongAt=openedAt,lastPingAt=0;
@@ -53,7 +55,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
     if([...wss.clients].filter(c=>c.authenticated).length>=admin.limit){device.closeOrigin='device_limit';admin.record({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
     device.authenticated=true;
-    connected.set(connection,{device,snapshot:()=>({connection,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
+    connected.set(connection,{device,snapshot:()=>({connection,deviceId,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));
@@ -67,7 +69,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
-      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa});
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }

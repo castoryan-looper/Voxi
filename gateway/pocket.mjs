@@ -4,9 +4,9 @@ import {PcmPacer} from './pcm-pacer.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
-export function attachPocket(device,{url,token,ca}) {
+export function attachPocket(device,{url,token,ca,deviceId}) {
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
-    headers:{Authorization:`Bearer ${token}`},...(ca?{ca}:{})});
+    headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
   const error=message=>{
     if(failed)return;failed=true;pacer.clear();

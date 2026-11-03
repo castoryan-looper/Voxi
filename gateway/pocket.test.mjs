@@ -10,6 +10,7 @@ test('Pocket proxy preserves credentials, PCM, PTT and channel controls without 
   const seen=[];
   upstream.on('connection',(socket,req)=>{
     assert.equal(req.headers.authorization,'Bearer pocket-only');
+    assert.equal(req.headers['x-voxi-device-id'],'esp32-111111111111');
     socket.send(JSON.stringify({type:'ready',channel:0}));
     socket.on('message',(raw,binary)=>{
       if(binary){seen.push({pcm:raw.length});return;}
@@ -22,7 +23,7 @@ test('Pocket proxy preserves credentials, PCM, PTT and channel controls without 
   const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
-  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only'}});
+  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111'}});
   const messages=[];let pcm=0;
   device.on('message',(raw,binary)=>{if(binary)pcm+=raw.length;else messages.push(JSON.parse(raw));});
   async function until(check){const start=Date.now();while(!check()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}

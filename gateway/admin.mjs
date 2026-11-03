@@ -2,7 +2,7 @@ import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 
-export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,username,passwordHash,accountFile,secureCookies=true}={}) {
+export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,memoryConfiguration,username,passwordHash,accountFile,secureCookies=true}={}) {
   const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const valid=n=>Number.isInteger(n)&&n>=1&&n<=capacity;
   if(!valid(initialLimit))throw Error(`MAX_CONNECTIONS must be an integer from 1 to ${capacity}`);
@@ -35,6 +35,10 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
       if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return json(401,{error:'管理密钥不正确'});
     }
     if(req.method==='GET'&&req.url==='/api/admin/status')return json(200,{...snapshot(),maxConnections:limit,capacity,persistent:Boolean(stateFile),events});
+    if(req.method==='GET'&&req.url==='/api/admin/memory'){
+      if(!memoryConfiguration)return json(409,{error:'当前模式未启用用户记忆'});
+      try{return json(200,await memoryConfiguration());}catch(error){return json(502,{error:error.message});}
+    }
     if(req.method==='GET'&&req.url==='/api/admin/ai'){
       if(!aiConfiguration)return json(409,{error:'当前模式未启用 Pocket AI 配置'});
       try{return json(200,await aiConfiguration());}catch(error){return json(502,{error:error.message});}
@@ -46,6 +50,10 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
       for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>131072)return json(413,{error:'请求过大'});}
       body=JSON.parse(body);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();
     }catch{return json(400,{error:'JSON 无效'});}
+    if(req.url==='/api/admin/memory'){
+      if(!memoryConfiguration)return json(409,{error:'当前模式未启用用户记忆'});
+      try{const result=await memoryConfiguration(body);record({event:'memory_changed'});return json(200,result);}catch(error){return json(502,{error:error.message});}
+    }
     if(req.url==='/api/admin/ai'){
       if(!aiConfiguration)return json(409,{error:'当前模式未启用 Pocket AI 配置'});
       try{const result=await aiConfiguration(body);record({event:'ai_config_changed'});return json(200,result);}
