@@ -19,6 +19,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "playback_gate.h"
 #include "playback_envelope.h"
 #include "audio_cache.h"
+#include "radio_squelch.h"
 #include <esp_rom_crc.h>
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
@@ -57,6 +58,17 @@ static bool probeRequested=false,probePassed=false;
 static volatile bool probeActive=false,probeFinishing=false;
 static uint32_t probeAt=0;static const char* probeState="idle";
 static uint32_t probeRandom=0x564f5849;
+static bool cueActive=false,replyCuePending=false,micCueGuard=false,cueRequested=false;
+void requestRadioCueTest(){cueRequested=true;}
+static size_t cuePosition=0;static uint32_t cueSeed=0x564f5849,micResumeAt=0;
+static void startRadioCue(){cuePosition=0;cueSeed+=0x9e3779b9u;cueActive=true;}
+static void radioCueTick(){
+  if(!cueActive)return;
+  int16_t block[240];size_t n=min((size_t)240,RadioSquelch::samples-cuePosition);
+  for(size_t i=0;i<n;i++)block[i]=RadioSquelch::sample(cuePosition+i,cueSeed);
+  cuePosition+=audioWrite(block,n);
+  if(cuePosition==RadioSquelch::samples){cueActive=false;micResumeAt=millis()+100;}
+}
 static uint32_t captureCrc=0;static volatile uint32_t sentCrc=0;
 void requestUploadTest(){probeRequested=true;}
 void radioTransportDiagnostics(JsonDocument& out){out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;out["recordingCrc"]=(uint32_t)captureCrc;out["sentCrc"]=(uint32_t)sentCrc;out["uploading"]=uploading;audioCacheDiagnostics(out);}
@@ -106,7 +118,7 @@ static void networkTask(void*){
   }
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
-void flushAudio(){playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 void fault(){replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_DISCONNECTED){replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
@@ -132,7 +144,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static bool startCachedUpload(bool test){
@@ -172,10 +184,12 @@ void button(){
     flushAudio();
     // Never include audio from the initial 0.5s hold threshold.
     int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
-    tx=true;thinking=false;pressAt=millis();diagnosticStage("recording");
+    tx=true;thinking=false;pressAt=millis();micCueGuard=true;startRadioCue();
+    radioDebug("OPEN MIC","TX squelch: mic guard");diagnosticStage("recording");
     Serial.println("VOXI_PTT recording");
   }else if(action==PttHold::Stop&&tx){
     tx=false;
+    if(!radioDebugRead().micBytes){audioCacheRemove();flushAudio();radioDebug("READY","Released during TX cue");return;}
     if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
     startCachedUpload(false);
   }
@@ -195,7 +209,11 @@ void encoder(){
 }
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
-  if(tx&&samples){samples=min(samples,(size_t)((RECORDING_MAX_BYTES-radioDebugRead().micBytes)/2));if(probeActive)for(size_t i=0;i<samples;i++){probeRandom=probeRandom*1664525u+1013904223u;mic[i]=(int16_t)((probeRandom>>20)&1023)-512;}unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));captureCrc=esp_rom_crc32_le(captureCrc,(const uint8_t*)mic,samples*2);radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);
+  radioCueTick();
+  if(micCueGuard&&!cueActive&&(int32_t)(millis()-micResumeAt)>=0){
+    micCueGuard=false;ptt.started=millis();radioDebug("RECORDING","REC started: release to send");
+  }
+  if(tx&&!micCueGuard&&samples){samples=min(samples,(size_t)((RECORDING_MAX_BYTES-radioDebugRead().micBytes)/2));if(probeActive)for(size_t i=0;i<samples;i++){probeRandom=probeRandom*1664525u+1013904223u;mic[i]=(int16_t)((probeRandom>>20)&1023)-512;}unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));captureCrc=esp_rom_crc32_le(captureCrc,(const uint8_t*)mic,samples*2);radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);
     if(tx&&radioDebugRead().micBytes>=RECORDING_MAX_BYTES){
       tx=false;if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
       if(probeActive){probeActive=false;probeFinishing=true;probeState="uploading";}
@@ -205,7 +223,8 @@ void audioTick(){
   // Prime with 200ms (adapt up to 360ms after gaps), then continuously drain even below the watermark.
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
-  if(!tx&&playing&&playbackGate.canWrite(used,ending)){
+  if(!tx&&playing&&!cueActive&&playbackGate.canWrite(used,ending)){
+    if(replyCuePending){replyCuePending=false;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
     size_t count=min(used/2,(size_t)240);int16_t mono[240];
     for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=playbackEnvelope((int16_t)(lo|(hi<<8)),i,fadeRemaining,used/2);}
     size_t written=count?audioWrite(mono,count):0;
@@ -232,7 +251,7 @@ void setup(){
 
 }
 void loop(){
-  displayDebugTick();boardStatusTick();setupTick(tx||uploading||playing||thinking,ready,channel);
+  displayDebugTick();boardStatusTick();setupTick(tx||uploading||playing||thinking||cueActive,ready,channel);
   if(speakerTestPending()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){
     button();
@@ -247,6 +266,7 @@ void loop(){
     else{probeState="failed";diagnosticError("Audio cache start failed");}
   }
   if(probeActive&&millis()-probeAt>30000){diagnosticError("Recording probe capture stalled");fault();}
+  if(cueRequested&&!tx&&!uploading&&!playing&&!thinking){cueRequested=false;flushAudio();startRadioCue();radioDebug("SQUELCH TEST","Local 90ms radio static");}
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=false;tx=false;diagnosticStage("wifi_connecting");}

@@ -54,5 +54,6 @@ jobs:
       - run: g++ -std=c++17 tools/test_output_gain.cpp -o /tmp/voxi-output && /tmp/voxi-output
       - run: g++ -std=c++17 tools/test_playback_gate.cpp -o /tmp/voxi-playback && /tmp/voxi-playback
       - run: g++ -std=c++17 tools/test_playback_envelope.cpp -o /tmp/voxi-envelope && /tmp/voxi-envelope
+      - run: g++ -std=c++17 tools/test_radio_squelch.cpp -o /tmp/voxi-squelch && /tmp/voxi-squelch
       - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6

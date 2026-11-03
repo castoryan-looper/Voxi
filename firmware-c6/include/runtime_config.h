@@ -14,4 +14,5 @@ bool setupScreenActive();
 void playbackDiagnostics(JsonDocument& out);
 
 void requestUploadTest();
+void requestRadioCueTest();
 void radioTransportDiagnostics(JsonDocument& out);
