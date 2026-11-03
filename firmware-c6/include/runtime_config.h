@@ -12,3 +12,6 @@ void setupTick(bool busy,bool cloudReady,int channel);
 bool setupScreenActive();
 
 void playbackDiagnostics(JsonDocument& out);
+
+void requestUploadTest();
+void radioTransportDiagnostics(JsonDocument& out);

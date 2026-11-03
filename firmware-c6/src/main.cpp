@@ -19,6 +19,7 @@
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
 public:
+  void resumeHeartbeat(){enableHeartbeat(15000,3000,2);_client.lastPing=millis();_client.pongReceived=true;_client.pongTimeoutCount=0;}
   void writeFailure(){
     char tls[96]={},message[160];int code=0;
     if(_client.ssl)code=_client.ssl->lastError(tls,sizeof(tls));
@@ -32,35 +33,56 @@ constexpr size_t CAP=24000; // half a second; fail closed instead of growing lat
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
 static PlaybackGate playbackGate;
 void playbackDiagnostics(JsonDocument& out){out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;}
-bool ready=false,tx=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false;
+volatile bool tx=false;
+bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false;
 uint32_t played=0,lastReport=0,pressAt=0;
 int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
 
 struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
-struct TxPacket{WStype_t type;size_t len;uint8_t data[512];};
+struct TxPacket{WStype_t type;size_t len;uint8_t data[2048];};
 static QueueHandle_t incoming,outgoing;
-static volatile bool resetLink=false,queueFault=false;
+static volatile bool resetLink=false,queueFault=false,networkBusy=false;
+static volatile uint32_t networkLoopMaxMs=0,networkSendMaxMs=0;
+static uint8_t micBatch[1920];static size_t micBatchUsed=0;
+static bool probeRequested=false,probePassed=false;
+static volatile bool probeActive=false,probeFinishing=false;
+static uint32_t probeAt=0;static const char* probeState="idle";
+void requestUploadTest(){probeRequested=true;}
+void radioTransportDiagnostics(JsonDocument& out){out["networkLoopMaxMs"]=(uint32_t)networkLoopMaxMs;out["networkSendMaxMs"]=(uint32_t)networkSendMaxMs;out["uploadProbe"]=probeState;out["uploadProbePassed"]=probePassed;}
+
 static void networkFault(const char* reason){if(!queueFault){diagnosticError(reason);queueFault=true;}}
 static void socketWriteFault(){if(!queueFault){ws.writeFailure();queueFault=true;}}
 static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
-static void sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE)networkFault("TX audio queue full");}
+static bool sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return false;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE){networkFault("TX audio queue full");return false;}return true;}
+static void flushMicBatch(){if(micBatchUsed){sendAudio(micBatch,micBatchUsed);micBatchUsed=0;}}
+static void batchAudio(uint8_t* bytes,size_t n){
+  while(n){size_t count=min(n,sizeof(micBatch)-micBatchUsed);memcpy(micBatch+micBatchUsed,bytes,count);micBatchUsed+=count;bytes+=count;n-=count;if(micBatchUsed==sizeof(micBatch))flushMicBatch();}
+}
 static void socketEvent(WStype_t type,uint8_t* data,size_t len){if(type!=WStype_TEXT&&type!=WStype_BIN&&type!=WStype_CONNECTED&&type!=WStype_DISCONNECTED)return;Packet p{};p.type=type;p.len=len;if(len>sizeof(p.data)){networkFault("RX frame exceeds 2048 bytes");return;}if(len)memcpy(p.data,data,len);if(xQueueSend(incoming,&p,pdMS_TO_TICKS(20))!=pdTRUE)networkFault("RX event queue full");}
+static void pumpSocket(){uint32_t at=millis();ws.loop();networkLoopMaxMs=max((uint32_t)networkLoopMaxMs,millis()-at);}
 static void networkTask(void*){
   if(radioConfig.tls)ws.beginSslWithCA(radioConfig.host.c_str(),radioConfig.port,"/radio",radioConfig.ca.c_str());else ws.begin(radioConfig.host.c_str(),radioConfig.port,"/radio");
   authorizationHeader="Authorization: Bearer "+radioConfig.token;ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
-  TxPacket p;uint32_t retryAt=0;
+  TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
   while(true){if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
     if(WiFi.status()==WL_CONNECTED&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
-      ws.loop();
-      // Bound each burst; keep reading control/error/close frames during upload.
+      bool connected=ws.isConnected();
+      if(!connected)xQueueReset(outgoing);
+      bool uploading=connected&&(tx||probeActive||probeFinishing||uxQueueMessagesWaiting(outgoing)>0);
+      if(uploading&&!heartbeatPaused){ws.disableHeartbeat();heartbeatPaused=true;}
+      if(!uploading&&heartbeatPaused){ws.resumeHeartbeat();heartbeatPaused=false;}
+      if(!uploading)pumpSocket();
+      // Half-duplex: drain queued mic data first; read replies only after release.
       for(int budget=0;budget<4&&!resetLink&&!queueFault;budget++){
         if(!ws.isConnected()||xQueueReceive(outgoing,&p,0)!=pdTRUE)break;
+        networkBusy=true;uint32_t sendAt=millis();
         bool sent=p.type==WStype_BIN?ws.sendBIN(p.data,p.len):ws.sendTXT(p.data,p.len);
-        if(!sent){socketWriteFault();ws.loop();break;}
+        networkSendMaxMs=max((uint32_t)networkSendMaxMs,millis()-sendAt);networkBusy=false;
+        if(!sent){socketWriteFault();pumpSocket();break;}
         if(p.type==WStype_BIN)radioDebugTx(p.len);
         else{String text((const char*)p.data,p.len);if(text.indexOf("ptt_up")>=0)radioDebug("WAIT AI","PTT UP sent to gateway");}
-        ws.loop();
+        if(!tx&&!probeActive&&!probeFinishing&&uxQueueMessagesWaiting(outgoing)==0)pumpSocket();
       }
     }
     else xQueueReset(outgoing);
@@ -69,9 +91,9 @@ static void networkTask(void*){
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){playbackGate.reset();head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
-void fault(){radioDebug("ERROR","Audio/queue fault: reconnect");ready=tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
+void fault(){micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED){radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
+  if(t==WStype_DISCONNECTED){micBatchUsed=0;if(probeActive||probeFinishing){probeActive=probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     radioDebugRx(len);
@@ -98,19 +120,20 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
 }
 static PttHold ptt;
 void button(){
+  if(probeActive||probeFinishing)return;
   bool down=digitalRead(PIN_PTT)==LOW;
   if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.5s":"NOT READY",ready?"BOOT down: hold 0.5s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
   auto action=ptt.update(millis(),stable,ready,digitalRead(2)==LOW);
   if(action==PttHold::Start){
-    radioDebugReset();radioDebug("RECORDING","REC started: release to send");
+    micBatchUsed=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
     flushAudio();
     // Never include audio from the initial 0.5s hold threshold.
     int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
-    control("ptt_down");thinking=false;tx=true;pressAt=millis();diagnosticStage("recording");
+    tx=true;control("ptt_down");thinking=false;pressAt=millis();diagnosticStage("recording");
     Serial.println("VOXI_PTT recording");
   }else if(action==PttHold::Stop&&tx){
-    radioDebug("SENDING","REC stopped: PTT UP queued");tx=false;thinking=true;control("ptt_up");diagnosticStage("thinking");Serial.println("VOXI_PTT submitted");
+    flushMicBatch();radioDebug("SENDING","REC stopped: PTT UP queued");control("ptt_up");tx=false;thinking=true;diagnosticStage("thinking");Serial.println("VOXI_PTT submitted");
   }
 }
 
@@ -128,7 +151,7 @@ void encoder(){
 }
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
-  if(tx&&samples){unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));radioDebugMic(samples*2,peak);sendAudio((uint8_t*)mic,samples*2);}
+  if(tx&&samples){if(probeActive)memset(mic,0,samples*2);unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);}
   // Prime once with 120ms, then continuously drain even below the watermark.
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
@@ -153,7 +176,7 @@ void setup(){
   if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
-  incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(24,sizeof(TxPacket));
+  incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
   if(!incoming||!outgoing||xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr)!=pdPASS){diagnosticError("network task allocation failed");radioConfig.valid=false;}
 
 }
@@ -167,6 +190,12 @@ void loop(){
   }
   Packet p;for(int i=0;i<8&&xQueueReceive(incoming,&p,0)==pdTRUE;i++)onWs(p.type,p.data,p.len);
   if(queueFault){queueFault=false;fault();}
+  if(probeRequested&&ready&&!tx&&!playing&&!thinking){probeRequested=false;probeActive=true;probePassed=false;probeState="running";probeAt=millis();micBatchUsed=0;networkLoopMaxMs=networkSendMaxMs=0;radioDebugReset();flushAudio();tx=true;control("ptt_down");radioDebug("UPLOAD TEST","3s synthetic silence upload");}
+  if(probeActive&&millis()-probeAt>=3000){tx=false;flushMicBatch();probeActive=false;probeFinishing=true;probeAt=millis();probeState="draining";}
+  if(probeFinishing&&millis()-probeAt>=150){
+    if(!networkBusy&&uxQueueMessagesWaiting(outgoing)==0){auto d=radioDebugRead();probePassed=d.micBytes>100000&&d.micBytes==d.txBytes;probeState=probePassed?"passed":"failed";probeFinishing=false;resetLink=true;radioDebug(probePassed?"UPLOAD PASS":"UPLOAD FAIL","Test done: reconnecting");}
+    else if(millis()-probeAt>3000){probeState="failed";probeFinishing=false;fault();}
+  }
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=tx=false;diagnosticStage("wifi_connecting");}
   button();encoder();audioTick();
