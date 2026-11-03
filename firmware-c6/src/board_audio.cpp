@@ -88,11 +88,16 @@ static void screenTask(void*){
   SPI.begin(6,4,5,7);
 #endif
   screen.init(0,true,20,false);
-  ScreenState state,previous;bool drawn=false;unsigned refreshes=0;
+  ScreenState state,previous;bool drawn=false;unsigned refreshes=0;uint32_t refreshCompletedAt=0;
   while(true){
     if(xQueueReceive(screenQueue,&state,portMAX_DELAY)!=pdTRUE)continue;
     // Coalesce rapid channel changes. Screen BUSY waits run in this low-priority task.
-    vTaskDelay(pdMS_TO_TICKS(100));ScreenState next;
+#ifdef VOXI_BOARD_S3G
+    vTaskDelay(pdMS_TO_TICKS(1000));
+#else
+    vTaskDelay(pdMS_TO_TICKS(100));
+#endif
+    ScreenState next;
     while(xQueueReceive(screenQueue,&next,0)==pdTRUE)state=next;
     // Progress counters and jitter events remain live in USB status, but do
     // not repaint e-paper every second during the same interaction phase.
@@ -100,27 +105,30 @@ static void screenTask(void*){
     bool active=!strcmp(state.debug.phase,"PLAYING")||!strcmp(state.debug.phase,"RECORDING")||!strcmp(state.debug.phase,"SENDING")||!strcmp(state.debug.phase,"WAIT AI");
     bool samePage=drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key);
 #ifdef VOXI_BOARD_S3G
-    // Four-color refresh takes ~15-20s. Render static navigation, never live phases.
+    // Snapshot status in idle. Never follow per-second counters in speech.
     if(active)continue;
-    if(drawn&&state.channel==previous.channel&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key))continue;
+    bool pageChanged=!drawn||state.channel!=previous.channel||state.setup!=previous.setup||state.hotspot!=previous.hotspot||state.usb!=previous.usb||strcmp(state.name,previous.name)||strcmp(state.key,previous.key);
+    bool connectionChanged=!drawn||state.wifi!=previous.wifi||strcmp(state.debug.phase,previous.debug.phase);
+    bool detailChanged=!drawn||state.battery!=previous.battery||state.signal!=previous.signal||memcmp(&state.debug,&previous.debug,sizeof(state.debug));
+    if(!pageChanged&&!connectionChanged&&(!detailChanged||millis()-refreshCompletedAt<60000))continue;
 #endif
     if(active&&samePage&&!strcmp(state.debug.phase,previous.debug.phase))continue;
     if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
     previous=state;
     refreshes++;
+#ifdef VOXI_BOARD_S3G
+    // All physical four-color updates are full refreshes, even at low frequency.
+    screen.setFullWindow();refreshes=0;screenFullRefreshes++;
+#else
     // Ghosting maintenance waits until idle; never flash a full refresh in speech.
     if(!drawn||(refreshes>=60&&!active)){screen.setFullWindow();refreshes=0;screenFullRefreshes++;}else{screen.setPartialWindow(0,0,200,200);screenPartialRefreshes++;}
+#endif
     drawn=true;screen.firstPage();
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
 #ifdef VOXI_BOARD_S3G
-      screen.fillRect(0,0,200,34,0xffe0);screen.setTextColor(0xf800);screen.setTextSize(2);screen.setCursor(10,10);screen.print("VOXI S3");
-      screen.setTextColor(GxEPD_BLACK);screen.setTextSize(3);screen.setCursor(15,53);screen.printf("CH %02d",state.channel+1);
-      screen.setTextSize(1);screen.setCursor(8,97);
-      if(state.setup){screen.print(state.name);screen.setCursor(8,112);screen.print(state.hotspot?"http://192.168.4.1/":"http://127.0.0.1:8788/");if(state.hotspot){screen.setCursor(8,127);screen.printf("KEY:%s",state.key);}}
-      else{screen.print("Hold BOOT to talk");screen.setCursor(8,112);screen.print("Release to send");}
-      screen.setCursor(8,156);screen.print("Live status: USB web page");screen.setCursor(8,176);screen.print("BOOT + PWR: setup");
-#else
+      screen.fillRect(0,0,200,34,0xffe0);
+#endif
       statusIcons(state);
       screen.setTextSize(1);screen.setCursor(12,41);screen.print("VOXI / AI RADIO");
       if(state.setup){
@@ -139,9 +147,8 @@ static void screenTask(void*){
       for(int i=0;i<3;i++){screen.setCursor(10,158+i*12);screen.print(state.debug.logs[i]);}
       screen.setCursor(10,190);screen.print(state.usb||state.setup?"USB settings + live debug":"Hold BOOT >0.3s to talk");
 
-#endif
     }while(screen.nextPage());
-    screen.powerOff();
+    screen.powerOff();refreshCompletedAt=millis();
   }
 }
 #endif
