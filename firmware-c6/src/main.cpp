@@ -15,6 +15,7 @@
 #include "ble_knob.h"
 #include "ptt_hold.h"
 #include "playback_gate.h"
+#include "playback_envelope.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
@@ -31,8 +32,8 @@ RadioSocket ws;
 String authorizationHeader;
 constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
-static PlaybackGate playbackGate;
-void playbackDiagnostics(JsonDocument& out){out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;}
+static PlaybackGate playbackGate;static size_t fadeRemaining=120;
+void playbackDiagnostics(JsonDocument& out){out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
 volatile bool tx=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -90,7 +91,7 @@ static void networkTask(void*){
   }
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
-void flushAudio(){playbackGate.reset();head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void flushAudio(){playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 void fault(){micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_DISCONNECTED){micBatchUsed=0;if(probeActive||probeFinishing){probeActive=probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
@@ -115,7 +116,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){playbackGate.reset();radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end"){radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static PttHold ptt;
@@ -152,17 +153,18 @@ void encoder(){
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
   if(tx&&samples){if(probeActive)memset(mic,0,samples*2);unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);}
-  // Prime once with 120ms, then continuously drain even below the watermark.
+  // Prime with 200ms (adapt up to 360ms after gaps), then continuously drain even below the watermark.
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
   if(!tx&&playing&&playbackGate.canWrite(used,ending)){
     size_t count=min(used/2,(size_t)240);int16_t mono[240];
-    for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=(int16_t)(lo|(hi<<8));}
+    for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];mono[i]=playbackEnvelope((int16_t)(lo|(hi<<8)),i,fadeRemaining,used/2);}
     size_t written=count?audioWrite(mono,count):0;
-    size_t consumed=written*2;tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;
+    fadeRemaining=written>=fadeRemaining?0:fadeRemaining-written;
+    size_t consumed=written*2;tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;if(used==0)fadeRemaining=120;
     if(ending&&used==0){radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
-  if(playbackGate.rebuffers!=previousRefills)radioDebug("BUFFERING","Audio jitter: refilling");
+  if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
   if(!tx&&playing&&ending&&used==0){playing=ending=thinking=false;radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
   if(millis()-lastReport>100){lastReport=millis();JsonDocument d;d["type"]="played";
     // Approximate DAC position: subtract maximum queued DMA (60 ms).
