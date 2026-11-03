@@ -6,6 +6,9 @@
 
 ## 先看这里
 
+- [换电脑接续／最新开发交接](docs/handoffs/LATEST.md)
+- [脱敏开发对话记录](docs/conversations/README.md)
+
 - [复用已登录的 Pocket Cloud，无需 API Key](docs/POCKET-BACKEND.md)
 - [网页配置与本机烧录](docs/WEB-SETUP.md)：USB 网页设置 Wi-Fi/令牌/根 CA，无需预填 config.h。
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
