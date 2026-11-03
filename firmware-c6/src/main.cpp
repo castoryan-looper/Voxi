@@ -177,14 +177,14 @@ static PttHold ptt;
 void button(){
   if(probeActive||probeFinishing||uploading)return;
   bool down=digitalRead(PIN_PTT)==LOW;
-  if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.5s":"NOT READY",ready?"BOOT down: hold 0.5s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
+  if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
   auto action=ptt.update(millis(),stable,ready&&!thinking&&!playing,digitalRead(2)==LOW);
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
     micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
     flushAudio();
-    // Never include audio from the initial 0.5s hold threshold.
+    // Never include audio from the initial 0.3s hold threshold.
     int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
     tx=true;thinking=false;pressAt=millis();micCueGuard=true;startRadioCue();
     radioDebug("OPEN MIC","TX squelch: mic guard");diagnosticStage("recording");

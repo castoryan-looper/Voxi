@@ -11,7 +11,7 @@ struct PttHold {
     if(!held){held=true;armed=ready&&!cancel;pressed=now;}
     if(cancel||!ready){armed=false;if(active){active=false;return Stop;}return None;}
     if(active&&uint32_t(now-started)>=RECORDING_MAX_MS){active=armed=false;return Stop;}
-    if(armed&&!active&&uint32_t(now-pressed)>=500){active=true;armed=false;started=now;return Start;}
+    if(armed&&!active&&uint32_t(now-pressed)>=300){active=true;armed=false;started=now;return Start;}
     return None;
   }
 };

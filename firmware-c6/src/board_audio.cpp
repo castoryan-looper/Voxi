@@ -23,7 +23,7 @@ static i2s_chan_handle_t output,input;
 static i2c_master_bus_handle_t bus;
 static i2c_master_dev_handle_t expander;
 static esp_codec_dev_handle_t codec;
-static int volumePercent=45;
+static int volumePercent=45;static int codecDacRegister=-1;
 int speakerVolume(){return volumePercent;}
 bool speakerSetVolume(int percent){
   if(percent<0||percent>100)return false;Preferences p;if(!p.begin("voxi-audio",false))return false;
@@ -104,7 +104,7 @@ static void screenTask(void*){
       screen.setTextSize(1);screen.setCursor(10,133);screen.printf("MIC:%luK TX:%luK RX:%luK",(unsigned long)(state.debug.micBytes/1024),(unsigned long)(state.debug.txBytes/1024),(unsigned long)(state.debug.rxBytes/1024));
       screen.setCursor(10,145);screen.printf("REC:%lu.%lus PEAK:%u",(unsigned long)(state.debug.micBytes/48000),(unsigned long)(state.debug.micBytes/4800%10),state.debug.peak);
       for(int i=0;i<3;i++){screen.setCursor(10,158+i*12);screen.print(state.debug.logs[i]);}
-      screen.setCursor(10,190);screen.print(state.usb||state.setup?"USB settings + live debug":"Hold BOOT >0.5s to talk");
+      screen.setCursor(10,190);screen.print(state.usb||state.setup?"USB settings + live debug":"Hold BOOT >0.3s to talk");
 
     }while(screen.nextPage());
     screen.powerOff();
@@ -174,7 +174,12 @@ void boardInit(){
   codec=esp_codec_dev_new(&dev);assert(codec);
   esp_codec_dev_sample_info_t fs={};fs.sample_rate=24000;fs.channel=2;fs.bits_per_sample=16;
   ESP_ERROR_CHECK(esp_codec_dev_open(codec,&fs));
+  // Use the codec DAC volume curve for +6dB versus the previous output setting.
+  esp_codec_dev_vol_map_t points[]={{0,-50.0f},{100,6.0f}};
+  esp_codec_dev_vol_curve_t curve={points,2};
+  ESP_ERROR_CHECK(esp_codec_dev_set_vol_curve(codec,&curve));
   ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(codec,100));
+  ESP_ERROR_CHECK(esp_codec_dev_read_reg(codec,0x32,&codecDacRegister));
   ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(codec,MICROPHONE_GAIN_DB));
   ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(codec,false));
   audioFlush();expWrite(1,0x2B); // enable amplifier after clocks/codec are stable
@@ -202,7 +207,7 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["speakerBoostDb"]=18;out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["codecDacRegister"]=codecDacRegister;out["codecExtraGainDb"]=6;out["pttHoldMs"]=300;out["speakerBoostDb"]=18;out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
   for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=speakerSample(mono[i],volumePercent);
