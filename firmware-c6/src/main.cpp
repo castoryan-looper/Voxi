@@ -46,8 +46,9 @@ constexpr size_t CAP=96000; // 2s jitter buffer; 1.7s maximum prime + 220ms cue 
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
+static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
 static PlaybackGate playbackGate;static size_t fadeRemaining=120;
-void playbackDiagnostics(JsonDocument& out){out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
+void playbackDiagnostics(JsonDocument& out){out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -189,6 +190,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
     if(len%2||len>CAP-used){diagnosticError(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%2?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
+    replyRxCrc=esp_rom_crc32_le(replyRxCrc,data,len);replyRxBytes+=len;
     for(size_t i=0;i<len;i++){playback[head]=data[i];head=(head+1)%CAP;}used+=len;playbackPeakBytes=max(playbackPeakBytes,used);return;
   }
   if(t!=WStype_TEXT)return;
@@ -210,7 +212,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static bool startCachedUpload(bool test){
@@ -302,11 +304,15 @@ void audioTick(){
     if(!written)break; // DMA full: retry next loop without consuming any PCM.
     if(written&&!turnTiming.voice)turnTiming.voice=millis();
     fadeRemaining=written>=fadeRemaining?0:fadeRemaining-written;
-    size_t consumed=written*2;tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;if(used==0)fadeRemaining=120;
-    if(ending&&used==0){turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
+    size_t consumed=written*2;
+    size_t first=min(consumed,CAP-tail);replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback+tail,first);
+    if(first<consumed)replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback,consumed-first);
+    replyConsumedBytes+=consumed;
+    tail=(tail+consumed)%CAP;used-=consumed;played+=consumed/2;if(used==0)fadeRemaining=120;
+    if(ending&&used==0){replyIntegrityComplete=true;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
   if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
-  if(!tx&&playing&&ending&&used==0){playing=ending=thinking=false;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
+  if(!tx&&playing&&ending&&used==0){replyIntegrityComplete=true;playing=ending=thinking=false;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
   if(millis()-lastReport>250){lastReport=millis();JsonDocument d;d["type"]="played";
     // Approximate DAC position: subtract maximum queued DMA (60 ms).
     static uint32_t lastReported=UINT32_MAX;
