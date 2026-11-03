@@ -24,7 +24,10 @@ static esp_codec_dev_handle_t codec;
 static const audio_codec_ctrl_if_t* codecControl;
 static esp_err_t codecWrite(uint8_t reg,uint8_t value){return codecControl->write_reg(codecControl,reg,1,&value,1);}
 static int volumePercent=45,batteryMv=-1,batteryLevel=-1;
-static bool displayReady=false,talkLatched=false,wasRecording=false;
+static bool displayReady=false;
+static MiniCamTalkLatch talk;
+static int mainRaw=1,volumeKeyMv=0;
+static uint32_t mainClicks=0;
 static volatile bool standbyRequested=false,standbyDisplayReady=false;
 static volatile uint32_t displayFrames=0;
 int speakerVolume(){return volumePercent;}
@@ -32,7 +35,7 @@ bool speakerSetVolume(int value){if(value<0||value>100)return false;Preferences 
 int batteryPercent(){return batteryLevel;}
 int batteryMillivolts(){return batteryMv;}
 bool boardPowerPressed(){return false;}
-bool boardTouchPttPressed(){return talkLatched;}
+bool boardTouchPttPressed(){return talk.pressed();}
 bool boardTouchActive(){return false;}
 int boardTouchWakePin(){return -1;}
 struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
@@ -51,14 +54,17 @@ static void postView(){if(!views)return;View s=baseView;s.debug=radioDebugRead()
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
-  auto action=controls.sample(now,analogReadMilliVolts(9),digitalRead(BOARD_BOOT_KEY)==LOW);
-  if(standbySuppressInput()){controls=MiniCamControls();action={};talkLatched=false;}
+  mainRaw=digitalRead(BOARD_BOOT_KEY);volumeKeyMv=analogReadMilliVolts(9);
+  auto action=controls.sample(now,volumeKeyMv,mainRaw==LOW);
+  if(standbySuppressInput()){controls=MiniCamControls();action={};talk.reset();}
+  bool canStart=radioCanStartRecording();talk.observe(now,radioRecordingActive(),canStart);
   if(action.volumeDelta){standbyActivity();speakerSetVolume(constrain(volumePercent+action.volumeDelta,0,100));postView();}
-  if(action.nextChannel)requestChannelDelta(1);
-  auto debug=radioDebugRead();bool recording=!strcmp(debug.phase,"RECORDING");
-  if(wasRecording&&!recording)talkLatched=false;
-  if(action.toggleTalk){if(talkLatched)talkLatched=false;else if(!strcmp(debug.phase,"READY"))talkLatched=true;standbyActivity();}
-  wasRecording=recording;
+  if(action.channelDelta){standbyActivity();requestChannelDelta(action.channelDelta);}
+  if(action.toggleTalk){
+   mainClicks++;standbyActivity();
+   if(talk.pressed()||canStart)talk.click(now,canStart);
+   else radioDebug("WAIT AI","Talk blocked: wait for READY");
+  }
  }
  if(!batteryAt||now-batteryAt>10000){batteryAt=now;int mv=analogReadMilliVolts(3),ref=analogReadMilliVolts(4);batteryMv=ref>2300?mv*2:ref>500?mv*2540/ref:-1;batteryLevel=batteryMv>0?constrain((batteryMv-3400)*100/800,0,100):-1;}
 }
@@ -80,8 +86,8 @@ static void screenTask(void*){
   canvas.setCursor(12,181);canvas.printf("VOL %d%%   BAT %d%%",s.volume,s.battery);
   for(int i=0;i<3;i++){canvas.setCursor(12,200+i*15);canvas.print(s.debug.logs[i]);}
   canvas.setCursor(12,253);canvas.print(s.setup?(s.hotspot?s.name:"USB SETUP: 127.0.0.1:8788"):"Click: record / click: send");
-  canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Double click: next channel");
-  canvas.setCursor(12,290);canvas.print("Side buttons: volume - / +");
+  canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Hold +/-: channel +/-");
+  canvas.setCursor(12,290);canvas.print("Tap +/-: volume - / +");
   canvas.flush();displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
 }
@@ -143,7 +149,7 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=talk.pressed();out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);

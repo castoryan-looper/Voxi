@@ -19,3 +19,6 @@ void radioTransportDiagnostics(JsonDocument& out);
 
 void requestSetupScreen();
 void requestChannelDelta(int delta);
+
+bool radioCanStartRecording();
+bool radioRecordingActive();

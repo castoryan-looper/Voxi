@@ -279,6 +279,8 @@ static void cachedUploadTick(){
     }
   }
 }
+bool radioCanStartRecording(){return ready&&!tx&&!uploading&&!thinking&&!playing&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
+bool radioRecordingActive(){return tx;}
 static PttHold ptt;
 void button(){
   if(standbySuppressInput())return;
