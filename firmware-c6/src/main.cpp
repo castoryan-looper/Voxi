@@ -1,3 +1,4 @@
+#include "board_profile.h"
 #include <Arduino.h>
 // USB status serialization and audio/file bookkeeping share the Arduino task.
 SET_LOOP_TASK_STACK_SIZE(16384);
@@ -23,6 +24,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include <errno.h>
 #include "radio_squelch.h"
 #include <esp_rom_crc.h>
+#include <esp_heap_caps.h>
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
@@ -42,13 +44,19 @@ public:
 };
 RadioSocket ws;
 String authorizationHeader;
-constexpr size_t CAP=96000; // 2s jitter buffer; 1.7s maximum prime + 220ms cue fit
-uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
+#ifdef VOXI_BOARD_S3G
+constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not internal DMA RAM.
+static uint8_t* playback=nullptr;
+#else
+constexpr size_t CAP=96000;
+static uint8_t playback[CAP];
+#endif
+size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
 static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
 static PlaybackGate playbackGate;static size_t fadeRemaining=120;
-void playbackDiagnostics(JsonDocument& out){out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
+void playbackDiagnostics(JsonDocument& out){out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -247,7 +255,7 @@ void button(){
   bool down=digitalRead(PIN_PTT)==LOW;
   if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
-  auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,digitalRead(2)==LOW);
+  auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,digitalRead(BOARD_POWER_KEY)==LOW);
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
     uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
@@ -322,14 +330,23 @@ void audioTick(){
 }
 void setup(){
   Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
-  pinMode(2,INPUT_PULLUP);
+  pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
   encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
   diagnosticsBegin();boardInit();audioCacheInit();setupBegin();
+#ifdef VOXI_BOARD_S3G
+  playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  if(!playback){diagnosticError("S3G PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
+#endif
   if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
-  if(!incoming||!outgoing||xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr)!=pdPASS){diagnosticError("network task allocation failed");radioConfig.valid=false;}
+#ifdef VOXI_BOARD_S3G
+  BaseType_t networkStarted=incoming&&outgoing?xTaskCreatePinnedToCore(networkTask,"radio-network",12288,nullptr,2,nullptr,0):pdFAIL;
+#else
+  BaseType_t networkStarted=incoming&&outgoing?xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr):pdFAIL;
+#endif
+  if(networkStarted!=pdPASS){diagnosticError("network task allocation failed");radioConfig.valid=false;}
 
 }
 void loop(){

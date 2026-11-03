@@ -1,3 +1,4 @@
+#include "board_profile.h"
 #include "board_audio.h"
 #include "diagnostics.h"
 #include "output_gain.h"
@@ -15,7 +16,11 @@
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
 #if ENABLE_EPAPER
+#ifdef VOXI_BOARD_S3G
+#include <s3g_screen.h>
+#else
 #include <GxEPD2_BW.h>
+#endif
 #include <SPI.h>
 #endif
 
@@ -39,7 +44,7 @@ void boardStatusTick(){
   if(last&&millis()-last<30000)return;
   last=millis();uint32_t total=0;
   // Board ADC channel 0 / GPIO0, calibrated millivolts, 1:2 divider.
-  for(int i=0;i<16;i++)total+=analogReadMilliVolts(0);
+  for(int i=0;i<16;i++)total+=analogReadMilliVolts(BOARD_BAT_ADC);
   int mv=(total/16)*2;
   if(mv<2800||mv>4500){batteryMv=batteryLevel=-1;return;}
   batteryMv=mv;
@@ -50,7 +55,11 @@ void boardStatusTick(){
 
 static volatile uint32_t screenFullRefreshes=0,screenPartialRefreshes=0;
 #if ENABLE_EPAPER
+#ifdef VOXI_BOARD_S3G
+static S3GScreen screen;
+#else
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
+#endif
 struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};RadioDebugSnapshot debug;};
 static QueueHandle_t screenQueue;
 static ScreenState screenBase;
@@ -74,8 +83,10 @@ static void statusIcons(const ScreenState& state){
 }
 
 static void screenTask(void*){
+#ifndef VOXI_BOARD_S3G
   pinMode(7,OUTPUT);pinMode(11,OUTPUT);pinMode(15,OUTPUT);
   SPI.begin(6,4,5,7);
+#endif
   screen.init(0,true,20,false);
   ScreenState state,previous;bool drawn=false;unsigned refreshes=0;
   while(true){
@@ -88,6 +99,11 @@ static void screenTask(void*){
     if(!strcmp(state.debug.phase,"BUFFERING")||!strcmp(state.debug.phase,"DRAINING"))strlcpy(state.debug.phase,"PLAYING",sizeof(state.debug.phase));
     bool active=!strcmp(state.debug.phase,"PLAYING")||!strcmp(state.debug.phase,"RECORDING")||!strcmp(state.debug.phase,"SENDING")||!strcmp(state.debug.phase,"WAIT AI");
     bool samePage=drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key);
+#ifdef VOXI_BOARD_S3G
+    // Four-color refresh takes ~15-20s. Render static navigation, never live phases.
+    if(active)continue;
+    if(drawn&&state.channel==previous.channel&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key))continue;
+#endif
     if(active&&samePage&&!strcmp(state.debug.phase,previous.debug.phase))continue;
     if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
     previous=state;
@@ -97,6 +113,14 @@ static void screenTask(void*){
     drawn=true;screen.firstPage();
     do{
       screen.fillScreen(GxEPD_WHITE);screen.setTextColor(GxEPD_BLACK);screen.setTextSize(2);
+#ifdef VOXI_BOARD_S3G
+      screen.fillRect(0,0,200,34,0xffe0);screen.setTextColor(0xf800);screen.setTextSize(2);screen.setCursor(10,10);screen.print("VOXI S3");
+      screen.setTextColor(GxEPD_BLACK);screen.setTextSize(3);screen.setCursor(15,53);screen.printf("CH %02d",state.channel+1);
+      screen.setTextSize(1);screen.setCursor(8,97);
+      if(state.setup){screen.print(state.name);screen.setCursor(8,112);screen.print(state.hotspot?"http://192.168.4.1/":"http://127.0.0.1:8788/");if(state.hotspot){screen.setCursor(8,127);screen.printf("KEY:%s",state.key);}}
+      else{screen.print("Hold BOOT to talk");screen.setCursor(8,112);screen.print("Release to send");}
+      screen.setCursor(8,156);screen.print("Live status: USB web page");screen.setCursor(8,176);screen.print("BOOT + PWR: setup");
+#else
       statusIcons(state);
       screen.setTextSize(1);screen.setCursor(12,41);screen.print("VOXI / AI RADIO");
       if(state.setup){
@@ -115,6 +139,7 @@ static void screenTask(void*){
       for(int i=0;i<3;i++){screen.setCursor(10,158+i*12);screen.print(state.debug.logs[i]);}
       screen.setCursor(10,190);screen.print(state.usb||state.setup?"USB settings + live debug":"Hold BOOT >0.3s to talk");
 
+#endif
     }while(screen.nextPage());
     screen.powerOff();
   }
@@ -157,22 +182,28 @@ void displayDebugTick(){
 }
 void boardInit(){
   Preferences volumePrefs;if(volumePrefs.begin("voxi-audio",true)){volumePercent=volumePrefs.getUChar("volume",45);volumePrefs.end();}
-  analogReadResolution(12);analogSetPinAttenuation(0,ADC_11db);boardStatusTick();
-  i2c_master_bus_config_t b={};b.i2c_port=I2C_NUM_0;b.sda_io_num=GPIO_NUM_18;b.scl_io_num=GPIO_NUM_8;
+  analogReadResolution(12);analogSetPinAttenuation(BOARD_BAT_ADC,ADC_11db);boardStatusTick();
+  i2c_master_bus_config_t b={};b.i2c_port=I2C_NUM_0;b.sda_io_num=(gpio_num_t)BOARD_I2C_SDA;b.scl_io_num=(gpio_num_t)BOARD_I2C_SCL;
   b.clk_source=I2C_CLK_SRC_DEFAULT;b.glitch_ignore_cnt=7;b.flags.enable_internal_pullup=true;
   ESP_ERROR_CHECK(i2c_new_master_bus(&b,&bus));
+#ifdef VOXI_BOARD_S3G
+  pinMode(17,OUTPUT);digitalWrite(17,HIGH); // battery power latch
+  pinMode(42,OUTPUT);digitalWrite(42,LOW); // audio supply enable is active-low
+  pinMode(46,OUTPUT);digitalWrite(46,LOW); // amplifier muted until codec clocks run
+#else
   i2c_device_config_t e={};e.dev_addr_length=I2C_ADDR_BIT_LEN_7;e.device_address=0x20;e.scl_speed_hz=100000;
   ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&e,&expander));
   // TCA9554: P0 e-paper power, P1 audio power, P3 PA, P5 battery latch.
   // Write outputs before changing direction; preserve other pins as inputs.
   expWrite(1,0x23);expWrite(3,0xD4);delay(30); // PA initially muted
+#endif
   i2s_chan_config_t c=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
   c.dma_desc_num=6;c.dma_frame_num=240;c.auto_clear=true;
   ESP_ERROR_CHECK(i2s_new_channel(&c,&output,&input));
   i2s_std_config_t s={};s.clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(24000);
   s.slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO);
-  s.gpio_cfg.mclk=GPIO_NUM_19;s.gpio_cfg.bclk=GPIO_NUM_21;s.gpio_cfg.ws=GPIO_NUM_22;
-  s.gpio_cfg.dout=GPIO_NUM_23;s.gpio_cfg.din=GPIO_NUM_20;
+  s.gpio_cfg.mclk=(gpio_num_t)BOARD_I2S_MCLK;s.gpio_cfg.bclk=(gpio_num_t)BOARD_I2S_BCLK;s.gpio_cfg.ws=(gpio_num_t)BOARD_I2S_WS;
+  s.gpio_cfg.dout=(gpio_num_t)BOARD_I2S_DOUT;s.gpio_cfg.din=(gpio_num_t)BOARD_I2S_DIN;
   ESP_ERROR_CHECK(i2s_channel_init_std_mode(output,&s));ESP_ERROR_CHECK(i2s_channel_init_std_mode(input,&s));
   audio_codec_i2s_cfg_t data={};data.port=0;data.rx_handle=input;data.tx_handle=output;
   audio_codec_i2c_cfg_t ctrl={};ctrl.port=0;ctrl.addr=ES8311_CODEC_DEFAULT_ADDR;ctrl.bus_handle=bus;
@@ -191,10 +222,19 @@ void boardInit(){
   ESP_ERROR_CHECK(esp_codec_dev_read_reg(codec,0x32,&codecDacRegister));
   ESP_ERROR_CHECK(esp_codec_dev_set_in_gain(codec,MICROPHONE_GAIN_DB));
   ESP_ERROR_CHECK(esp_codec_dev_set_out_mute(codec,false));
-  audioFlush();expWrite(1,0x2B); // enable amplifier after clocks/codec are stable
+  audioFlush();
+#ifdef VOXI_BOARD_S3G
+  digitalWrite(46,HIGH);
+#else
+  expWrite(1,0x2B);
+#endif
 #if ENABLE_EPAPER
   screenQueue=xQueueCreate(1,sizeof(ScreenState));assert(screenQueue);
+#ifdef VOXI_BOARD_S3G
+  xTaskCreatePinnedToCore(screenTask,"epaper",4096,nullptr,1,nullptr,0);
+#else
   xTaskCreate(screenTask,"epaper",4096,nullptr,1,nullptr);
+#endif
 #endif
 }
 void audioFlush(){
@@ -228,7 +268,12 @@ size_t audioWrite(const int16_t* mono,size_t samples){
 }
 void speakerTestRun(){
   testPending=false;radioDebug("SPEAKER TEST","Local test: 2 quiet tones");
-  audioFlush();esp_codec_dev_set_out_mute(codec,false);esp_codec_dev_set_out_vol(codec,100);expWrite(1,0x2B);
+  audioFlush();esp_codec_dev_set_out_mute(codec,false);esp_codec_dev_set_out_vol(codec,100);
+#ifdef VOXI_BOARD_S3G
+  digitalWrite(46,HIGH);
+#else
+  expWrite(1,0x2B);
+#endif
   outputPeak=0;uint32_t start=millis();size_t position=0;
   while(position<18000&&millis()-start<3000){
     int16_t block[240];size_t n=min((size_t)240,18000-position);

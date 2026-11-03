@@ -1,3 +1,4 @@
+#include "board_profile.h"
 #include "runtime_config.h"
 #include "board_audio.h"
 #include "diagnostics.h"
@@ -142,7 +143,7 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
 static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out){
   if(method=="config")fillConfig(out);
   else if(method=="status"){
-    out["firmware"]="voxi-c6-web-5";out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
+    out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
     diagnosticsJson(out);radioTransportDiagnostics(out);speakerDiagnostics(out);playbackDiagnostics(out);profilesJson(out);bleStatus(out);out["batteryPercent"]=batteryPercent();out["batteryMillivolts"]=batteryMillivolts();
@@ -217,7 +218,7 @@ void setupTick(bool busy,bool cloudReady,int channel){
     else{configView=false;displayChannel(currentChannel,cloudNow);}
   }
   if(ap){dns.processNextRequest();web.handleClient();}
-  bool chord=digitalRead(9)==LOW&&digitalRead(2)==LOW;
+  bool chord=digitalRead(BOARD_BOOT_KEY)==LOW&&digitalRead(BOARD_POWER_KEY)==LOW;
   if(chord&&!busy){if(!chordAt)chordAt=millis();if(!chordTriggered&&millis()-chordAt>3000){openSetup();chordTriggered=true;}}
   else{chordAt=0;chordTriggered=false;}
   // Standby remains visible offline; BOOT+PWR or the web button opens setup.

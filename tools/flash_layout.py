@@ -4,7 +4,7 @@ Keep the NVS layout unchanged to preserve Pocket/Voxi settings.
 """
 from pathlib import Path
 Import('env')
-rows=(Path(env['PROJECT_DIR'])/'partitions.csv').read_text().splitlines()
+rows=(Path(env['PROJECT_DIR'])/env.BoardConfig().get('build.partitions','partitions.csv')).read_text().splitlines()
 assert any(row.startswith('factory,app,factory,') for row in rows)
 assert not any(',ota,' in row or ',ota_0,' in row for row in rows if not row.startswith('#'))
 images=[(offset,path) for offset,path in env.get('FLASH_EXTRA_IMAGES',[]) if Path(path).name!='boot_app0.bin']

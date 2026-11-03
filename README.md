@@ -1,6 +1,6 @@
 # Voxi · AI 对讲机
 
-基于 **微雪 ESP32-C6-ePaper-1.54**：按住 BOOT 讲话，松开听 AI；EC11 旋钮切换四个 AI 频道。复用板载麦克风、ES8311、功放与墨水屏，云端语音网关部署在腾讯云 Linux 主机。
+支持 **微雪 ESP32-C6-ePaper-1.54** 与 **ESP32-S3-ePaper-1.54G 四彩屏**：按住 BOOT 讲话，松开听 AI；EC11 旋钮切换四个 AI 频道。复用板载麦克风、ES8311、功放与墨水屏，云端语音网关部署在腾讯云 Linux 主机。
 
 仓库：https://github.com/castoryan-looper/Voxi
 
@@ -9,6 +9,7 @@
 - [复用已登录的 Pocket Cloud，无需 API Key](docs/POCKET-BACKEND.md)
 - [网页配置与本机烧录](docs/WEB-SETUP.md)：USB 网页设置 Wi-Fi/令牌/根 CA，无需预填 config.h。
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
+- [S3G 四彩屏编译与接线](docs/WAVESHARE-S3G.md)：8MB PSRAM、独立构建目标和静态彩屏。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
 - [服务器空间与旧 Codex 处理](docs/SERVER-SPACE.md)
 - [开发计划与验收](docs/PLAN.md)
@@ -18,7 +19,7 @@
 
 | 目录 | 用途 |
 |---|---|
-| firmware-c6/ | 当前微雪 C6 固件，Arduino 3.3.3 / PlatformIO |
+| firmware-c6/ | 共用微雪 C6 / S3G 源码，两个 PlatformIO 构建目标 |
 | firmware/ | 历史 S3 外接音频原型，不能刷到 C6 |
 | gateway/ | Node.js 22+ 流式网关，mock / OpenAI Realtime |
 | deploy/ | Docker Compose、TLS、首次部署、自动拉取与健康检查 |
