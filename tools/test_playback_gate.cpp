@@ -23,4 +23,3 @@ int main(){
  // Short final replies and tails must drain without reaching 1400ms.
  assert(gate.canWrite(480,true));assert(!gate.canWrite(0,true));assert(gate.rebuffers==0);
 }
-
