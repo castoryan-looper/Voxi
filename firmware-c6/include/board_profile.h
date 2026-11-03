@@ -1,5 +1,19 @@
 #pragma once
-#ifdef VOXI_BOARD_S3G
+#if defined(VOXI_BOARD_AMOLED)
+#define BOARD_NAME "waveshare-s3-touch-amoled-1.8-v2"
+#define BOARD_BOOT_KEY 0
+#define BOARD_POWER_KEY -1
+#define BOARD_BAT_ADC -1
+#define BOARD_I2C_SDA 15
+#define BOARD_I2C_SCL 14
+#define BOARD_I2S_MCLK 16
+#define BOARD_I2S_BCLK 9
+#define BOARD_I2S_WS 45
+#define BOARD_I2S_DOUT 8
+#define BOARD_I2S_DIN 10
+#define BOARD_ENCODER_A -1
+#define BOARD_ENCODER_B -1
+#elif defined(VOXI_BOARD_S3G)
 #define BOARD_NAME "waveshare-s3-epaper-1.54g"
 #define BOARD_BOOT_KEY 0
 #define BOARD_POWER_KEY 18

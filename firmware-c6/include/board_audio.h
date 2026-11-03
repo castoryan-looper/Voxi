@@ -23,3 +23,6 @@ void speakerDiagnostics(JsonDocument& out);
 
 bool speakerSetVolume(int percent);
 int speakerVolume();
+
+bool boardPowerPressed();
+bool boardTouchPttPressed();

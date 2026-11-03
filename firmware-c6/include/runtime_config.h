@@ -16,3 +16,6 @@ void playbackDiagnostics(JsonDocument& out);
 void requestUploadTest(bool simulateStall=true,bool allowRecovery=false);
 void requestRadioCueTest();
 void radioTransportDiagnostics(JsonDocument& out);
+
+void requestSetupScreen();
+void requestChannelDelta(int delta);

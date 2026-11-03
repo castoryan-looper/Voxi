@@ -57,6 +57,8 @@ jobs:
       - run: g++ -std=c++17 tools/test_playback_envelope.cpp -o /tmp/voxi-envelope && /tmp/voxi-envelope
       - run: g++ -std=c++17 tools/test_radio_squelch.cpp -o /tmp/voxi-squelch && /tmp/voxi-squelch
       - run: g++ -std=c++17 tools/test_upload_recovery.cpp -o /tmp/voxi-recovery && /tmp/voxi-recovery
+      - run: g++ -std=c++17 tools/test_amoled_controls.cpp -o /tmp/voxi-touch && /tmp/voxi-touch
       - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6 -e waveshare_c6
       - run: pio run --project-dir firmware-c6 -e waveshare_s3g
+      - run: pio run --project-dir firmware-c6 -e waveshare_amoled18_v2

@@ -24,6 +24,8 @@ static bool storageReady=false,ap=false,configView=false,busyNow=false,cloudNow=
 static uint32_t restartAt=0,chordAt=0,attemptAt=0,nextScan=0,scanAt=0,blocked[8]={};
 static int currentChannel=0,attempt=-1;
 static volatile int wifiReason=0;
+static bool touchSetupRequested=false;
+void requestSetupScreen(){touchSetupRequested=true;}
 static String normalCa(String s){s.replace("\\n","\n");s.replace("\r","");s.trim();if(s.length())s+='\n';return s;}
 static bool validCa(const String& s){mbedtls_x509_crt c;mbedtls_x509_crt_init(&c);int ret=mbedtls_x509_crt_parse(&c,(const unsigned char*)s.c_str(),s.length()+1);mbedtls_x509_crt_free(&c);return ret==0;}
 static bool configured(const RadioConfig& c,const KnownWifiSet& k){return k.count&&c.host.length()&&c.token.length()>=16&&(!c.tls||validCa(c.ca));}
@@ -218,7 +220,8 @@ void setupTick(bool busy,bool cloudReady,int channel){
     else{configView=false;displayChannel(currentChannel,cloudNow);}
   }
   if(ap){dns.processNextRequest();web.handleClient();}
-  bool chord=digitalRead(BOARD_BOOT_KEY)==LOW&&digitalRead(BOARD_POWER_KEY)==LOW;
+  if(touchSetupRequested&&!busy){touchSetupRequested=false;openSetup();}
+  bool chord=digitalRead(BOARD_BOOT_KEY)==LOW&&boardPowerPressed();
   if(chord&&!busy){if(!chordAt)chordAt=millis();if(!chordTriggered&&millis()-chordAt>3000){openSetup();chordTriggered=true;}}
   else{chordAt=0;chordTriggered=false;}
   // Standby remains visible offline; BOOT+PWR or the web button opens setup.

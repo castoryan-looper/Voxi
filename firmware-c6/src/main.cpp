@@ -44,7 +44,7 @@ public:
 };
 RadioSocket ws;
 String authorizationHeader;
-#ifdef VOXI_BOARD_S3G
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
 constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not internal DMA RAM.
 static uint8_t* playback=nullptr;
 #else
@@ -252,10 +252,10 @@ static void cachedUploadTick(){
 static PttHold ptt;
 void button(){
   if(probeActive||probeFinishing||(uploading&&!tx))return;
-  bool down=digitalRead(PIN_PTT)==LOW;
+  bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
   if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
-  auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,digitalRead(BOARD_POWER_KEY)==LOW);
+  auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,boardPowerPressed());
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
     uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
@@ -274,10 +274,11 @@ void button(){
   }
 }
 
+void requestChannelDelta(int delta){pendingChannel=(pendingChannel+delta+4)%4;encAt=millis();}
 void encoder(){
   int action=bleAction();if(action&1){pendingChannel=(pendingChannel+1)%4;encAt=millis();}if(action&2){pendingChannel=(pendingChannel+3)%4;encAt=millis();}
   static const int8_t table[]={0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
-  int now=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
+  int now=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):encPrev;
   if(now!=encPrev){encSteps+=table[(encPrev<<2)|now];encPrev=now;
     if(abs(encSteps)>=4){pendingChannel=(pendingChannel+(encSteps>0?1:3))%4;encSteps=0;encAt=millis();}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
@@ -329,19 +330,19 @@ void audioTick(){
     if(ready&&!tx&&!uploading&&!playing&&!cueActive&&played!=lastReported&&sendText(s))lastReported=played;}
 }
 void setup(){
-  Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
-  pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
-  encPrev=(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B);
+  Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
+  if(BOARD_POWER_KEY>=0)pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
+  encPrev=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):0;
   diagnosticsBegin();boardInit();audioCacheInit();setupBegin();
-#ifdef VOXI_BOARD_S3G
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
-  if(!playback){diagnosticError("S3G PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
+  if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
 #endif
   if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",WiFi.status()==WL_CONNECTED,false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
   if(radioConfig.tls)configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
-#ifdef VOXI_BOARD_S3G
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
   BaseType_t networkStarted=incoming&&outgoing?xTaskCreatePinnedToCore(networkTask,"radio-network",12288,nullptr,2,nullptr,0):pdFAIL;
 #else
   BaseType_t networkStarted=incoming&&outgoing?xTaskCreate(networkTask,"radio-network",12288,nullptr,1,nullptr):pdFAIL;

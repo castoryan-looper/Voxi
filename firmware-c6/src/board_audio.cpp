@@ -1,3 +1,4 @@
+#ifndef VOXI_BOARD_AMOLED
 #include "board_profile.h"
 #include "board_audio.h"
 #include "diagnostics.h"
@@ -292,3 +293,7 @@ void speakerTestRun(){
   }
   delay(50);radioDebug(position==18000?"TEST DONE":"TEST ERROR",position==18000?"2 tones written to speaker":"Local tone write timeout");
 }
+
+bool boardPowerPressed(){return digitalRead(BOARD_POWER_KEY)==LOW;}
+bool boardTouchPttPressed(){return false;}
+#endif
