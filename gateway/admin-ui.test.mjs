@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('./admin.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0];
+const source=readFileSync(new URL('./admin.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0].replace('restoreSession();','');
 function page(){
   const nodes=new Map();
   const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;}});return nodes.get(id);};
@@ -12,20 +12,20 @@ function page(){
 const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_rejected',reason:'device_limit',connection:13,maxConnections:2}],maxConnections:2,capacity:4,persistent:true,mode:'pocket'};
 test('admin login renders status and count controls, saves live change and keeps secret out of storage',async()=>{
   const {context,get}=page();const requests=[];
-  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:{maxConnections:3}};};
+  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/login')?{csrf:'session-csrf'}:{maxConnections:3}};};
   get('secret').value='admin-secret';await get('loginForm').onsubmit({preventDefault(){}});
   assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,1);assert.equal(get('devices').children[0].children[0].textContent,'#12');
   assert.match(get('events').children[0].textContent,/数量达到上限/);
   get('limit').value='3';await get('limitForm').onsubmit({preventDefault(){}});
   assert.equal(JSON.parse(requests.find(r=>r.path.endsWith('/limit')).options.body).maxConnections,3);
-  assert.equal(requests[0].options.headers.Authorization,'Bearer admin-secret');
-  get('logout').onclick();assert.equal(get('dashboard').hidden,true);assert.equal(vm.runInContext('token',context),'');
+  assert.equal(requests.find(r=>r.path.endsWith('/status')).options.headers['X-CSRF-Token'],'session-csrf');
+  await get('logout').onclick();assert.equal(get('dashboard').hidden,true);assert.equal(vm.runInContext('token',context),'');
 });
 test('pending status cannot reopen dashboard after logout',async()=>{
-  const {context,get}=page();let resolve;context.fetch=()=>new Promise(r=>resolve=r);
-  get('secret').value='admin-secret';const pending=get('loginForm').onsubmit({preventDefault(){}});
-  get('logout').onclick();resolve({ok:true,json:async()=>status});await pending;
-  assert.equal(get('dashboard').hidden,true);assert.equal(get('login').hidden,false);
+ const {context,get}=page();let resolve;context.fetch=path=>path.endsWith('/logout')?Promise.resolve({ok:true,json:async()=>({ok:true})}):new Promise(r=>resolve=r);
+ vm.runInContext("token='session-csrf'",context);const pending=vm.runInContext('refresh()',context);
+ await get('logout').onclick();resolve({ok:true,json:async()=>status});await pending;
+ assert.equal(get('dashboard').hidden,true);assert.equal(get('login').hidden,false);
 });
 test('save failure remains visible and re-enables button',async()=>{
   const {context,get}=page();context.fetch=async()=>({ok:false,json:async()=>({error:'保存失败，原数量上限保持不变'})});

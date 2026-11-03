@@ -1,7 +1,9 @@
+import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 
-export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration}={}) {
+export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,username,passwordHash,accountFile,secureCookies=true}={}) {
+  const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const valid=n=>Number.isInteger(n)&&n>=1&&n<=capacity;
   if(!valid(initialLimit))throw Error(`MAX_CONNECTIONS must be an integer from 1 to ${capacity}`);
   let limit=initialLimit;
@@ -18,10 +20,20 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
   }
   async function handle(req,res){
     const json=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
-    if(!token)return json(503,{error:'未配置 ADMIN_TOKEN，请先更新部署'});
-    const actual=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+token);
-    if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return json(401,{error:'管理密钥不正确'});
     if(req.headers.origin){let origin;try{origin=new URL(req.headers.origin);}catch{return json(403,{error:'来源不允许'});}if(origin.host!==req.headers.host)return json(403,{error:'来源不允许'});}
+    const authRoute=['/api/admin/login','/api/admin/logout','/api/admin/password','/api/admin/session'].includes(req.url);
+    let body;
+    if(authRoute&&req.method==='POST'){
+      if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
+      let raw='';try{for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2048)return json(413,{error:'请求过大'});}body=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{return json(400,{error:'JSON 无效'});}
+    }
+    if(authRoute)return auth.handle(req,res,json,body);
+    if(auth.enabled){if(!auth.authorize(req))return json(401,{error:'登录已过期，请重新登录'});}
+    else {
+      if(!token)return json(503,{error:'未配置管理员账户，请先更新部署'});
+      const actual=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+token);
+      if(actual.length!==expected.length||!timingSafeEqual(actual,expected))return json(401,{error:'管理密钥不正确'});
+    }
     if(req.method==='GET'&&req.url==='/api/admin/status')return json(200,{...snapshot(),maxConnections:limit,capacity,persistent:Boolean(stateFile),events});
     if(req.method==='GET'&&req.url==='/api/admin/ai'){
       if(!aiConfiguration)return json(409,{error:'当前模式未启用 Pocket AI 配置'});
@@ -29,7 +41,7 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
     }
     if(req.method!=='POST')return json(405,{error:'不支持此请求'});
     if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
-    let body='';
+    body='';
     try{
       for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>131072)return json(413,{error:'请求过大'});}
       body=JSON.parse(body);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();

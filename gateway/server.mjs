@@ -7,7 +7,7 @@ import {attachPocket} from './pocket.mjs';
 import {createAdmin} from './admin.mjs';
 import {pocketSettings} from './pocket-settings.mjs';
 
-export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile}={}) {
+export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
   if(!['mock','openai','pocket'].includes(mode)) throw Error('MODE must be mock, openai or pocket');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
@@ -28,7 +28,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
   const connected=new Map();
-  const admin=createAdmin({token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+  const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
@@ -167,7 +167,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   return {server,wss};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
-  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev',adminToken:process.env.ADMIN_TOKEN,adminStateFile:process.env.ADMIN_STATE_FILE,pocketUrl:process.env.POCKET_URL,pocketToken:process.env.POCKET_DEVICE_TOKEN,pocketCa:process.env.POCKET_CA_FILE?readFileSync(process.env.POCKET_CA_FILE):undefined});
+  const {server,wss}=createGateway({mode:process.env.MODE||'mock',token:process.env.DEVICE_TOKEN,apiKey:process.env.OPENAI_API_KEY,model:process.env.OPENAI_MODEL,voice:process.env.OPENAI_VOICE,maxConnections:Number(process.env.MAX_CONNECTIONS||2),revision:process.env.REVISION||'dev',adminToken:process.env.ADMIN_TOKEN,adminUsername:process.env.ADMIN_USERNAME,adminPasswordHash:process.env.ADMIN_PASSWORD_HASH,adminStateFile:process.env.ADMIN_STATE_FILE,pocketUrl:process.env.POCKET_URL,pocketToken:process.env.POCKET_DEVICE_TOKEN,pocketCa:process.env.POCKET_CA_FILE?readFileSync(process.env.POCKET_CA_FILE):undefined});
   server.listen(Number(process.env.PORT||8787),'0.0.0.0',()=>console.log('Radio gateway listening'));
   process.on('SIGTERM',()=>{
     for(const client of wss.clients)client.close(1012,'Service restarting');

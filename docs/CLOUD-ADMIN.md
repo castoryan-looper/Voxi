@@ -19,12 +19,17 @@ git -c core.hooksPath=/dev/null pull --ff-only
 sudo bash deploy/deploy.sh
 sudo curl --cacert /etc/voxi/tls/ca.crt https://43.160.215.253:9443/healthz
 docker exec codex-pocket-gateway-1 printenv VOXI_MAX_SESSIONS
-docker exec voxi-gateway-1 printenv ADMIN_TOKEN
+docker exec voxi-gateway-1 printenv ADMIN_USERNAME
+docker exec voxi-gateway-1 printenv ADMIN_INITIAL_PASSWORD
 ```
 
-首次新版部署自动生成独立的 64 位随机十六进制管理密钥，保存在 `/etc/voxi/gateway.env` 的 `ADMIN_TOKEN` 中。最后一条命令的输出直接填入管理页，不要贴到聊天或日志。
+首次账户版部署自动创建用户名 `admin` 和随机初始密码。上述最后两条命令分别显示用户名和初始密码，直接填入管理页，不要贴到聊天。登录后可在「管理员账户」修改密码（12–128字符）。
 
-设备令牌无法登录管理页。管理密钥只保存在页面内存，刷新/关闭页面后重新登录；接口要求 Bearer 鉴权并校验浏览器请求来源。不向前端返回设备令牌、Pocket 令牌、账号登录信息或 Wi-Fi 密码。
+账户密码使用带随机盐的scrypt哈希验证。修改后的哈希保存在网关持久卷 `/state/admin.json.account`，部署和重启保留，且优先于环境变量的初始哈希。修改密码后 `ADMIN_INITIAL_PASSWORD` 不再有效，只供首次登录；初始密码位于服务器root可读的 `/etc/voxi/gateway.env`。当前账户用户名可用 `ADMIN_USERNAME` 初始化，页面提供改密码，不提供多管理员管理。
+
+浏览器使用HttpOnly、Secure、SameSite=Strict Cookie，会话最长8小时。刷新页面可恢复会话；退出立即失效，修改密码使全部管理会话失效，网关重启后需重新登录。写操作校验CSRF令牌与请求来源。登录每分钟最多8次失败尝试。账户配置存在时旧ADMIN_TOKEN及设备令牌均无法登录管理接口，现有设备配置不受影响。
+
+忘记修改后的密码时，可在服务器上先备份 `/state/admin.json.account`，再通过服务器维护流程重置账户；不要删除整个持久卷（其中还有设备数量配置）。
 
 若浏览器尚未信任现有私有 CA，请先导入 `/etc/voxi/tls/ca.crt`（仅公钥证书）。这不是公网受信任 CA 证书；本功能沿用现有证书方案。
 
