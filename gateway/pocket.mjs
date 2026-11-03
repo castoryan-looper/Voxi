@@ -63,7 +63,7 @@ export function attachPocket(device,{url,token,ca}) {
     const code=response.statusCode;
     console.error(JSON.stringify({event:'pocket_handshake_failed',status:code}));
     response.resume();upstream.terminate();
-    error(code===401||code===403?'Pocket authentication rejected (HTTP '+code+'); rerun connect-pocket.sh':code===404?'Pocket /voxi endpoint missing (HTTP 404); upgrade Pocket Cloud':'Pocket handshake failed (HTTP '+code+')');
+    error(code===503&&response.headers['x-voxi-rejection']==='session-limit'?'Pocket voice session capacity reached; wait for a free device slot':code===401||code===403?'Pocket authentication rejected (HTTP '+code+'); rerun connect-pocket.sh':code===404?'Pocket /voxi endpoint missing (HTTP 404); upgrade Pocket Cloud':'Pocket handshake failed (HTTP '+code+')');
   });
   upstream.on('error',e=>{
     if(failed)return;

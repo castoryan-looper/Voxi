@@ -34,8 +34,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     });
     device.on('close',(code)=>console.log(JSON.stringify({event:'device_closed',connection,code,inputBytes,origin:device.closeOrigin||'peer_or_transport',...connectionMetrics()})));
 
-    if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.close(1008,'Unauthorized');return;}
-    if([...wss.clients].filter(c=>c.authenticated).length>=maxConnections){device.close(1013,'Device limit reached');return;}
+    if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
+    if([...wss.clients].filter(c=>c.authenticated).length>=maxConnections){device.closeOrigin='device_limit';console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
     device.authenticated=true;
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));

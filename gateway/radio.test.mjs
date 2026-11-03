@@ -70,3 +70,21 @@ test('setup route returns HTML and malformed WebSocket frames do not crash gatew
  assert.equal(await closed,1002);
  const health=await fetch(base+'/healthz');assert.equal(health.status,200);
 });
+
+test('two authenticated devices keep independent channels and a third gets an explicit limit',async t=>{
+ const {server,wss}=createGateway({token:'shared-device-token',maxConnections:2});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
+ const url=`ws://127.0.0.1:${server.address().port}/radio`;
+ const connect=()=>new WebSocket(url,{headers:{Authorization:'Bearer shared-device-token'}});
+ const a=connect(),b=connect(),ma=[],mb=[];
+ a.on('message',(d,binary)=>{if(!binary)ma.push(JSON.parse(d));});b.on('message',(d,binary)=>{if(!binary)mb.push(JSON.parse(d));});
+ const until=async fn=>{const end=Date.now()+2000;while(!fn()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}};
+ await until(()=>ma.some(e=>e.type==='ready')&&mb.some(e=>e.type==='ready'));
+ a.send(JSON.stringify({type:'channel',channel:3}));await until(()=>ma.some(e=>e.type==='ready'&&e.channel===3));
+ assert.equal(mb.filter(e=>e.type==='ready').at(-1).channel,0);
+ const third=connect();let error;
+ third.on('message',(d,binary)=>{if(!binary)error=JSON.parse(d);});
+ const code=await new Promise(r=>third.once('close',r));assert.equal(code,1013);assert.match(error.message,/device limit/i);
+ assert.equal(a.readyState,WebSocket.OPEN);assert.equal(b.readyState,WebSocket.OPEN);
+});
