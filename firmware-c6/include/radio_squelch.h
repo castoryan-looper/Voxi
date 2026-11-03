@@ -3,7 +3,7 @@
 #include <stddef.h>
 // Locally generated band-limited squelch; random-access samples survive partial I2S writes.
 struct RadioSquelch {
-  static constexpr size_t samples=2160; // 90ms, 24kHz mono
+  static constexpr size_t samples=5280; // 220ms, 24kHz mono
   static int noise(uint32_t n,uint32_t seed){
     uint32_t x=n+seed;x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;
     return int(x&2047)-1024;

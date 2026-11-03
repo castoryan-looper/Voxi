@@ -8,7 +8,7 @@ int main(){
    assert(speakerSample((int16_t)n,0)==0);
    assert(speakerSample((int16_t)n,75)==out*75/100);
  }
- assert(speakerSample(1000,100)==4000);
+ assert(speakerSample(1000,100)==8000);
  assert(speakerSample(32767,100)>30000);
  for(int n=0;n<=32767;n++)assert(speakerSample((int16_t)n,100)==-speakerSample((int16_t)-n,100));
 }

@@ -35,10 +35,11 @@ public:
 };
 RadioSocket ws;
 String authorizationHeader;
-constexpr size_t CAP=24000; // half a second; fail closed instead of growing latency
+constexpr size_t CAP=57600; // bounded 1.2s jitter buffer, including squelch pre-roll
 uint8_t playback[CAP]; size_t head=0,tail=0,used=0;
+static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static PlaybackGate playbackGate;static size_t fadeRemaining=120;
-void playbackDiagnostics(JsonDocument& out){out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
+void playbackDiagnostics(JsonDocument& out){out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -125,6 +126,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_CONNECTED){radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
     radioDebugRx(len);
+    if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
     if(len%2||len>CAP-used){Serial.println("Audio overflow");fault();return;}
     for(size_t i=0;i<len;i++){playback[head]=data[i];head=(head+1)%CAP;}used+=len;return;
@@ -144,7 +146,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){lastReplyPacketAt=replyGapMaxMs=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static bool startCachedUpload(bool test){
@@ -220,7 +222,7 @@ void audioTick(){
       radioDebug("SENDING","20s limit: recording stopped");startCachedUpload(probeFinishing);
     }
   }
-  // Prime with 200ms (adapt up to 360ms after gaps), then continuously drain even below the watermark.
+  // Prime with 500ms (adapt up to 800ms after gaps), then continuously drain even below the watermark.
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
   if(!tx&&playing&&!cueActive&&playbackGate.canWrite(used,ending)){
@@ -234,9 +236,12 @@ void audioTick(){
   }
   if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
   if(!tx&&playing&&ending&&used==0){playing=ending=thinking=false;radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
-  if(millis()-lastReport>100){lastReport=millis();JsonDocument d;d["type"]="played";
+  if(millis()-lastReport>250){lastReport=millis();JsonDocument d;d["type"]="played";
     // Approximate DAC position: subtract maximum queued DMA (60 ms).
-    d["ms"]=played>1440?(played-1440)/24:0;String s;serializeJson(d,s);if(ready&&!tx&&!uploading)sendText(s);}
+    static uint32_t lastReported=UINT32_MAX;
+    d["ms"]=played>1440?(played-1440)/24:0;String s;serializeJson(d,s);
+    // A synchronous TLS write must not block incoming speech just to report position.
+    if(ready&&!tx&&!uploading&&!playing&&!cueActive&&played!=lastReported&&sendText(s))lastReported=played;}
 }
 void setup(){
   Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);pinMode(PIN_ENC_A,INPUT_PULLUP);pinMode(PIN_ENC_B,INPUT_PULLUP);
@@ -266,7 +271,7 @@ void loop(){
     else{probeState="failed";diagnosticError("Audio cache start failed");}
   }
   if(probeActive&&millis()-probeAt>30000){diagnosticError("Recording probe capture stalled");fault();}
-  if(cueRequested&&!tx&&!uploading&&!playing&&!thinking){cueRequested=false;flushAudio();startRadioCue();radioDebug("SQUELCH TEST","Local 90ms radio static");}
+  if(cueRequested&&!tx&&!uploading&&!playing&&!thinking){cueRequested=false;flushAudio();startRadioCue();radioDebug("SQUELCH TEST","Local 220ms radio static");}
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=WiFi.status()==WL_CONNECTED;if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":"NO WIFI",wifiNow?"WiFi connected":"WiFi disconnected");}
   if(WiFi.status()!=WL_CONNECTED){if(ready||tx||playing||used)flushAudio();ready=false;tx=false;diagnosticStage("wifi_connecting");}

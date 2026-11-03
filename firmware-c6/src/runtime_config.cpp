@@ -149,7 +149,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   }else if(method=="save")return saveConfig(body,out);
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}requestUploadTest();out["message"]="开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI";}
   else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}
-  else if(method=="squelch_test"){if(busyNow||!radioConfig.valid){out["error"]="请等待设备配置完成且空闲";return 409;}requestRadioCueTest();out["message"]="即将播放90ms无线电开台噪声";}
+  else if(method=="squelch_test"){if(busyNow||!radioConfig.valid){out["error"]="请等待设备配置完成且空闲";return 409;}requestRadioCueTest();out["message"]="即将播放220ms无线电开台噪声";}
   else if(method=="speaker_test"){if(busyNow){out["error"]="请先等待录音或回复结束";return 409;}speakerTestRequest();out["message"]="即将播放两声本地测试音（不经过云端）";}
   else if(method=="storage_test"){
     uint8_t* bytes=(uint8_t*)malloc(5000);bool ok=storageReady&&bytes;
