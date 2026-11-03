@@ -22,4 +22,14 @@ int main(){
  gate.reset();
  // Short final replies and tails must drain without reaching 1400ms.
  assert(gate.canWrite(480,true));assert(!gate.canWrite(0,true));assert(gate.rebuffers==0);
+ // S3 PSRAM profile absorbs the observed 3.05-second delivery gap.
+ PlaybackGate s3(4*48000,8*48000,48000,true);
+ assert(!s3.canWrite(4*48000-1,false));assert(s3.canWrite(4*48000,false));
+ queued=4*48000;
+ for(int i=0;i<305;i++){assert(s3.canWrite(queued,false));queued-=480;}
+ assert(queued>0&&s3.rebuffers==0);
+ assert(!s3.canWrite(0,false));assert(s3.targetBytes==5*48000);
+ s3.reset();assert(s3.targetBytes==5*48000&&s3.rebuffers==0);
+ for(int i=0;i<8;i++){assert(s3.canWrite(s3.targetBytes,false));assert(!s3.canWrite(0,false));}
+ assert(s3.targetBytes==8*48000);s3.reset();assert(s3.canWrite(480,true));
 }

@@ -55,7 +55,14 @@ size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
 static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
-static PlaybackGate playbackGate;static size_t fadeRemaining=120;
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)
+// The measured link has 2–3s gaps. Use PSRAM reserve and keep learned jitter
+// protection across turns rather than resetting to the C6's small watermark.
+static PlaybackGate playbackGate(4*48000,8*48000,48000,true);
+#else
+static PlaybackGate playbackGate;
+#endif
+static size_t fadeRemaining=120;
 void playbackDiagnostics(JsonDocument& out){out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/48;out["playbackPeakMs"]=playbackPeakBytes/48;out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/48;out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/48;}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
@@ -301,7 +308,7 @@ void audioTick(){
       radioDebug("SENDING","20s limit: recording stopped");if(uploading){if(!audioCacheOpenUpload(liveQueuedBytes))fault();}else startCachedUpload(probeFinishing);
     }
   }
-  // Prime with 1400ms (adapt up to 1700ms), then continuously drain below the watermark.
+  // Watermarks apply only when priming/refilling, never to continuous playback.
   if(playing){uint32_t now=millis();if(playbackServiceAt)playbackServiceGapMaxMs=max(playbackServiceGapMaxMs,now-playbackServiceAt);playbackServiceAt=now;}
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;

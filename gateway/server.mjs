@@ -5,6 +5,7 @@ import WebSocket,{WebSocketServer} from 'ws';
 import {channels,instructions,RadioFilter} from './radio.mjs';
 import {attachPocket} from './pocket.mjs';
 import {createAdmin} from './admin.mjs';
+import {pocketSettings} from './pocket-settings.mjs';
 
 export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
@@ -28,6 +29,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   let connectionSequence=0;
   const connected=new Map();
   const admin=createAdmin({token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+    aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
