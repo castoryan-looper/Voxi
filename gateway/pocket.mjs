@@ -5,12 +5,20 @@ import {PcmPacer} from './pcm-pacer.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
-export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24000'}) {
+export function attachPocket(device,{url,token,ca,deviceId,connection,audioFormat='pcm16-24000'}) {
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
     headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
+  let replyNumber=0,reply=null;
+  const finishReply=outcome=>{
+    if(!reply)return;
+    const {lastSourceAt,lastSendAt,startedAt,...metrics}=reply;
+    console.log(JSON.stringify({event:'pocket_downlink',connection,reply:replyNumber,outcome,audioFormat,
+      elapsedMs:Math.round(performance.now()-startedAt),...metrics}));
+    reply=null;
+  };
   const error=message=>{
-    if(failed)return;failed=true;pacer.clear();
+    if(failed)return;failed=true;finishReply("relay_error");pacer.clear();
     console.error(JSON.stringify({event:'pocket_relay_error',reason:message,inputBytes:bytes}));
     if(device.readyState===1){device.closeOrigin='pocket_error';device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
@@ -18,14 +26,24 @@ export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24
   const deliver=(data,binary)=>{
     if(device.readyState!==1)return;
     if(binary&&audioFormat==='mulaw8-24000')data=encodeMulaw(data);
-    if(!binary){const e=JSON.parse(data);if(e.type==='ready'){e.audioFormat=audioFormat;data=JSON.stringify(e);}
+    let eventType;
+    if(!binary){const e=JSON.parse(data);eventType=e.type;if(e.type==='ready'){e.audioFormat=audioFormat;data=JSON.stringify(e);}
       if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
       if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
     }
     device.send(data,{binary});
+    if(binary&&reply){
+      const now=performance.now();
+      if(reply.lastSendAt!==null)reply.maxSendGapMs=Math.max(reply.maxSendGapMs,Math.round(now-reply.lastSendAt));
+      reply.lastSendAt=now;reply.sentBytes+=data.length;
+    }
+    if(eventType==='audio_end')finishReply('complete');
   };
   const pacer=new PcmPacer({send:deliver,fail:error,
-    canSend:()=>device.readyState===1&&device.bufferedAmount<4800});
+    canSend:()=>{
+      if(reply)reply.peakTcpBufferedBytes=Math.max(reply.peakTcpBufferedBytes,device.bufferedAmount);
+      return device.readyState===1&&device.bufferedAmount<4800;
+    }});
   device.downlinkQueuedBytes=()=>pacer.bytes;
   const pacing=setInterval(()=>pacer.tick(),5);
   upstream.on('message',(raw,binary)=>{
@@ -33,15 +51,26 @@ export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24
     if(binary){
       if(!ready||recording)return;
       if(raw.length%2)return error('Pocket returned invalid PCM');
+      if(reply){
+        const now=performance.now();
+        if(reply.lastSourceAt!==null)reply.maxSourceGapMs=Math.max(reply.maxSourceGapMs,Math.round(now-reply.lastSourceAt));
+        reply.lastSourceAt=now;reply.sourcePcmBytes+=raw.length;
+      }
       const pcm=filter.process(raw);
       pacer.audio(pcm);
+      if(reply)reply.peakQueuedPcmBytes=Math.max(reply.peakQueuedPcmBytes,pacer.bytes);
     }else{
       let e;try{e=JSON.parse(raw);}catch{return error('Pocket returned invalid control data');}
       if(!e||typeof e!=='object')return error('Pocket returned invalid event');
       if(e.type==='ready')ready=true;
       if(['connecting','offline','error'].includes(e.type)){ready=false;recording=false;}
       if(e.type==='audio_start'||e.type==='flush')filter=new RadioFilter();
-      if(['flush','connecting','offline','error'].includes(e.type))pacer.clear();
+      if(e.type==='audio_start'){
+        finishReply('replaced');replyNumber++;
+        reply={startedAt:performance.now(),lastSourceAt:null,lastSendAt:null,sourcePcmBytes:0,sentBytes:0,
+          maxSourceGapMs:0,maxSendGapMs:0,peakQueuedPcmBytes:0,peakTcpBufferedBytes:0};
+      }
+      if(['flush','connecting','offline','error'].includes(e.type)){finishReply(e.type);pacer.clear();}
       pacer.control(raw.toString());
     }
   });
@@ -58,7 +87,7 @@ export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24
     if(!e||typeof e!=='object'||Array.isArray(e))return;
     if(e.type==='ptt_down'&&ready){recording=true;bytes=0;device.radioBusy=true;}
     else if(e.type==='ptt_up')recording=false;
-    else if(e.type==='channel'){ready=false;recording=false;pacer.clear();}
+    else if(e.type==='channel'){ready=false;recording=false;finishReply("channel_change");pacer.clear();}
     if(['ptt_down','ptt_up','channel','played'].includes(e.type))upstream.send(JSON.stringify(e));
   });
   upstream.on('unexpected-response',(_,response)=>{
@@ -73,7 +102,7 @@ export function attachPocket(device,{url,token,ca,deviceId,audioFormat='pcm16-24
     console.error(JSON.stringify({event:'pocket_connection_failed',code:labels[e.code]?e.code:'OTHER'}));
     error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
   });
-  upstream.on('close',(code)=>{console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.closeOrigin='pocket_closed';device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
-  device.on('close',()=>{clearInterval(pacing);pacer.clear();upstream.close();});
+  upstream.on('close',(code)=>{finishReply('pocket_closed');console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.closeOrigin='pocket_closed';device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
+  device.on('close',()=>{finishReply('device_closed');clearInterval(pacing);pacer.clear();upstream.close();});
   return upstream;
 }

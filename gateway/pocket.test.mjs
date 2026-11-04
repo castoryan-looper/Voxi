@@ -7,7 +7,8 @@ import {createGateway} from './server.mjs';
 for(const audioFormat of [undefined,'mulaw8-24000'])test('Pocket proxy preserves uplink and negotiated downlink '+(audioFormat||'PCM16'),async t=>{
   const upstream=new WebSocketServer({port:0,host:'127.0.0.1'});
   await new Promise(r=>upstream.once('listening',r));
-  const seen=[];
+  const seen=[];const records=[];
+  t.mock.method(console,'log',line=>records.push(JSON.parse(line)));
   upstream.on('connection',(socket,req)=>{
     assert.equal(req.headers.authorization,'Bearer pocket-only');
     assert.equal(req.headers['x-voxi-device-id'],'esp32-111111111111');
@@ -30,6 +31,9 @@ for(const audioFormat of [undefined,'mulaw8-24000'])test('Pocket proxy preserves
   await until(()=>messages.some(e=>e.type==='ready'));
   device.send(JSON.stringify({type:'ptt_down'}));device.send(Buffer.alloc(5760));device.send(JSON.stringify({type:'ptt_up'}));
   await until(()=>messages.some(e=>e.type==='audio_end'));
+  const downlink=records.find(e=>e.event==='pocket_downlink');
+  assert.equal(downlink.connection,1);assert.equal(downlink.reply,1);assert.equal(downlink.outcome,'complete');
+  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,audioFormat?480:960);
   assert.equal(messages.find(e=>e.type==='ready').audioFormat,audioFormat||'pcm16-24000');assert.equal(pcm,audioFormat?480:960);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
   device.send(JSON.stringify({type:'channel',channel:2}));await until(()=>seen.some(e=>e.channel===2));
   device.close();

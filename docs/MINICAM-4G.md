@@ -44,3 +44,23 @@
 该轮 USB 记录到最大音频接收空档 18095ms、两次重新缓冲，当时恢复门槛已增至 10000ms；DMA 溢出和扬声器写入错误均为 0，音频服务循环最大间隔 82ms。后续还记录到模组 `modem MIPURC disconnect: 1`，设备已自行恢复 READY，该轮回复未完成完整性校验。用户贴出的同一排查时段 Pocket 上游日志无丢包，其中后段会话最大接收间隔仅 223ms；因此继续重点检查网关下行至 4G 设备的传输，仍需用连接/会话与时间戳严格关联，不能宣称已根治。
 
 最新固件已将中途恢复门槛分离为 2 秒，保留下一轮较大起播储备，并修复播放/思考期间无效 PTT 按键误覆盖为 NOT READY、缓冲恢复后不更新 PLAYING 的显示。播放门控与侧键时序测试通过；MiniCam 构建和写入 Hash 校验通过，重启已通过纯 4G、TLS 校验恢复 READY。此版长故事卡顿改善程度与断线情况仍待新一轮实机验收。
+
+## 按轮对照网关与设备收包
+
+复现长回复停顿后，在腾讯云终端查看同一时段的网关记录。
+
+```bash
+docker logs --since=10m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_ptt|pocket_downlink|device_closed|device_heartbeat_timeout'
+```
+
+`pocket_downlink` 每轮在播放流发送完毕或中断时记录一次。用 `connection` 关联 `device_ptt` 和 `device_closed`，用 `reply` 区分同一连接内的多轮回复。记录仅含统计数据。
+
+| 字段 | 用于判断 |
+|---|---|
+| `maxSourceGapMs` | Voxi 从 Pocket 收到相邻 PCM 包的最大间隔 |
+| `maxSendGapMs` | Voxi 向设备 WebSocket 交付相邻音频包的最大间隔 |
+| `peakQueuedPcmBytes` / `peakTcpBufferedBytes` | 网关待发送音频和 WebSocket 发送积压的峰值 |
+| `sourcePcmBytes` / `sentBytes` | 转码前 PCM 与发给设备的字节数。µ-law 在同采样率下约为 PCM16 的一半 |
+| `outcome` | 正常发出 `audio_end` 或中断的位置 |
+
+设备报告长空档而网关两个间隔都短时，优先检查网关到设备之间的链路。网关交付时间只反映本地 WebSocket 发送调用，设备侧 `replyGapMaxMs` 才反映该设备观察到的收包间隔。若网关发送空档很长、上游间隔短，结合两个积压峰值排查网关队列或下游回压。

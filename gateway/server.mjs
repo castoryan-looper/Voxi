@@ -75,7 +75,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
-      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,audioFormat});
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,connection,audioFormat});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }
