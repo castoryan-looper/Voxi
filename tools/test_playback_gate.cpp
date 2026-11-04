@@ -39,4 +39,20 @@ int main(){
  assert(queued>0&&cell.rebuffers==0);
  assert(!cell.canWrite(0,false));assert(cell.targetBytes==8*24000);
  cell.reset();assert(cell.targetBytes==8*24000);assert(cell.canWrite(240,true));
+ // Recovery of a cellular underrun needs only 2s, not another 8--12s
+ // startup reserve. Retain the larger reserve for the next turn.
+ PlaybackGate fastRecovery(6*24000,12*24000,2*24000,true);
+ fastRecovery.resumeBytes=2*24000;
+ assert(!fastRecovery.canWrite(2*24000,false));
+ assert(fastRecovery.canWrite(6*24000,false));
+ assert(!fastRecovery.canWrite(0,false));assert(fastRecovery.rebuffers==1);
+ assert(fastRecovery.targetBytes==8*24000&&fastRecovery.threshold()==2*24000);
+ assert(!fastRecovery.canWrite(2*24000-1,false));
+ assert(fastRecovery.canWrite(2*24000,false));
+ assert(fastRecovery.canWrite(240,false)); // do not gate each following frame
+ assert(!fastRecovery.canWrite(0,false));assert(fastRecovery.rebuffers==2);
+ assert(fastRecovery.canWrite(240,true)); // ended short tail still drains
+ fastRecovery.reset();assert(fastRecovery.threshold()==10*24000);
+ assert(!fastRecovery.canWrite(2*24000,false));
+ assert(fastRecovery.canWrite(10*24000,false));
 }

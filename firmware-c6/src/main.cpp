@@ -268,6 +268,8 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(radioUsesCellular()){
       size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
       if(negotiated!=replyBytesPerSample||playbackGate.initialBytes!=6*24000*negotiated){replyBytesPerSample=negotiated;playbackGate.configure(6*24000*negotiated,12*24000*negotiated,2*24000*negotiated,true);}
+      // A mid-sentence refill must not repeat the growing 6--12s startup reserve.
+      playbackGate.resumeBytes=2*24000*negotiated;
     }
 #endif
 #if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
@@ -329,7 +331,14 @@ void button(){
 #else
   bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
 #endif
-  if(down!=candidate){candidate=down;changedAt=millis();if(down)radioDebug(ready?"HOLD 0.3s":"NOT READY",ready?"BOOT down: hold 0.3s":"BOOT blocked: AI offline");else if(!tx&&ptt.held)radioDebug(ready?"READY":"NOT READY","Short press: no recording");}
+  if(down!=candidate){
+    candidate=down;changedAt=millis();
+    // READY is recording availability, not transport liveness. A blocked key
+    // during a reply must not overwrite PLAYING/BUFFERING with NOT READY.
+    bool busy=tx||playing||thinking||uploading||replyPending;
+    if(down&&!busy)radioDebug(radioCanStartRecording()?"HOLD 0.3s":(gatewayLinked?"WAIT AI":"OFFLINE"),radioCanStartRecording()?"PTT down: hold 0.3s":"PTT blocked: waiting for AI");
+    else if(!down&&!busy&&ptt.held)radioDebug(ready?"READY":(gatewayLinked?"WAIT AI":"OFFLINE"),"Short press: no recording");
+  }
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
   auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,boardPowerPressed());
   if(action==PttHold::Start){
@@ -382,8 +391,10 @@ void audioTick(){
   if(playing){uint32_t now=millis();if(playbackServiceAt)playbackServiceGapMaxMs=max(playbackServiceGapMaxMs,now-playbackServiceAt);playbackServiceAt=now;}
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
+  bool waitingForBuffer=!playbackGate.primed;
   for(int budget=0;budget<6&&!tx&&playing&&!cueActive&&playbackGate.canWrite(used,ending);budget++){
     if(replyCuePending){replyCuePending=false;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
+    if(waitingForBuffer){radioDebug("PLAYING","Audio buffer ready: resumed");waitingForBuffer=false;}
     size_t count=min(used/replyBytesPerSample,(size_t)240);int16_t mono[240];
     for(size_t i=0;i<count;i++){int16_t sample;if(replyBytesPerSample==1)sample=decodeMulaw(playback[(tail+i)%CAP]);else{uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];sample=(int16_t)(lo|(hi<<8));}mono[i]=playbackEnvelope(sample,i,fadeRemaining,used/replyBytesPerSample);}
     size_t written=count?audioWrite(mono,count):0;
