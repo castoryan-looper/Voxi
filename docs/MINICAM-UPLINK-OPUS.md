@@ -1,6 +1,6 @@
-# MiniCam 录音上行 Opus
+# ESP32-S3 录音上行 Opus
 
-MiniCam 的标准音量＋录音和 GPIO11 改装目标支持压缩上行，Wi-Fi/ML307 共用；其他板型继续使用原有 PCM 上行。所有维护板型的回复下行仍统一为 16kbps Opus。
+MiniCam 的标准音量＋录音和 GPIO11 改装目标支持压缩上行，Wi-Fi/ML307 共用；后续也已移植到 S3 AMOLED 和 S3G（宏 `VOXI_OPUS_UPLINK`），两类任务的栈均使用 32KB。C6 暂保留原有 PCM 上行。所有维护板型的回复下行仍统一为 16kbps Opus。
 
 ## 目的与边界
 
@@ -48,7 +48,7 @@ sudo bash deploy/check-uplink.sh
 
 - 网关 55 项测试通过：解码与转发到 Pocket、结束标记顺序、原始时长上限、帧序号、尾帧、非法格式与畸形包拒绝。
 - 真实 S3 编码自检：原始 9600 字节/4800 采样，11 帧共 499 线路字节，网关解码 10560 字节且测试信号能量正常；编码错误 0，最慢帧约 9.067ms。
-- 实机发现 SILK 编码所需栈超过原有任务空间，MiniCam 的 Arduino 和网络任务调整为 32KB 后通过真实编码测试；其他板型栈大小不变。
+- 实机发现 SILK 编码所需栈超过原有任务空间，MiniCam 的 Arduino 和网络任务调整为 32KB 后通过真实编码测试；后续 AMOLED/S3G 上行适配也使用同一栈配置，C6 栈大小不变。
 - 全部五个维护目标最终构建通过；最终标准 MiniCam 固件已烧录，Hash 校验通过。最终芯片自检最慢帧 9.227ms，尾帧 RMS 5604，确认尾部延迟音频排出。
 - 用户已部署 `595bf72274fadabeaed02a123b5d77292f342a02`，`check-uplink.sh` 通过；USB 确认 `uplinkOpusReady:true`、READY。自检时可用内部堆约 39KB、最低约 27KB。
 - 云端正式部署后的真实麦克风长故事、丢网补传、实际耗电仍需现场验证，不能把合成自检当作已根治 offline。已启动真实对话采集；新诊断曾保留一条 `4G heartbeat timeout (0)`，不能仅凭这条历史记录解释此前所有中断。

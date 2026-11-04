@@ -31,7 +31,7 @@ static uint32_t restartAt=0,chordAt=0,attemptAt=0,nextScan=0,scanAt=0,blocked[8]
 static int currentChannel=0,attempt=-1;
 static volatile int wifiReason=0;
 static bool touchSetupRequested=false;
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
 static JsonArray uplinkProbePackets;
 static bool uplinkProbeSend(const uint8_t* bytes,size_t n){String hex;hex.reserve(n*2);const char digits[]="0123456789abcdef";for(size_t i=0;i<n;i++){hex+=digits[bytes[i]>>4];hex+=digits[bytes[i]&15];}return uplinkProbePackets.add(hex);}
 #endif
@@ -211,7 +211,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   }
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
   else if(method=="uplink_probe"){
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
     if(busyNow||!cloudNow){out["error"]="Wait for idle READY";return 409;}
     uplinkProbePackets=out["packets"].to<JsonArray>();bool ok=opusUplinkReset();
     int16_t pcm[480];for(int frame=0;frame<10&&ok;frame++){for(int i=0;i<480;i++)pcm[i]=((frame*480+i)/24)%2?10000:-10000;ok=opusUplinkAudio(reinterpret_cast<uint8_t*>(pcm),sizeof(pcm),uplinkProbeSend);}

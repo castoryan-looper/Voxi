@@ -16,6 +16,11 @@ int main(){
  h.reset(0);
  for(uint32_t now=1000;now<=120000;now+=1000){h.received(now);assert(h.tick(now)==(now%15000==0?CellularHeartbeat::Ping:CellularHeartbeat::None));}
  h.configure(15000,3000,2,0);assert(h.tick(15000)==CellularHeartbeat::Ping);assert(h.tick(29999)==CellularHeartbeat::None);assert(h.tick(30000)==CellularHeartbeat::Ping);assert(h.tick(45000)==CellularHeartbeat::Dead);
- h.configure(0,3000,2,0);assert(h.tick(100000)==CellularHeartbeat::None);
+  h.configure(15000,3000,2,0);
+  // Wi-Fi uses this same policy: valid speech/control frames prove liveness,
+  // even when a Pong is delayed behind TCP retransmissions for over 3 seconds.
+  for(uint32_t now=0;now<=120000;now+=1000){if(now%9000==0)h.received(now);assert(h.tick(now)!=CellularHeartbeat::Dead);}
+  h.reset(0);assert(h.tick(15000)==CellularHeartbeat::Ping);assert(h.tick(30000)==CellularHeartbeat::Ping);assert(h.tick(45000)==CellularHeartbeat::Dead);
+  h.configure(0,3000,2,0);assert(h.tick(100000)==CellularHeartbeat::None);
 }
 

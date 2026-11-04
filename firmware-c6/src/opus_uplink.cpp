@@ -1,5 +1,5 @@
 #include "opus_uplink.h"
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
 #include <esp_opus_enc.h>
 #include <esp_timer.h>
 #include <string.h>

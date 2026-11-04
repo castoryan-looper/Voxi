@@ -17,7 +17,8 @@
 - [统一 Opus 下行](docs/MINICAM-OPUS.md)：所有维护板型、Wi-Fi/4G 均为 16kbps Opus，不再回退旧下行格式；更新网关时需同步更新各设备固件。
 - [MiniCam 分级待机](docs/MINICAM-STANDBY.md)：1 分钟关屏保连接、5 分钟释放云端会话、15 分钟休眠，USB 页面可调整。
 - [MiniCam 暗色界面](docs/MINICAM-UI.md)：Wi-Fi / 4G / USB 状态图标、大号频道与对讲状态，屏幕不再显示调试日志。
-- [MiniCam 录音上行 Opus](docs/MINICAM-UPLINK-OPUS.md)：16kbps 压缩录音上传、合包发送和首次补传提速，需配套更新 Voxi 网关。
+- [S3 录音上行 Opus](docs/MINICAM-UPLINK-OPUS.md)：MiniCam / AMOLED / S3G 的 16kbps 压缩录音上传、合包发送和首次补传提速，需网关支持（当前已部署）。
+- [Wi-Fi 心跳修正](docs/WIFI-HEARTBEAT.md)：避免只等 3 秒 Pong 而在音频仍到达时提前断开，保留有界失联检测。
 - [AMOLED 1.8 V2 支持](docs/WAVESHARE-AMOLED18-V2.md)：实时状态、触摸对讲、CO5300/CST820。
 - [S3G 四彩屏编译与接线](docs/WAVESHARE-S3G.md)：8MB PSRAM、独立构建目标和静态彩屏。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。

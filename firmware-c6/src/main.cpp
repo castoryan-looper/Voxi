@@ -1,8 +1,9 @@
 #include "board_profile.h"
+#include "opus_uplink.h"
 #include "standby.h"
 #include <Arduino.h>
 // USB status serialization and audio/file bookkeeping share the Arduino task.
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
 SET_LOOP_TASK_STACK_SIZE(32768);
 #else
 SET_LOOP_TASK_STACK_SIZE(16384);
@@ -24,7 +25,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "cellular_socket.h"
 #endif
 #include "opus_reply.h"
-#include "opus_uplink.h"
+#include "cellular_protocol.h"
 #include "diagnostics.h"
 #include "ble_knob.h"
 #include "ptt_hold.h"
@@ -41,6 +42,9 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
 class RadioSocket:public WebSocketsClient{
+  CellularHeartbeat wifiHeartbeat;
+  bool wifiWasConnected=false;
+  String wifiFailure;
 #ifdef VOXI_BOARD_MINICAM
   CellularSocket cell;
 #endif
@@ -51,20 +55,52 @@ public:
   void setExtraHeaders(const char* h){if(radioUsesCellular())cell.setExtraHeaders(h);else WebSocketsClient::setExtraHeaders(h);}
   void onEvent(WebSocketClientEvent f){if(radioUsesCellular())cell.onEvent(f);else WebSocketsClient::onEvent(f);}
   void setReconnectInterval(uint32_t n){if(radioUsesCellular())cell.setReconnectInterval(n);else WebSocketsClient::setReconnectInterval(n);}
-  void enableHeartbeat(uint32_t i,uint32_t t,uint8_t n){if(radioUsesCellular())cell.enableHeartbeat(i,t,n);else WebSocketsClient::enableHeartbeat(i,t,n);}
-  void disableHeartbeat(){if(radioUsesCellular())cell.disableHeartbeat();else WebSocketsClient::disableHeartbeat();}
   void disconnect(){if(radioUsesCellular())cell.disconnect();else WebSocketsClient::disconnect();}
   bool isConnected(){return radioUsesCellular()?cell.isConnected():WebSocketsClient::isConnected();}
-  void loop(){if(radioUsesCellular())cell.loop();else WebSocketsClient::loop();}
   bool sendTXT(uint8_t* p,size_t n){return radioUsesCellular()?cell.sendTXT(p,n):WebSocketsClient::sendTXT(p,n);}
-  String lastLinkFailure(){return radioUsesCellular()&&cell.lastFailure().length()?cell.lastFailure():String("Gateway disconnected during reply");}
   void linkDiagnostics(JsonDocument& out){out["cellularLinkFailure"]=cell.lastFailure();out["cellularLinkFailureAtMs"]=cell.lastFailureTime();out["cellularRemoteCloseCode"]=cell.lastRemoteCloseCode();}
 #endif
+  void enableHeartbeat(uint32_t i,uint32_t t,uint8_t n){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){cell.enableHeartbeat(i,t,n);return;}
+#endif
+    WebSocketsClient::disableHeartbeat();wifiHeartbeat.configure(i,t,n,millis());
+  }
+  void disableHeartbeat(){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){cell.disableHeartbeat();return;}
+#endif
+    WebSocketsClient::disableHeartbeat();wifiHeartbeat.configure(0,15000,2,millis());
+  }
+  void peerActivity(){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular())return;
+#endif
+    wifiHeartbeat.received(millis());
+  }
+  void connectionChanged(){wifiWasConnected=false;wifiHeartbeat.reset(millis());}
+  String lastLinkFailure(){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular())return cell.lastFailure().length()?cell.lastFailure():String("Gateway disconnected during reply");
+#endif
+    return wifiFailure.length()?wifiFailure:String("Gateway disconnected during reply");
+  }
+  void loop(){
+#ifdef VOXI_BOARD_MINICAM
+    if(radioUsesCellular()){cell.loop();return;}
+#endif
+    WebSocketsClient::loop();
+    if(!WebSocketsClient::isConnected()){wifiWasConnected=false;return;}
+    if(!wifiWasConnected){wifiWasConnected=true;wifiFailure="";wifiHeartbeat.reset(millis());}
+    auto action=wifiHeartbeat.tick(millis());
+    if(action==CellularHeartbeat::Dead){wifiFailure="WiFi WebSocket heartbeat timeout";diagnosticError(wifiFailure.c_str());WebSocketsClient::disconnect();}
+    else if(action==CellularHeartbeat::Ping&&!WebSocketsClient::sendPing()){wifiFailure="WiFi WebSocket Ping write failed";diagnosticError(wifiFailure.c_str());WebSocketsClient::disconnect();}
+  }
   void resumeHeartbeat(){
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular()){cell.resumeHeartbeat();return;}
 #endif
-    enableHeartbeat(15000,3000,2);_client.lastPing=millis();_client.pongReceived=true;_client.pongTimeoutCount=0;}
+    enableHeartbeat(15000,15000,2);}
   bool sendPcm(const uint8_t* data,size_t len){
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular())return cell.sendPcm(data,len);
@@ -84,7 +120,7 @@ public:
   }
 };
 RadioSocket ws;
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
 static bool uplinkOpusReady=false;
 #endif
 String authorizationHeader;
@@ -115,10 +151,12 @@ static PlaybackGate playbackGate;
 static size_t fadeRemaining=120;
 void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 void opusDiagnostics(JsonDocument& out){
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
  out["opusUplinkFrames"]=opusUplinkFrames;out["opusUplinkErrors"]=opusUplinkErrors;out["opusUplinkMaxUs"]=opusUplinkMaxUs;out["opusUplinkWireBytes"]=opusUplinkWireBytes;
- ws.linkDiagnostics(out);
  out["uplinkOpusReady"]=uplinkOpusReady;
+#endif
+#ifdef VOXI_BOARD_MINICAM
+ ws.linkDiagnostics(out);
 #endif
  out["replyTransportFormat"]=replyFormat();out["replyCodecConfirmed"]=replyCodecReady;out["replyWireBytesPerSecond"]=replyAudioBitrate/8+200;
  out["replyWireReceivedBytes"]=replyWireBytes;out["replyAudioBitrate"]=replyAudioBitrate;
@@ -209,6 +247,8 @@ static void batchAudio(uint8_t* bytes,size_t n){
   while(n&&!queueFault){size_t count=min(n,sizeof(micBatch)-micBatchUsed);memcpy(micBatch+micBatchUsed,bytes,count);micBatchUsed+=count;bytes+=count;n-=count;if(micBatchUsed==sizeof(micBatch))flushMicBatch();}
 }
 static void socketEvent(WStype_t type,uint8_t* data,size_t len){
+  if(type==WStype_CONNECTED||type==WStype_DISCONNECTED)ws.connectionChanged();
+  if(type==WStype_TEXT||type==WStype_BIN||type==WStype_PING||type==WStype_PONG)ws.peerActivity();
   if(type==WStype_PING){wsPings++;wsPingAt=millis();return;}
   if(type==WStype_PONG){wsPongs++;wsPongAt=millis();return;}
   if(type==WStype_DISCONNECTED)wsDisconnectedAt=millis();
@@ -224,7 +264,7 @@ static void networkTask(void*){
   authorizationHeader+="\r\nX-Voxi-Audio-Format: opus-24000-v1\r\nX-Voxi-Downlink-Codecs: opus-24000-v1";
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false,wasWarm=false;
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
   bool encodedUpload=false;
   auto sendOpus=[](const uint8_t* data,size_t len){return ws.sendPcm(data,len);};
 #endif
@@ -246,20 +286,20 @@ static void networkTask(void*){
         networkBusy=true;uint32_t sendAt=millis();
         bool sent=true;
         if(p.type==WStype_TEXT){String c((const char*)p.data,p.len);
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
           if(c.indexOf("ptt_down")>=0){encodedUpload=c.indexOf("opus-24000-uplink-v1")>=0;if(encodedUpload&&!opusUplinkReset()){networkBusy=false;networkFault("Opus microphone encoder initialization failed");break;}}
           if(c.indexOf("ptt_up")>=0&&encodedUpload)sent=opusUplinkFinish(sendOpus);
 #endif
           if(sent){if(c.indexOf("ptt_up")>=0)submissionAttempted=true;sent=ws.sendTXT(p.data,p.len);}
         }else{
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
           if(encodedUpload)sent=opusUplinkAudio(p.data,p.len,sendOpus);else
 #endif
           sent=ws.sendPcm(p.data,p.len);
         }
         networkSendMaxMs=max((uint32_t)networkSendMaxMs,millis()-sendAt);
         if(!sent){networkBusy=false;
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
           if(encodedUpload&&opusUplinkErrors){networkFault("Opus microphone encoding failed");break;}
 #endif
           socketWriteFault(p.type==WStype_BIN,p.len,millis()-sendAt);pumpSocket();break;}
@@ -298,9 +338,10 @@ static bool deferUploadRecovery(){
 }
 void fault(){if(retryableWriteFailure){retryableWriteFailure=false;if(deferUploadRecovery())return;}uploadRecovery.pending=false;replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-#ifdef VOXI_BOARD_MINICAM
-  if(t==WStype_DISCONNECTED){uplinkOpusReady=false;if(playing||thinking||replyPending)diagnosticTurnFailure(ws.lastLinkFailure().c_str());}
+#ifdef VOXI_OPUS_UPLINK
+  if(t==WStype_DISCONNECTED)uplinkOpusReady=false;
 #endif
+  if(t==WStype_DISCONNECTED&&(playing||thinking||replyPending))diagnosticTurnFailure(ws.lastLinkFailure().c_str());
   if(t==WStype_DISCONNECTED)replyCodecReady=false;
   if(t==WStype_DISCONNECTED){gatewayLinked=false;if(deferUploadRecovery())return;if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){replyCodecReady=false;radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
@@ -321,7 +362,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   String type=d["type"]|"";
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
     uplinkOpusReady=String(d["uplinkFormat"]|"")=="opus-24000-uplink-v1";
 #endif
     if(String(d["audioFormat"]|"")!="opus-24000-v1"){
@@ -358,7 +399,7 @@ static bool startCachedUpload(bool test){
   uploading=true;ready=false;thinking=false;uploadBlockUsed=0;uploadEof=false;submitQueued=false;submitSent=false;uploadAt=uploadProgressAt=millis();turnTiming.upload=uploadAt;uploadProgressBytes=0;
   probeStallUntil=test&&probeSimulateStall?millis()+3500:0;
   JsonDocument start;start["type"]="ptt_down";
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
   if(uplinkOpusReady&&!test&&!probeActive&&!probeFinishing)start["audioFormat"]="opus-24000-uplink-v1";
 #endif
   String request;serializeJson(start,request);sendText(request);radioDebug("SENDING",test?(probeSimulateStall?"Test: 3.5s network stall":"Test: normal live uplink"):(tx?"Recording: live uplink":"Cache tail: upload"));return true;
@@ -494,7 +535,7 @@ void setup(){
   if(radioConfig.tls&&!radioUsesCellular())configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
-#ifdef VOXI_BOARD_MINICAM
+#ifdef VOXI_OPUS_UPLINK
   constexpr uint32_t networkStack=32768;
 #else
   constexpr uint32_t networkStack=12288;

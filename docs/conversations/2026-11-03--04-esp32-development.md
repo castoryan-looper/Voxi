@@ -6,7 +6,7 @@
 
 接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。
 
-共 564 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
+共 579 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
 
 ## 001 · 用户 · 2026-11-03 16:17:12 +08:00
 
@@ -4926,3 +4926,116 @@ Recv-Q                               Send-Q                                     
 固件已烧录并校验通过。设备已使用原有配置恢复 Wi‑Fi 和云端 READY，并确认启用 16kbps Opus；屏幕、触摸控制器和电源管理芯片初始化均正常。
 
 我再做一次本地 Opus 解码自检，确认这块板的解码器也能正常工作。
+
+## 565 · 助手 · 2026-11-04 16:54:33 +08:00
+
+AMOLED 设备已更新并烧录成功，现已恢复 **Wi‑Fi 和云端 READY**。
+
+- 已支持 **16kbps Opus 回复音频**，解码自检通过。
+- 原有 Wi‑Fi、令牌和 CA 配置均保留。
+- 屏幕、触摸控制器初始化正常。
+
+现在可以按住 BOOT 或屏幕通话按钮说话，松开发送。无需更新云端。
+
+## 566 · 用户 · 2026-11-04 16:58:03 +08:00
+
+没讲两句就offline了，好像在这个设备上又有些不稳定
+
+## 567 · 助手 · 2026-11-04 16:58:09 +08:00
+
+我先读取这块 AMOLED 的断线原因和播放记录，确认是 Wi‑Fi、设备重启，还是云端语音会话中断。
+
+## 568 · 助手 · 2026-11-04 16:59:06 +08:00
+
+读到具体错误了：Wi‑Fi 没有掉线，也没有内存不足或 Opus 解码错误；但录音上传时，一次 1920 字节的 PCM 写入阻塞了约 5 秒，随后触发重连。
+
+这块 AMOLED 目前只更新了 Opus 下行，录音上行仍是 PCM。我会把已在 MiniCam 验证过的压缩上行移植过来，减少上传压力，同时保留断线记录继续检查播放中断。
+
+## 569 · 助手提问 · 2026-11-04 17:01:23 +08:00
+
+我还抓到了一次播放中途“网关断开”，当时 Wi‑Fi 未掉线、Opus 解码无错误。请执行下面两条只读命令并贴输出，区分网关心跳和 Pocket 上游关闭；我继续更新设备的压缩上行。
+```bash
+docker logs --since=10m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|device_heartbeat_timeout|pocket_closed|pocket_relay_error|pocket_downlink' | tail -n 25
+docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Consent|Native voice upstream|audio receive failed|failed during' | tail -n 15
+```
+
+## 570 · 用户 · 2026-11-04 17:01:51 +08:00
+
+问题：我还抓到了一次播放中途“网关断开”，当时 Wi‑Fi 未掉线、Opus 解码无错误。请执行下面两条只读命令并贴输出，区分网关心跳和 Pocket 上游关闭；我继续更新设备的压缩上行。
+```bash
+docker logs --since=10m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|device_heartbeat_timeout|pocket_closed|pocket_relay_error|pocket_downlink' | tail -n 25
+docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Consent|Native voice upstream|audio receive failed|failed during' | tail -n 15
+```
+
+回答：root@VM-0-14-ubuntu:~/Voxi# docker logs --since=10m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|device_heartbeat_timeout|pocket_closed|pocket_relay_error|pocket_downlink' | tail -n 25
+docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Consent|Native voice upstream|audio receive failed|failed during' | tail -n 15
+2026-11-04T08:51:49.466571783Z {"event":"pocket_downlink","connection":42,"reply":2,"outcome":"complete","audioFormat":"opus-24000-v1","elapsedMs":12670,"sourcePcmBytes":576960,"sentBytes":26488,"maxSourceGapMs":131,"maxSendGapMs":112,"peakQueuedPcmBytes":5760,"peakTcpBufferedBytes":0}
+2026-11-04T08:54:41.910366762Z {"event":"device_closed","connection":59,"code":1000,"inputBytes":0,"origin":"peer_or_transport","ageMs":151858,"sentPings":5,"pongs":5,"pings":10,"lastPongAgoMs":1808,"lastPingAgoMs":7191,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:54:41.947281797Z {"event":"pocket_closed","code":1000,"inputBytes":0,"failed":false}
+2026-11-04T08:55:37.417729367Z {"event":"device_heartbeat_timeout","connection":42,"ageMs":390005,"sentPings":12,"pongs":11,"pings":19,"lastPongAgoMs":58905,"lastPingAgoMs":59262,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:55:37.433541212Z {"event":"device_closed","connection":42,"code":1006,"inputBytes":18093,"origin":"heartbeat_timeout","ageMs":390030,"sentPings":12,"pongs":11,"pings":19,"lastPongAgoMs":58930,"lastPingAgoMs":59287,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:55:37.498818673Z {"event":"pocket_closed","code":1000,"inputBytes":172800,"failed":false}
+2026-11-04T08:56:01.465941538Z {"event":"device_closed","connection":61,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":30324,"sentPings":1,"pongs":0,"pings":1,"lastPongAgoMs":30324,"lastPingAgoMs":30231,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:56:01.473380733Z {"event":"pocket_closed","code":1000,"inputBytes":0,"failed":false}
+2026-11-04T08:56:12.271263557Z {"event":"device_closed","connection":62,"code":1006,"inputBytes":7680,"origin":"peer_or_transport","ageMs":15938,"sentPings":0,"pongs":0,"pings":1,"lastPongAgoMs":15938,"lastPingAgoMs":10800,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:56:12.286165335Z {"event":"pocket_closed","code":1000,"inputBytes":7680,"failed":false}
+2026-11-04T08:56:48.341436912Z {"event":"device_closed","connection":63,"code":1006,"inputBytes":1920,"origin":"peer_or_transport","ageMs":30254,"sentPings":1,"pongs":0,"pings":1,"lastPongAgoMs":30255,"lastPingAgoMs":16205,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:56:48.357904161Z {"event":"pocket_closed","code":1000,"inputBytes":1920,"failed":false}
+2026-11-04T08:57:32.529739151Z {"event":"device_closed","connection":64,"code":1006,"inputBytes":85440,"origin":"peer_or_transport","ageMs":38364,"sentPings":1,"pongs":0,"pings":3,"lastPongAgoMs":38364,"lastPingAgoMs":3078,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:57:32.532356777Z {"event":"pocket_downlink","connection":64,"reply":1,"outcome":"device_closed","audioFormat":"opus-24000-v1","elapsedMs":17322,"sourcePcmBytes":795840,"sentBytes":36476,"maxSourceGapMs":90,"maxSendGapMs":66,"peakQueuedPcmBytes":7680,"peakTcpBufferedBytes":0}
+2026-11-04T08:57:32.754615298Z {"event":"pocket_closed","code":1000,"inputBytes":85440,"failed":false}
+2026-11-04T08:58:41.280578949Z {"event":"device_closed","connection":65,"code":1006,"inputBytes":5760,"origin":"peer_or_transport","ageMs":60744,"sentPings":2,"pongs":0,"pings":2,"lastPongAgoMs":60744,"lastPingAgoMs":37782,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T08:58:41.305816416Z {"event":"pocket_closed","code":1000,"inputBytes":5760,"failed":false}
+2026-11-04T08:59:19.600149962Z {"event":"pocket_downlink","connection":66,"reply":1,"outcome":"complete","audioFormat":"opus-24000-v1","elapsedMs":29858,"sourcePcmBytes":1312320,"sentBytes":60192,"maxSourceGapMs":260,"maxSendGapMs":201,"peakQueuedPcmBytes":9600,"peakTcpBufferedBytes":0}
+2026-11-04T09:00:38.547095272Z {"event":"device_closed","connection":66,"code":1006,"inputBytes":238560,"origin":"peer_or_transport","ageMs":139085,"sentPings":4,"pongs":4,"pings":6,"lastPongAgoMs":18148,"lastPingAgoMs":2796,"queuedPcmBytes":960,"tcpBufferedBytes":0}
+2026-11-04T09:00:38.548815903Z {"event":"pocket_downlink","connection":66,"reply":2,"outcome":"device_closed","audioFormat":"opus-24000-v1","elapsedMs":29041,"sourcePcmBytes":1228800,"sentBytes":56276,"maxSourceGapMs":601,"maxSendGapMs":528,"peakQueuedPcmBytes":8640,"peakTcpBufferedBytes":0}
+2026-11-04T09:00:38.603356361Z {"event":"pocket_closed","code":1000,"inputBytes":132000,"failed":false}
+2026-11-04T09:00:40.268974728Z {"event":"pocket_downlink","connection":60,"reply":1,"outcome":"complete","audioFormat":"opus-24000-v1","elapsedMs":43102,"sourcePcmBytes":1998720,"sentBytes":91652,"maxSourceGapMs":188,"maxSendGapMs":140,"peakQueuedPcmBytes":11520,"peakTcpBufferedBytes":0}
+
+## 571 · 助手 · 2026-11-04 17:02:39 +08:00
+
+日志里没有出现新的 Pocket／WebRTC 错误；对应的播放中断是设备连接先关闭，云端当时仍在正常发送音频。
+
+我还发现一个需要核对的差异：Wi‑Fi 路径的心跳等待比 4G 路径短。我会检查它是否会在网络抖动或 Pong 延迟时过早重连，再决定修正方式。
+
+## 572 · 助手 · 2026-11-04 17:04:39 +08:00
+
+已确认 Wi‑Fi 旧逻辑只认 Pong，超时门槛仅 3 秒；即使音频仍在接收，Pong 延迟也可能触发重连。
+
+我已改为统一的存活检查：保持定期 Ping，将有效音频和控制包也作为存活证据；连续无回包仍会超时重连。AMOLED 的压缩上行已通过芯片实测，现在编译、烧录心跳修正版。
+
+## 573 · 助手提问 · 2026-11-04 17:06:09 +08:00
+
+修正版已编译通过。我刚检查 COM14，AMOLED 已进入原有一分钟休眠，USB 返回“设备没有发挥作用”。请轻点屏幕唤醒并重新插拔 USB，管理页保持断开，完成后回复“已重新插线”；之后我会持续采集，避免测试期间再次休眠。
+
+## 574 · 用户 · 2026-11-04 17:07:19 +08:00
+
+问题：修正版已编译通过。我刚检查 COM14，AMOLED 已进入原有一分钟休眠，USB 返回“设备没有发挥作用”。请轻点屏幕唤醒并重新插拔 USB，管理页保持断开，完成后回复“已重新插线”；之后我会持续采集，避免测试期间再次休眠。
+
+回答：已重新插线
+
+## 575 · 助手提问 · 2026-11-04 17:08:36 +08:00
+
+AMOLED 的压缩上行＋Wi‑Fi 心跳修正版已烧录，设备已恢复 READY，真实编码/网关解码自检通过。请现在让它讲一个约 1～2 分钟的故事；如果再卡或 offline，直接告诉我，先不要重启或再次录音。我正在持续采集这一轮。
+
+## 576 · 助手 · 2026-11-04 17:09:46 +08:00
+
+这轮目前明显稳定了：已经连续播放约 40 秒，最大音频接收间隔约 62ms，没有重新缓冲、解码错误或断线。4.5 秒录音也已完整发送，松手后发送收尾约 33ms。
+
+我继续采集到故事结束，并完成连接恢复时清零心跳计时的兼容性检查。
+
+## 577 · 用户 · 2026-11-04 17:10:09 +08:00
+
+问题：AMOLED 的压缩上行＋Wi‑Fi 心跳修正版已烧录，设备已恢复 READY，真实编码/网关解码自检通过。请现在让它讲一个约 1～2 分钟的故事；如果再卡或 offline，直接告诉我，先不要重启或再次录音。我正在持续采集这一轮。
+
+回答：讲完了，还不错。帮我把代码和开发进度全部上传同步吧
+
+## 578 · 助手 · 2026-11-04 17:10:20 +08:00
+
+这轮故事已完整讲完，验证结果比之前稳定了。我会把代码、实测数据、剩余问题和换电脑接续说明一起同步到 GitHub；最后再确认一次编译和当前设备的固件版本。
+
+## 579 · 助手 · 2026-11-04 17:13:12 +08:00
+
+五个板型已全部编译通过，Pocket 仓库也确认与 GitHub 一致，没有遗漏的本地改动。
+
+当前 USB 已换成另一台设备（COM10），所以我没有继续烧录。AMOLED 已装上并通过故事测试的修正版；随后补充的“连接恢复时清零心跳计时”小修会一并上传，并在交接文档中注明下次接入时补刷。
