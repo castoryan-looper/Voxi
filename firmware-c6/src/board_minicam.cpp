@@ -109,7 +109,7 @@ static uint16_t phaseColor(const char* phase){
 static void centeredText(const char* text,int y,int size,uint16_t color){canvas.setTextSize(size);canvas.setTextColor(color);int x=(240-int(strlen(text))*6*size)/2;canvas.setCursor(x<12?12:x,y);canvas.print(text);}
 static void screenTask(void*){
  if(!canvas.begin(40000000)){diagnosticError("ST7789 initialization failed");vTaskDelete(nullptr);return;}
- panel.invertDisplay(true);digitalWrite(42,LOW);displayReady=true;canvas.setTextWrap(false);
+ panel.invertDisplay(false);digitalWrite(42,LOW);displayReady=true;canvas.setTextWrap(false);
  View s,previous;bool drawn=false;
  for(;;){
   if(standbyRequested){digitalWrite(42,HIGH);panel.displayOff();standbyDisplayReady=true;vTaskSuspend(nullptr);}
