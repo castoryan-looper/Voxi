@@ -86,13 +86,19 @@ bool CellularSocket::receiveFrame(){
 void CellularSocket::loop(){
  if(connected&&!minicamTcpConnected()){fail("TCP disconnected");return;}
  if(!connected){if(minicamModemReady()&&millis()-attemptAt>=retryMs){attemptAt=millis();connect();}return;}
- if(receiveFrame())return;
- if(buffered==sizeof(wire)){fail("WebSocket receive buffer full");return;}
- int count=readSome(wire+buffered,sizeof(wire)-buffered);
- if(count>0){buffered+=count;if(receiveFrame())return;}
- else if(count!=MBEDTLS_ERR_SSL_WANT_READ&&count!=MBEDTLS_ERR_SSL_WANT_WRITE){fail("TLS read failed",count);return;}
+ bool handled=receiveFrame();
+ if(!connected)return;
+ if(!handled){
+  if(buffered==sizeof(wire)){fail("WebSocket receive buffer full");return;}
+  int count=readSome(wire+buffered,sizeof(wire)-buffered);
+  if(count>0){buffered+=count;receiveFrame();}
+  else if(count!=MBEDTLS_ERR_SSL_WANT_READ&&count!=MBEDTLS_ERR_SSL_WANT_WRITE){fail("TLS read failed",count);return;}
+ }
+ if(!connected)return;
  // Consume available frames before testing liveness. Audio/control traffic proves
  // the peer is alive, even when a Pong is delayed behind queued voice data.
+ // Never return early after a complete frame: a sustained receive backlog
+ // otherwise starves the periodic client Ping despite a healthy RX stream.
  auto action=heartbeat.tick(millis());
  if(action==CellularHeartbeat::Dead){fail("heartbeat timeout");return;}
  if(action==CellularHeartbeat::Ping)frame(9,nullptr,0);

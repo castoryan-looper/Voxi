@@ -38,6 +38,10 @@ sudo bash deploy/check-opus.sh
 - 网关统一格式及心跳调整后 51 项测试通过，包括真实 Opus 编解码、固定码率、尾部排空、缺失/旧格式明确拒绝和设备 Ping/消息刷新存活；帧序号、播放门控、蜂窝心跳和按键本地测试通过。
 - 全部五个维护中的构建目标通过：C6、S3G、AMOLED、MiniCam 标准版、MiniCam GPIO11 改装版。当前音量＋录音版 MiniCam 已烧录最终统一 Opus/双向心跳固件，写入 Hash 校验成功，保留 Wi-Fi/4G、令牌、CA 和唯一设备 ID。其他设备未连接，未声称已烧录或完成实机性能验收。
 - 网关 16kbps 编码器生成的真实帧已通过 USB 送入实际 ESP32-S3：解码为 480 采样，峰值 9205、耗时约 3035µs；错序和非法帧拒绝测试通过。
-- 用户已部署首个 Opus 版本，实际设备已确认 `opus-24000-v1` 并恢复 READY。去除回退后的统一版本还需更新云端和各板型固件；长故事改善程度、低信号和高重传效果仍待现场验证。压缩降低带宽需求，不保证消除断网或严重 TCP 重传。
+- 用户已部署统一版本 `2711e7e`：云端自检确认 `opusOnly:true`、`audioBitrate:16000`、`wireBytesPerSecond:2200`；设备已确认 `replyCodecConfirmed=true`、16kbps 和 READY。其他未接入设备仍需更新固件。压缩降低带宽需求，不保证消除断网或严重 TCP 重传。
 
 首版 24kbps 实际播放记录：成功解码 2368 帧、解码错误 0，最大解码约 5357µs，但最终模组报告 `MIPURC disconnect: 2`；另一轮音频收包空档达到约 41.8 秒后断线。不能把此类 TCP 故障归为 Opus 解码失败，也不能宣称压缩已根治断线。最新版播放期间每 15 秒仍会主动发 Ping，服务器将收到的 Ping 和有效设备流量计为存活，仍保留真正失联后的关闭机制。
+
+统一 16kbps 实测（云端 UTC 2026-11-04T07:00:32Z）：录音 207840 字节完整上传，采集/发送 CRC 相同。设备收到压缩数据 118184 字节，解码为 PCM 2578560 字节，解码错误为 0；最大音频接收空档约 6899ms。最终仍中断，不能算通过长故事验收。网关明确记录 `pocket_downlink outcome=error`，随后 `pocket_closed code=1000`、`device_closed origin=pocket_closed`，不是本轮心跳超时。Pocket 同时记录 `Native voice audio receive failed (MediaStreamError) peer=closed outputting=True generation_done=False`：尚未生成完成时云端 WebRTC 音轨已关闭，关闭根因仍需在 Pocket/上游会话层定位。
+
+另外修复设备接收循环中“成功解析帧后提前 return，跳过周期心跳”的路径；标准版和 GPIO11 改装版编译通过，标准版已重新烧录并确认纯 4G、16kbps、协议已确认、READY。此补丁仅改设备端，不需要再次部署网关；不能据此宣称上述 Pocket/WebRTC 关闭问题已解决。

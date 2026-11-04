@@ -6,7 +6,7 @@
 
 接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。
 
-共 465 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
+共 478 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
 
 ## 001 · 用户 · 2026-11-03 16:17:12 +08:00
 
@@ -3592,3 +3592,653 @@ sudo bash deploy/check-opus.sh
 统一格式的五个固件目标已完成首轮构建，16kbps 和双向心跳的相关测试也已通过，正在做最终回归并刷新当前设备。
 
 你已部署的首版云端目前仍发送 24kbps Opus。这一版推送后，还需再更新一次 Voxi 网关，16kbps 和服务端心跳调整才会生效；其他设备也需更新固件才能连接统一网关。
+
+## 466 · 助手 · 2026-11-04 14:57:09 +08:00
+
+最新统一版已推送：`2711e7e`。旧 PCM／µ-law 下行已移除，五个固件目标构建通过，网关 51 项测试通过；当前 MiniCam 也已烧录并通过 16kbps 解码自检。
+
+还需让云端更新到这个提交，才能启用 16kbps 和新的存活判定。其他未接入的设备目前只是编译通过，尚未烧录。
+
+## 467 · 助手提问 · 2026-11-04 14:57:12 +08:00
+
+请再部署一次最新统一版（你刚才部署的是首个 24kbps 版本），把最后的自检输出贴回来：
+```bash
+cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-opus.sh
+```
+这次应看到 opusOnly:true、audioBitrate:16000、wireBytesPerSecond:2200。我会核对设备实际连接状态。
+
+## 468 · 助手 · 2026-11-04 14:57:53 +08:00
+
+已改为所有维护板型的**回复下行统一使用 Opus**，不再回退 PCM／µ-law。同时降到 16kbps，并调整了双向心跳。
+
+当前 MiniCam 已烧录；五个固件目标和 51 项网关测试通过。代码已推送：`2711e7e`。其他设备仍需逐台更新固件。
+
+云端还需部署这次统一版：
+
+```bash
+cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-opus.sh
+```
+
+自检应显示 `opusOnly:true`、`audioBitrate:16000`。卡顿和断线改善程度还需部署后实测。
+
+## 469 · 用户 · 2026-11-04 14:59:14 +08:00
+
+问题：请再部署一次最新统一版（你刚才部署的是首个 24kbps 版本），把最后的自检输出贴回来：
+```bash
+cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-opus.sh
+```
+这次应看到 opusOnly:true、audioBitrate:16000、wireBytesPerSecond:2200。我会核对设备实际连接状态。
+
+回答：root@VM-0-14-ubuntu:~/Voxi# cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-opus.sh
+remote: Enumerating objects: 79, done.
+remote: Counting objects: 100% (79/79), done.
+remote: Compressing objects: 100% (8/8), done.
+remote: Total 41 (delta 29), reused 41 (delta 29), pack-reused 0 (from 0)
+Unpacking objects: 100% (41/41), 1.47 MiB | 125.00 KiB/s, done.
+From https://github.com/castoryan-looper/Voxi
+   58fd1a9..2711e7e  main       -> origin/main
+Updating 58fd1a9..2711e7e
+Fast-forward
+ .github/workflows/ci.yml                                                 |   3 ++-
+ README.md                                                                |   3 ++-
+ deploy/check-opus.sh                                                     |   6 ++++--
+ docs/MINICAM-4G.md                                                       |   6 +++---
+ docs/MINICAM-OPUS.md                                                     |  24 +++++++++++++-----------
+ docs/PROTOCOL.md                                                         |  20 ++++++++++----------
+ docs/conversations/2026-11-03--04-esp32-development.md                   |  91 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ docs/handoffs/2026-11-04.md                                              |   2 +-
+ firmware-c6/include/cellular_protocol.h                                  |   4 +++-
+ firmware-c6/include/mulaw.h                                              |   6 ------
+ firmware-c6/include/opus_reply.h                                         |   2 --
+ firmware-c6/src/main.cpp                                                 |  72 ++++++++++++++++++++++++------------------------------------------------
+ firmware-c6/src/opus_reply.cpp                                           |   2 --
+ firmware-c6/src/runtime_config.cpp                                       |   4 ----
+ firmware-c6/vendor/esp_audio_opus/NOTICE                                 |   9 +++++----
+ firmware-c6/vendor/esp_audio_opus/lib/esp32c6/libesp_audio_codec.a       | Bin 0 -> 3596940 bytes
+ firmware-c6/vendor/esp_audio_opus/lib/{ => esp32s3}/libesp_audio_codec.a | Bin
+ gateway/admin.test.mjs                                                   |   2 +-
+ gateway/mulaw.mjs                                                        |  12 ------------
+ gateway/mulaw.test.mjs                                                   |  10 ----------
+ gateway/opus.mjs                                                         |   4 ++--
+ gateway/opus.test.mjs                                                    |   6 +++---
+ gateway/pocket.mjs                                                       |  19 +++++++++----------
+ gateway/pocket.test.mjs                                                  |  12 ++++++------
+ gateway/radio.test.mjs                                                   |  31 +++++++++++++++++++++++++------
+ gateway/server.mjs                                                       |  29 +++++++++++++++++++++--------
+ tools/opus_decoder_link.py                                               |  12 +++++++-----
+ tools/test_cellular_protocol.cpp                                         |   3 ++-
+ tools/test_mulaw.cpp                                                     |  17 -----------------
+ 29 files changed, 233 insertions(+), 178 deletions(-)
+ delete mode 100644 firmware-c6/include/mulaw.h
+ create mode 100644 firmware-c6/vendor/esp_audio_opus/lib/esp32c6/libesp_audio_codec.a
+ rename firmware-c6/vendor/esp_audio_opus/lib/{ => esp32s3}/libesp_audio_codec.a (100%)
+ delete mode 100644 gateway/mulaw.mjs
+ delete mode 100644 gateway/mulaw.test.mjs
+ delete mode 100644 tools/test_mulaw.cpp
+From https://github.com/castoryan-looper/Voxi
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+Total reclaimed space: 0B
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  636.4kB
+Step 1/15 : FROM node:22-alpine
+ ---> fe4f6d74e203
+Step 2/15 : LABEL io.voxi.project="voxi"
+ ---> Running in 282663e84af2
+ ---> Removed intermediate container 282663e84af2
+ ---> 23945851914d
+Step 3/15 : WORKDIR /app
+ ---> Running in 789e2b749e13
+ ---> Removed intermediate container 789e2b749e13
+ ---> 6e7b37438547
+Step 4/15 : COPY gateway/package*.json ./
+ ---> db22d7fde74b
+Step 5/15 : RUN npm ci --omit=dev && npm cache clean --force
+ ---> Running in 282d4e67bc3f
+
+added 2 packages, and audited 3 packages in 3s
+
+found 0 vulnerabilities
+npm notice
+npm notice New major version of npm available! 10.9.9 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice
+npm warn using --force Recommended protections disabled.
+ ---> Removed intermediate container 282d4e67bc3f
+ ---> 3206a340905f
+Step 6/15 : COPY gateway/*.mjs ./
+ ---> 48ee4098f810
+Step 7/15 : COPY gateway/*.html gateway/*.css ./
+ ---> f83ec52bf4fd
+Step 8/15 : RUN mkdir /state && chown node:node /state
+ ---> Running in 4d249842a55a
+ ---> Removed intermediate container 4d249842a55a
+ ---> 279337e2b917
+Step 9/15 : RUN node --test
+ ---> Running in b0302d477e0e
+TAP version 13
+# Subtest: account login, CSRF, password persistence, invalidation and logout
+ok 1 - account login, CSRF, password persistence, invalidation and logout
+  ---
+  duration_ms: 980.811175
+  type: 'test'
+  ...
+# Subtest: password login rejects cross-origin requests and limits repeated failures
+ok 2 - password login rejects cross-origin requests and limits repeated failures
+  ---
+  duration_ms: 518.507913
+  type: 'test'
+  ...
+# Subtest: admin child pages support direct navigation and assets without weakening API authentication
+ok 3 - admin child pages support direct navigation and assets without weakening API authentication
+  ---
+  duration_ms: 112.509157
+  type: 'test'
+  ...
+# Subtest: admin login renders status and count controls, saves live change and keeps secret out of storage
+ok 4 - admin login renders status and count controls, saves live change and keeps secret out of storage
+  ---
+  duration_ms: 33.022648
+  type: 'test'
+  ...
+# Subtest: pending status cannot reopen dashboard after logout
+ok 5 - pending status cannot reopen dashboard after logout
+  ---
+  duration_ms: 1.454743
+  type: 'test'
+  ...
+# Subtest: save failure remains visible and re-enables button
+ok 6 - save failure remains visible and re-enables button
+  ---
+  duration_ms: 1.069289
+  type: 'test'
+  ...
+# Subtest: AI editor reads real settings, previews unsaved prompt and saves only supported fields
+ok 7 - AI editor reads real settings, previews unsaved prompt and saves only supported fields
+  ---
+  duration_ms: 3.627405
+  type: 'test'
+  ...
+# Subtest: read button immediately shows loading and recovers after backend failure
+ok 8 - read button immediately shows loading and recovers after backend failure
+  ---
+  duration_ms: 1.058519
+  type: 'test'
+  ...
+# Subtest: incompatible response is reported instead of leaving an empty editor
+ok 9 - incompatible response is reported instead of leaving an empty editor
+  ---
+  duration_ms: 0.89385
+  type: 'test'
+  ...
+# Subtest: memory manager reads user, edits profile and renders transcript without HTML injection
+ok 10 - memory manager reads user, edits profile and renders transcript without HTML injection
+  ---
+  duration_ms: 18.142353
+  type: 'test'
+  ...
+# Subtest: device memory entry selects owner by immutable ID and keeps offline devices visible
+ok 11 - device memory entry selects owner by immutable ID and keeps offline devices visible
+  ---
+  duration_ms: 3.142414
+  type: 'test'
+  ...
+# Subtest: page navigation separates prompts and voice and guards unsaved changes
+ok 12 - page navigation separates prompts and voice and guards unsaved changes
+  ---
+  duration_ms: 1.609634
+  type: 'test'
+  ...
+# Subtest: admin authentication is separate from device authentication; cross-origin mutations rejected
+ok 13 - admin authentication is separate from device authentication; cross-origin mutations rejected
+  ---
+  duration_ms: 83.528182
+  type: 'test'
+  ...
+# Subtest: disabled admin fails closed
+ok 14 - disabled admin fails closed
+  ---
+  duration_ms: 28.974002
+  type: 'test'
+  ...
+# {"event":"device_opened","connection":1}
+# {"event":"device_rejected","connection":2,"reason":"device_limit","maxConnections":1}
+# {"event":"device_closed","connection":2,"code":1013,"inputBytes":0,"origin":"device_limit","ageMs":13,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":13,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":3}
+# {"event":"device_closed","connection":3,"code":1000,"inputBytes":0,"origin":"admin_disconnected","ageMs":38,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":38,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":4}
+# {"event":"device_opened","connection":5}
+# {"event":"device_opened","connection":6}
+# Subtest: live limit change admits another device, preserves existing sessions when lowered and disconnects selected connection
+ok 15 - live limit change admits another device, preserves existing sessions when lowered and disconnects selected connection
+  ---
+  duration_ms: 106.247564
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":6,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":8,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":8,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":5,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":10,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":10,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":4,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":12,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":12,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":93,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":93,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: invalid limits rejected and persisted limit survives a gateway restart
+ok 16 - invalid limits rejected and persisted limit survives a gateway restart
+  ---
+  duration_ms: 23.736603
+  type: 'test'
+  ...
+# Subtest: failed persistence does not change the active limit
+ok 17 - failed persistence does not change the active limit
+  ---
+  duration_ms: 16.512602
+  type: 'test'
+  ...
+# Subtest: Opus CBR is 16kbps, ordered, decodable and preserves the final codec tail
+ok 18 - Opus CBR is 16kbps, ordered, decodable and preserves the final codec tail
+  ---
+  duration_ms: 258.956411
+  type: 'test'
+  ...
+# Subtest: partial final frames are padded and codec state/sequence resets between turns
+ok 19 - partial final frames are padded and codec state/sequence resets between turns
+  ---
+  duration_ms: 16.958479
+  type: 'test'
+  ...
+# Subtest: burst PCM is paced and audio_end/ready remain behind final samples
+ok 20 - burst PCM is paced and audio_end/ready remain behind final samples
+  ---
+  duration_ms: 3.129801
+  type: 'test'
+  ...
+# Subtest: blocked transport preserves PCM and recovery never flushes a catch-up burst
+ok 21 - blocked transport preserves PCM and recovery never flushes a catch-up burst
+  ---
+  duration_ms: 0.373222
+  type: 'test'
+  ...
+# Subtest: clearing a cancelled stream drops its queued end marker and PCM
+ok 22 - clearing a cancelled stream drops its queued end marker and PCM
+  ---
+  duration_ms: 0.444054
+  type: 'test'
+  ...
+# Subtest: queue overflow fails explicitly but total drained story length is unlimited
+ok 23 - queue overflow fails explicitly but total drained story length is unlimited
+  ---
+  duration_ms: 22.390935
+  type: 'test'
+  ...
+# Subtest: authenticated admin proxies AI settings to dedicated Pocket endpoint without exposing bearer
+ok 24 - authenticated admin proxies AI settings to dedicated Pocket endpoint without exposing bearer
+  ---
+  duration_ms: 218.737855
+  type: 'test'
+  ...
+# Subtest: memory editor uses only dedicated backend memory endpoint
+ok 25 - memory editor uses only dedicated backend memory endpoint
+  ---
+  duration_ms: 28.463133
+  type: 'test'
+  ...
+# Subtest: Pocket proxy preserves PCM uplink and uses only Opus downlink
+ok 26 - Pocket proxy preserves PCM uplink and uses only Opus downlink
+  ---
+  duration_ms: 81.715165
+  type: 'test'
+  ...
+# {"event":"pocket_closed","code":1006,"inputBytes":5760,"failed":false}
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":5760,"origin":"peer_or_transport","ageMs":72,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":72,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"pocket_handshake_failed","status":403}
+# {"event":"pocket_relay_error","reason":"Pocket authentication rejected (HTTP 403); rerun connect-pocket.sh","inputBytes":0}
+# {"event":"pocket_closed","code":1006,"inputBytes":0,"failed":true}
+# Subtest: Pocket HTTP 403 produces actionable device error
+ok 27 - Pocket HTTP 403 produces actionable device error
+  ---
+  duration_ms: 35.155616
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"pocket_error","ageMs":23,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":23,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"pocket_handshake_failed","status":404}
+# {"event":"pocket_relay_error","reason":"Pocket /voxi endpoint missing (HTTP 404); upgrade Pocket Cloud","inputBytes":0}
+# {"event":"pocket_closed","code":1006,"inputBytes":0,"failed":true}
+# Subtest: Pocket HTTP 404 produces actionable device error
+ok 28 - Pocket HTTP 404 produces actionable device error
+  ---
+  duration_ms: 16.904578
+  type: 'test'
+  ...
+# {"event":"pocket_handshake_failed","status":503}
+# {"event":"pocket_relay_error","reason":"Pocket handshake failed (HTTP 503)","inputBytes":0}
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"pocket_error","ageMs":10,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":10,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"pocket_closed","code":1006,"inputBytes":0,"failed":true}
+# Subtest: Pocket HTTP 503 produces actionable device error
+ok 29 - Pocket HTTP 503 produces actionable device error
+  ---
+  duration_ms: 11.706252
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"pocket_error","ageMs":13,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":13,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"device_ptt","connection":1,"type":"ptt_down","inputBytes":0}
+# {"event":"pocket_relay_error","reason":"Invalid/overlong PCM","inputBytes":960002}
+# {"event":"pocket_closed","code":1005,"inputBytes":960002,"failed":true}
+# {"event":"device_closed","connection":1,"code":1011,"inputBytes":960002,"origin":"pocket_error","ageMs":164,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":164,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: Pocket accepts exactly 20 seconds and rejects one extra PCM sample
+ok 30 - Pocket accepts exactly 20 seconds and rejects one extra PCM sample
+  ---
+  duration_ms: 173.720002
+  type: 'test'
+  ...
+# Subtest: old or absent downlink format is explicitly rejected: undefined
+ok 31 - old or absent downlink format is explicitly rejected: undefined
+  ---
+  duration_ms: 42.102687
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1008,"inputBytes":0,"origin":"codec_required","ageMs":18,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":18,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: old or absent downlink format is explicitly rejected: pcm16-24000
+ok 32 - old or absent downlink format is explicitly rejected: pcm16-24000
+  ---
+  duration_ms: 9.045494
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1008,"inputBytes":0,"origin":"codec_required","ageMs":4,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":4,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: old or absent downlink format is explicitly rejected: mulaw8-24000
+ok 33 - old or absent downlink format is explicitly rejected: mulaw8-24000
+  ---
+  duration_ms: 8.008747
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1008,"inputBytes":0,"origin":"codec_required","ageMs":6,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":6,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: old or absent downlink format is explicitly rejected: opus-unsupported
+ok 34 - old or absent downlink format is explicitly rejected: opus-unsupported
+  ---
+  duration_ms: 8.20292
+  type: 'test'
+  ...
+# {"event":"device_rejected","connection":1,"reason":"unauthorized"}
+# {"event":"device_closed","connection":1,"code":1008,"inputBytes":0,"origin":"codec_required","ageMs":11,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":11,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":1,"code":1008,"inputBytes":0,"origin":"auth_rejected","ageMs":6,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":6,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":2}
+# {"event":"device_ptt","connection":2,"type":"ptt_down","inputBytes":0}
+# {"event":"device_ptt","connection":2,"type":"ptt_up","inputBytes":960}
+# {"event":"device_ptt","connection":2,"type":"ptt_down","inputBytes":960}
+# {"event":"device_ptt","connection":2,"type":"ptt_up","inputBytes":6720}
+# {"event":"first_audio","channel":0,"ms":61}
+# {"event":"device_ptt","connection":2,"type":"ptt_down","inputBytes":6720}
+# {"event":"device_ptt","connection":2,"type":"ptt_down","inputBytes":6720}
+# {"event":"device_ptt","connection":2,"type":"ptt_up","inputBytes":12480}
+# {"event":"first_audio","channel":2,"ms":50}
+# Subtest: mock: authentication, short press, streaming, interruption and channel reset
+ok 35 - mock: authentication, short press, streaming, interruption and channel reset
+  ---
+  duration_ms: 590.239173
+  type: 'test'
+  ...
+# Subtest: filter rejects DC and stays in PCM16 range
+ok 36 - filter rejects DC and stays in PCM16 range
+  ---
+  duration_ms: 2.530043
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":2,"code":1006,"inputBytes":12480,"origin":"peer_or_transport","ageMs":590,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":590,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# Subtest: peer Ping and incoming device traffic refresh liveness during downlink
+ok 37 - peer Ping and incoming device traffic refresh liveness during downlink
+  ---
+  duration_ms: 25.635021
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":35,"sentPings":0,"pongs":0,"pings":1,"lastPongAgoMs":35,"lastPingAgoMs":33,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"device_rejected","connection":2,"reason":"device_limit","maxConnections":1}
+# {"event":"device_closed","connection":2,"code":1013,"inputBytes":0,"origin":"device_limit","ageMs":4,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":4,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: cloud health, connection budget and malformed events
+ok 38 - cloud health, connection budget and malformed events
+  ---
+  duration_ms: 65.898772
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":21,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":21,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_opened","connection":1}
+# {"event":"device_ws_error","connection":1,"code":"WS_ERR_EXPECTED_MASK"}
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":12,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":12,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: setup route returns HTML and malformed WebSocket frames do not crash gateway
+ok 39 - setup route returns HTML and malformed WebSocket frames do not crash gateway
+  ---
+  duration_ms: 53.810954
+  type: 'test'
+  ...
+# {"event":"device_opened","connection":1}
+# {"event":"device_opened","connection":2}
+# {"event":"device_rejected","connection":3,"reason":"device_limit","maxConnections":2}
+# Subtest: two authenticated devices keep independent channels and a third gets an explicit limit
+ok 40 - two authenticated devices keep independent channels and a third gets an explicit limit
+  ---
+  duration_ms: 35.813522
+  type: 'test'
+  ...
+# {"event":"device_closed","connection":3,"code":1013,"inputBytes":0,"origin":"device_limit","ageMs":5,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":5,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":2,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":29,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":29,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# {"event":"device_closed","connection":1,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":30,"sentPings":0,"pongs":0,"pings":0,"lastPongAgoMs":30,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+# Subtest: save reports write failure and retains secrets for correction
+ok 41 - save reports write failure and retains secrets for correction
+  ---
+  duration_ms: 6.019789
+  type: 'test'
+  ...
+# Subtest: successful save tracks revision for reboot verification
+ok 42 - successful save tracks revision for reboot verification
+  ---
+  duration_ms: 1.117459
+  type: 'test'
+  ...
+# Subtest: invalid form gives visible feedback without sending
+ok 43 - invalid form gives visible feedback without sending
+  ---
+  duration_ms: 1.045795
+  type: 'test'
+  ...
+# Subtest: remembered Wi-Fi selection reuses stored password
+ok 44 - remembered Wi-Fi selection reuses stored password
+  ---
+  duration_ms: 0.829769
+  type: 'test'
+  ...
+# Subtest: USB sends certificate-sized requests in bounded chunks and preserves response
+ok 45 - USB sends certificate-sized requests in bounded chunks and preserves response
+  ---
+  duration_ms: 961.030514
+  type: 'test'
+  ...
+# Subtest: remembered credentials are indicated without exposing a token
+ok 46 - remembered credentials are indicated without exposing a token
+  ---
+  duration_ms: 1.301885
+  type: 'test'
+  ...
+# Subtest: offline AI does not imply remembered cloud settings were lost
+ok 47 - offline AI does not imply remembered cloud settings were lost
+  ---
+  duration_ms: 2.054258
+  type: 'test'
+  ...
+# Subtest: live radio debug shows capture, network bytes and recent device events
+ok 48 - live radio debug shows capture, network bytes and recent device events
+  ---
+  duration_ms: 2.121325
+  type: 'test'
+  ...
+# Subtest: volume controls load actual saved level and retain an unsaved edit during polling
+ok 49 - volume controls load actual saved level and retain an unsaved edit during polling
+  ---
+  duration_ms: 2.840276
+  type: 'test'
+  ...
+# Subtest: volume save sends selected level and displays persistent success beside controls
+ok 50 - volume save sends selected level and displays persistent success beside controls
+  ---
+  duration_ms: 1.727636
+  type: 'test'
+  ...
+# Subtest: USB disconnect hides the volume section and disables its controls
+ok 51 - USB disconnect hides the volume section and disables its controls
+  ---
+  duration_ms: 2.690274
+  type: 'test'
+  ...
+1..51
+# tests 51
+# suites 0
+# pass 51
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6546.786891
+ ---> Removed intermediate container b0302d477e0e
+ ---> a2dfbf2cc1d8
+Step 10/15 : ARG REVISION=dev
+ ---> Running in d74162835535
+ ---> Removed intermediate container d74162835535
+ ---> 02c07d564fe6
+Step 11/15 : ENV NODE_ENV=production PORT=8787 REVISION=$REVISION
+ ---> Running in c2a17b19239b
+ ---> Removed intermediate container c2a17b19239b
+ ---> 0057c0005656
+Step 12/15 : USER node
+ ---> Running in 2e589afc9228
+ ---> Removed intermediate container 2e589afc9228
+ ---> 03dfb367fce8
+Step 13/15 : EXPOSE 8787
+ ---> Running in 33a7cbdba36b
+ ---> Removed intermediate container 33a7cbdba36b
+ ---> 154a4c9ed3ed
+Step 14/15 : HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 CMD node -e "fetch('http://127.0.0.1:8787/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+ ---> Running in 033e90dc4662
+ ---> Removed intermediate container 033e90dc4662
+ ---> 1015b4fbd5d8
+Step 15/15 : CMD ["node","server.mjs"]
+ ---> Running in 58e049cc5322
+ ---> Removed intermediate container 58e049cc5322
+ ---> 04774b805f25
+Successfully built 04774b805f25
+Successfully tagged voxi-gateway:2711e7ee7064e43645fa323b7fab0c64569eb1e0
+[+] Running 2/2
+ ✔ Container voxi-gateway-1  Healthy                                                                                                                                                                                                                 9.6s
+ ✔ Container voxi-proxy-1    Healthy                                                                                                                                                                                                                 4.6s
+Untagged: voxi-gateway:a899c5dfc72acee06f5bf1f2c564909dfe701368
+Deleted: sha256:[已省略：长令牌或校验摘要]
+Deleted Images:
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+untagged: sha256:[已省略：长令牌或校验摘要]
+deleted: sha256:[已省略：长令牌或校验摘要]
+
+Total reclaimed space: 132.9kB
+Deployed 2711e7ee7064e43645fa323b7fab0c64569eb1e0
+{"ok":true,"revision":"2711e7ee7064e43645fa323b7fab0c64569eb1e0","format":"opus-24000-v1","opusOnly":true,"audioBitrate":16000,"wireBytesPerSecond":2200}
+
+## 470 · 助手 · 2026-11-04 14:59:21 +08:00
+
+云端部署和自检都已成功，确认是仅 Opus、16kbps 的版本。我再读取设备状态，核对它是否已连上这版云端。
+
+## 471 · 助手 · 2026-11-04 14:59:40 +08:00
+
+设备端也已确认：当前是纯 4G、Opus 16kbps，协议确认成功。看到你已经开始新一轮录音，我会直接观察这轮的发送、播放和心跳，不用重复测试。
+
+## 472 · 助手 · 2026-11-04 15:02:05 +08:00
+
+已确认设备实际使用的是 16kbps Opus。不过这轮仍出现了重连，播放完整性没有通过，不能算稳定验收。
+
+我在接收循环里又找到一个问题：连续收包时可能直接返回，跳过后面的心跳检查。我会补上这个设备端修正；这次不需要改云端协议。
+
+## 473 · 助手提问 · 2026-11-04 15:02:44 +08:00
+
+设备已确认在用 16kbps。这轮断开前还收到“cloud unavailable”，需要确认是否 Pocket 上游先关闭。请执行并贴出最后几条日志，不用重测故事：
+```bash
+docker logs --since=5m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|pocket_closed|pocket_relay_error|pocket_downlink|heartbeat_timeout' | tail -n 20
+```
+
+## 474 · 用户 · 2026-11-04 15:04:09 +08:00
+
+问题：设备已确认在用 16kbps。这轮断开前还收到“cloud unavailable”，需要确认是否 Pocket 上游先关闭。请执行并贴出最后几条日志，不用重测故事：
+```bash
+docker logs --since=5m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|pocket_closed|pocket_relay_error|pocket_downlink|heartbeat_timeout' | tail -n 20
+```
+
+回答：root@VM-0-14-ubuntu:~/Voxi# docker logs --since=5m --timestamps voxi-gateway-1 2>&1 | grep -E 'device_closed|pocket_closed|pocket_relay_error|pocket_downlink|heartbeat_timeout' | tail -n 20
+2026-11-04T07:00:32.630526449Z {"event":"pocket_downlink","connection":1,"reply":1,"outcome":"error","audioFormat":"opus-24000-v1","elapsedMs":55675,"sourcePcmBytes":2647680,"sentBytes":118184,"maxSourceGapMs":317,"maxSendGapMs":246,"peakQueuedPcmBytes":73920,"peakTcpBufferedBytes":0}
+2026-11-04T07:00:32.723581226Z {"event":"pocket_closed","code":1000,"inputBytes":207840,"failed":false}
+2026-11-04T07:00:48.315805980Z {"event":"device_closed","connection":1,"code":1006,"inputBytes":207840,"origin":"pocket_closed","ageMs":134905,"sentPings":4,"pongs":3,"pings":7,"lastPongAgoMs":39522,"lastPingAgoMs":12356,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+
+## 475 · 助手 · 2026-11-04 15:04:41 +08:00
+
+这组日志明确了关闭顺序：Pocket 上游先报错，随后关闭连接，网关才让设备离线；这次不是 `heartbeat_timeout`。
+
+我会把它和 4G 收包慢分开处理，继续查 Pocket 的具体错误。16kbps 已实际启用，但还不能据此认定发送和断线问题已解决。
+
+## 476 · 助手提问 · 2026-11-04 15:05:00 +08:00
+
+这次已确定是 Pocket 先报错退出，Opus 解码错误为 0。请再看 Pocket 自己的错误分类日志（不用重测）：
+```bash
+docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Native voice upstream|Native voice audio receive failed|Native voice failed during' | tail -n 20
+```
+这些日志会帮助区分上游会话错误、WebRTC 接收故障和网络超时。
+
+## 477 · 用户 · 2026-11-04 15:05:31 +08:00
+
+问题：这次已确定是 Pocket 先报错退出，Opus 解码错误为 0。请再看 Pocket 自己的错误分类日志（不用重测）：
+```bash
+docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Native voice upstream|Native voice audio receive failed|Native voice failed during' | tail -n 20
+```
+这些日志会帮助区分上游会话错误、WebRTC 接收故障和网络超时。
+
+回答：root@VM-0-14-ubuntu:~/Voxi# docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 | grep -E 'Native voice upstream|Native voice audio receive failed|Native voice failed during' | tail -n 20
+2026-11-04T07:00:32.609474399Z 2026-11-04 07:00:32,609 WARNING Native voice audio receive failed (MediaStreamError) peer=closed outputting=True generation_done=False
+
+## 478 · 助手 · 2026-11-04 15:05:54 +08:00
+
+具体错误找到了：Pocket 的 WebRTC 音频接收抛出 `MediaStreamError`，当时连接已是 `closed`，而回复尚未生成完成。这确认了本次离线发生在云端 WebRTC 会话这一层，和设备 Opus 解码失败不同。
+
+我会继续核对是连接异常关闭，还是会话清理时序触发了这条错误，避免把正常清理误报成故障。
