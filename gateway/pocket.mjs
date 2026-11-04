@@ -2,6 +2,7 @@ import {encodeMulaw} from './mulaw.mjs';
 import WebSocket from 'ws';
 import {RadioFilter} from './radio.mjs';
 import {PcmPacer} from './pcm-pacer.mjs';
+import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
@@ -10,6 +11,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
     headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false;
   let replyNumber=0,reply=null;
+  const opus=audioFormat===OPUS_FORMAT?new OpusDownlink():null;
   const finishReply=outcome=>{
     if(!reply)return;
     const {lastSourceAt,lastSendAt,startedAt,...metrics}=reply;
@@ -23,21 +25,33 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
     if(device.readyState===1){device.closeOrigin='pocket_error';device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
-  const deliver=(data,binary)=>{
+  const sendWire=(data,binary)=>{
     if(device.readyState!==1)return;
-    if(binary&&audioFormat==='mulaw8-24000')data=encodeMulaw(data);
-    let eventType;
-    if(!binary){const e=JSON.parse(data);eventType=e.type;if(e.type==='ready'){e.audioFormat=audioFormat;data=JSON.stringify(e);}
-      if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
-      if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
-    }
     device.send(data,{binary});
     if(binary&&reply){
       const now=performance.now();
       if(reply.lastSendAt!==null)reply.maxSendGapMs=Math.max(reply.maxSendGapMs,Math.round(now-reply.lastSendAt));
       reply.lastSendAt=now;reply.sentBytes+=data.length;
     }
-    if(eventType==='audio_end')finishReply('complete');
+  };
+  const deliver=(data,binary)=>{
+    if(device.readyState!==1)return;
+    try{
+      if(binary){
+        if(opus){for(const packet of opus.audio(data))sendWire(packet,true);}
+        else sendWire(audioFormat==='mulaw8-24000'?encodeMulaw(data):data,true);
+        return;
+      }
+      const e=JSON.parse(data);
+      if(e.type==='ready'){e.audioFormat=audioFormat;if(opus)e.audioBitrate=OPUS_BITRATE;}
+      if(e.type==='audio_start'&&opus)opus.reset();
+      if(e.type==='audio_end'&&opus)for(const packet of opus.finish())sendWire(packet,true);
+      if(['flush','connecting','offline','error'].includes(e.type))opus?.close();
+      if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
+      if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
+      sendWire(JSON.stringify(e),false);
+      if(e.type==='audio_end')finishReply('complete');
+    }catch{error('Downlink audio encoding failed');}
   };
   const pacer=new PcmPacer({send:deliver,fail:error,
     canSend:()=>{
@@ -103,6 +117,6 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
     error(labels[e.code]||'Cannot connect to Pocket native voice; verify backend deployment and device bearer');
   });
   upstream.on('close',(code)=>{finishReply('pocket_closed');console.log(JSON.stringify({event:'pocket_closed',code,inputBytes:bytes,failed}));if(device.readyState===1){device.closeOrigin='pocket_closed';device.send(JSON.stringify({type:'offline'}));device.close(1012,'Pocket disconnected');}});
-  device.on('close',()=>{finishReply('device_closed');clearInterval(pacing);pacer.clear();upstream.close();});
+  device.on('close',()=>{finishReply('device_closed');clearInterval(pacing);pacer.clear();opus?.close();upstream.close();});
   return upstream;
 }

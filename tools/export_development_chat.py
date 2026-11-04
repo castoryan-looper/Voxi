@@ -108,6 +108,7 @@ def render(rows):
             "接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。", "",
             f"共 {len(rows)} 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。", ""]
     for i, (timestamp, role, body) in enumerate(rows, 1):
+        body = "\n".join(line.rstrip() for line in body.splitlines())
         text.extend([f"## {i:03d} · {role} · {local_time(timestamp)}", "", body, ""])
     return "\n".join(text).rstrip() + "\n"
 

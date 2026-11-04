@@ -6,7 +6,7 @@
 
 接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。
 
-共 402 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
+共 452 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
 
 ## 001 · 用户 · 2026-11-03 16:17:12 +08:00
 
@@ -1087,8 +1087,8 @@ Already up to date.
 Total reclaimed space: 0B
 Reusing voxi-gateway:d80e804b079627787950420bc97a6e3a80407851
 [+] Running 2/2
- ✔ Container voxi-gateway-1  Healthy                                                                                                                                                                                                                 8.3s 
- ✔ Container voxi-proxy-1    Healthy                                                                                                                                                                                                                 3.3s 
+ ✔ Container voxi-gateway-1  Healthy                                                                                                                                                                                                                 8.3s
+ ✔ Container voxi-proxy-1    Healthy                                                                                                                                                                                                                 3.3s
 Total reclaimed space: 0B
 Deployed d80e804b079627787950420bc97a6e3a80407851
 2
@@ -1642,7 +1642,7 @@ Another deployment is running; skipped.
   "failed_at": 1793723969.6625874,
   "failed_commit": "ab02609e3bb4b3063f1eef53b33ea4e5100d9334"
 }
-root@VM-0-14-ubuntu:~/Voxi# 
+root@VM-0-14-ubuntu:~/Voxi#
 root@VM-0-14-ubuntu:~/Voxi# cd ~/Voxi
 git -c core.hooksPath=/dev/null pull --ff-only
 sudo bash deploy/deploy.sh
@@ -3109,3 +3109,397 @@ docker logs --since=10m codex-pocket-gateway-1 2>&1 | grep 'Native voice media s
 ## 402 · 助手 · 2026-11-04 09:27:16 +08:00
 
 我会把这次按键交互、播放缓冲和状态显示的修改提交到 GitHub，并更新脱敏对话记录和接续说明，注明实机验证进度。
+
+## 403 · 助手 · 2026-11-04 09:28:54 +08:00
+
+本次修改已编译、烧录，设备已通过 4G 恢复 READY；C6 兼容构建和相关测试也已通过。脱敏对话已更新为 402 条可见消息，正在推送并核对远端版本。交接中已注明：长停顿尚未根治，修正版的长故事效果仍待验证。
+
+## 404 · 助手 · 2026-11-04 09:29:11 +08:00
+
+已同步到 GitHub，远端核对一致：`eb6eac8`。
+
+包含本次代码修改、402 条脱敏对话及最新交接说明。固件已烧录并恢复 READY；长故事卡顿改善效果仍待验证，已记入待办。
+
+换电脑后从[接续指南](https://github.com/castoryan-looper/Voxi/blob/main/docs/handoffs/LATEST.md)开始即可。
+
+## 405 · 用户 · 2026-11-04 14:00:06 +08:00
+
+显示playing以后，很久才说话，然后过一会会buffering一下，是网络不太好？
+
+## 406 · 助手 · 2026-11-04 14:00:18 +08:00
+
+是的，目前证据更指向 **4G 下行传输不稳定或速度不足**，但还不能单凭信号强弱确定原因。
+
+之前抓到的情况是：
+
+- 云端上游没有丢包，最大收包间隔约 0.22 秒。
+- 设备端却出现过 **18 秒没收到新音频**，本地接收缓冲和扬声器没有报错。
+
+显示 PLAYING 后迟迟没声音，是因为目前这个状态在收到音频时就出现，实际还要先积攒 **6 秒音频**；网络传得慢，等待时间就会超过 6 秒。中途 BUFFERING 则表示播放速度超过了接收速度，缓冲耗尽了。最新版攒到约 2 秒音频就会恢复。
+
+所以这不太像 S3 性能不够。下一步用同一台设备、同样的故事切到 Wi‑Fi 对比，最容易确认是否主要出在 4G 链路；页面上的 PLAYING 也应该改成实际出声后才显示，预缓冲期间显示“正在缓冲”。
+
+## 407 · 用户 · 2026-11-04 14:02:14 +08:00
+
+应该怎么往下检查？
+
+## 408 · 助手 · 2026-11-04 14:02:23 +08:00
+
+下一步先做同一台设备的 Wi‑Fi／4G 对比，最容易缩小范围。
+
+1. 先保持 4G，让它讲约 1 分钟故事，记录“开始等待多久、途中停顿几次”。
+2. 在 USB 管理页切换到 Wi‑Fi，保留网关、令牌、CA，再重复相同测试。
+3. 两轮测试后，在云端执行：
+
+```bash
+docker logs --since=15m --timestamps voxi-gateway-1 2>&1 \
+  | grep -E 'device_closed|pocket_closed|heartbeat_timeout|pocket_relay_error' \
+  | tail -n 40
+```
+
+把测试结果和日志贴回来。判断方向是：
+
+- **Wi‑Fi 顺畅、4G 卡顿**：重点查蜂窝下行、模组与串口传输。
+- **两种都卡顿**：重点查网关下行与设备播放逻辑。
+- **出现断线日志**：先按关闭原因排查连接，不能只调大缓冲。
+
+测试时管理页保持串口断开、USB 插着，我可以同步读取收包间隔、缓冲水位和模组错误。之前的云端与设备日志还没有严格关联到同一轮，对比测试能把证据补齐。
+
+## 409 · 用户 · 2026-11-04 14:02:36 +08:00
+
+root@VM-0-14-ubuntu:~# docker logs --since=15m --timestamps voxi-gateway-1 2>&1 \
+  | grep -E 'device_closed|pocket_closed|heartbeat_timeout|pocket_relay_error' \
+  | tail -n 40
+2026-11-04T06:00:14.942339144Z {"event":"device_heartbeat_timeout","connection":3,"ageMs":90033,"sentPings":2,"pongs":1,"pings":0,"lastPongAgoMs":54593,"lastPingAgoMs":null,"queuedPcmBytes":2880,"tcpBufferedBytes":0}
+2026-11-04T06:00:14.959920123Z {"event":"device_closed","connection":3,"code":1006,"inputBytes":210720,"origin":"heartbeat_timeout","ageMs":90061,"sentPings":2,"pongs":1,"pings":0,"lastPongAgoMs":54621,"lastPingAgoMs":null,"queuedPcmBytes":2880,"tcpBufferedBytes":0}
+2026-11-04T06:00:14.959943607Z {"event":"pocket_downlink","connection":3,"reply":1,"outcome":"device_closed","audioFormat":"mulaw8-24000","elapsedMs":62731,"sourcePcmBytes":2849280,"sentBytes":1423200,"maxSourceGapMs":586,"maxSendGapMs":586,"peakQueuedPcmBytes":8640,"peakTcpBufferedBytes":0}
+2026-11-04T06:00:14.993517851Z {"event":"pocket_closed","code":1000,"inputBytes":210720,"failed":false}
+
+## 410 · 助手 · 2026-11-04 14:02:42 +08:00
+
+这次日志明确记录了网关因心跳超时断开设备。我会核对心跳判定逻辑，以及语音发送和 Pong 回包的关系，看看为什么云端仍在发送音频，却收不到设备心跳。
+
+## 411 · 助手 · 2026-11-04 14:03:04 +08:00
+
+这次已明确：**最终断线是网关收不到设备的 Pong 心跳回包，主动断开的。**
+
+日志说明：
+
+- 连接约 90 秒时被断开，最后一次收到 Pong 已是约 55 秒前。
+- 云端音频来源和发送的最大间隔都只有 **586ms**，没有出现此前设备端的 18 秒空档。
+- 网关待发音频很少，TCP 发送缓冲为 0，说明网关没有明显积压；但这不代表设备已经收到并播放。
+
+因此重点应查 **4G 下行接收与心跳回包**，不能只继续增大播放缓冲。目前还不能确定是蜂窝链路停顿，还是设备接收处理阻塞。
+
+USB 现在可以读取，但设备刚从待机唤醒，上一轮统计已重置。下一轮需要同步采集设备数据：等 READY 后再讲约一分钟故事，出现停顿时回复“卡了”，保持 USB 插着、管理页串口断开。我会对照收包空档、Ping/Pong 计数和模组断线原因定位。
+
+## 412 · 用户 · 2026-11-04 14:04:59 +08:00
+
+卡了
+
+## 413 · 助手 · 2026-11-04 14:05:04 +08:00
+
+我现在读取设备的收包、缓冲和心跳状态，先不要发起下一轮对话，保留这次卡顿的统计。
+
+## 414 · 助手 · 2026-11-04 14:05:55 +08:00
+
+抓到了：这轮已发生 **7 次缓冲耗尽，最长 9.3 秒没收到新音频**。扬声器无写入错误，接收无溢出，播放处理最大间隔仅 31ms，说明不是播放算不过来。
+
+采样的约 34 秒里只收到约 26 万字节音频，平均约 **7.6KB/s**，而连续播放需要 **24KB/s**。因此会“讲几秒、等几秒”，单纯调大缓冲无法解决。
+
+请再贴这轮对应的云端日志：
+
+```bash
+docker logs --since=5m --timestamps voxi-gateway-1 2>&1 \
+  | grep -E 'pocket_downlink|device_heartbeat_timeout|device_closed' \
+  | tail -n 15
+```
+
+然后用同一设备切到 Wi‑Fi 重复测试。如果 Wi‑Fi 顺畅，就能进一步把问题锁定在蜂窝链路或 ML307 接收路径。
+
+## 415 · 用户 · 2026-11-04 14:06:20 +08:00
+
+root@VM-0-14-ubuntu:~# docker logs --since=5m --timestamps voxi-gateway-1 2>&1 \
+  | grep -E 'pocket_downlink|device_heartbeat_timeout|device_closed' \
+  | tail -n 15
+2026-11-04T06:02:47.324227084Z {"event":"device_closed","connection":4,"code":1006,"inputBytes":0,"origin":"peer_or_transport","ageMs":46895,"sentPings":1,"pongs":1,"pings":2,"lastPongAgoMs":16567,"lastPingAgoMs":1561,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T06:03:39.871129750Z {"event":"pocket_downlink","connection":5,"reply":1,"outcome":"complete","audioFormat":"mulaw8-24000","elapsedMs":2313,"sourcePcmBytes":110400,"sentBytes":55200,"maxSourceGapMs":82,"maxSendGapMs":26,"peakQueuedPcmBytes":2880,"peakTcpBufferedBytes":0}
+2026-11-04T06:04:46.556180217Z {"event":"pocket_downlink","connection":5,"reply":2,"outcome":"complete","audioFormat":"mulaw8-24000","elapsedMs":27183,"sourcePcmBytes":1190400,"sentBytes":595200,"maxSourceGapMs":265,"maxSendGapMs":243,"peakQueuedPcmBytes":12480,"peakTcpBufferedBytes":0}
+2026-11-04T06:05:04.911818380Z {"event":"device_heartbeat_timeout","connection":5,"ageMs":120033,"sentPings":3,"pongs":2,"pings":0,"lastPongAgoMs":59835,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+2026-11-04T06:05:04.968994959Z {"event":"device_closed","connection":5,"code":1006,"inputBytes":365280,"origin":"heartbeat_timeout","ageMs":120101,"sentPings":3,"pongs":2,"pings":0,"lastPongAgoMs":59903,"lastPingAgoMs":null,"queuedPcmBytes":0,"tcpBufferedBytes":0}
+
+## 416 · 助手 · 2026-11-04 14:06:27 +08:00
+
+这组日志进一步把问题缩小到 **网关发送之后、设备播放之前的 4G 接收链路**：
+
+- 网关在 **27.2 秒**内发送了这轮全部音频，最大间隔仅 **243ms**，没有明显发送积压。
+- 设备端却出现 **9.3 秒收包空档、7 次缓冲耗尽**，明显跟不上。
+- 网关发送结束约 18 秒后，因迟迟收不到 Pong，主动断开了连接。
+
+这里的 `outcome:"complete"` 只表示网关发送完成，**不代表设备已完整收到或播放**。
+
+下一步最关键的是同板 Wi‑Fi 对比：在 USB 管理页切到 Wi‑Fi，保留令牌和 CA，再讲一次约一分钟故事。
+
+如果 Wi‑Fi 顺畅，就集中检查 ML307 到 ESP32 的 TCP／TLS 接收路径，以及 Pong 是否被积压音频挡住。当前证据还不足以区分运营商链路问题与模组接收问题；继续加缓冲或延长心跳，只能掩盖现象。
+
+## 417 · 用户 · 2026-11-04 14:07:41 +08:00
+
+我现在没办法进入管理页面，切换wifi/4g
+
+## 418 · 助手 · 2026-11-04 14:07:43 +08:00
+
+我先检查本机管理服务和 USB 连接，恢复管理页面后再切换联网模式。
+
+## 419 · 助手 · 2026-11-04 14:08:09 +08:00
+
+原因找到了：电脑上的 USB 管理服务没在运行。我已重新启动，页面已能正常访问。
+
+打开或刷新 [设备管理页](http://127.0.0.1:8788/)，然后：
+
+1. 点击“连接 USB 设备”，选择 COM15。
+2. 在“联网方式”选择 Wi‑Fi，填写 2.4GHz 网络。
+3. 保留原有令牌和 CA，保存后等设备重启。
+
+请用 Chrome 或 Edge 打开；若 USB 连接无响应，先唤醒设备，必要时拔插一次数据线。
+
+## 420 · 用户 · 2026-11-04 14:10:27 +08:00
+
+我测试了wifi路径，这个很正常。重点检查下ml307这块吧
+
+## 421 · 助手 · 2026-11-04 14:10:31 +08:00
+
+Wi‑Fi 正常，说明问题集中在 4G 路径。我会重点检查 ML307 收包、串口传输、TLS 读取和心跳回包，先定位数据在哪一层变慢。
+
+## 422 · 助手提问 · 2026-11-04 14:11:01 +08:00
+
+已检查：COM15 当前被管理页面占用。请在 USB 管理页点“断开连接”，保持设备开机、USB 插着，回复“已断开”。我需要读取 ML307 的实时接收状态，代码检查会继续进行。
+
+## 423 · 助手 · 2026-11-04 14:12:02 +08:00
+
+代码核对后，暂未发现串口带宽或缓冲容量不足的证据。接下来要区分两种情况：模组本身输出数据就慢，还是数据已到 ESP32，却卡在 TLS／WebSocket 读取。
+
+另有一个需要验证的疑点：当前初始化没有明确关闭 ML307 的低功耗模式，是否影响这块模组还不能确定。USB 串口仍被管理页占用，拿到实时诊断后才能继续缩小范围。
+
+## 424 · 助手 · 2026-11-04 14:12:12 +08:00
+
+Wi‑Fi 对比已把范围缩小到 **ML307 的 4G 接收路径**。目前重点查：
+
+- 模组输出 TCP 数据是否本身变慢。
+- 数据到达后，TLS 解密／WebSocket 处理是否积压，连带拖延 Pong。
+- 模组低功耗设置是否影响持续收包；这项目前只是疑点。
+
+现在 COM15 仍被管理页占用，无法继续读取实时数据。请点管理页的“断开连接”，保持 USB 插着、设备开机，回复“已断开”，我接着检查。
+
+## 425 · 用户 · 2026-11-04 14:15:08 +08:00
+
+问题：已检查：COM15 当前被管理页面占用。请在 USB 管理页点“断开连接”，保持设备开机、USB 插着，回复“已断开”。我需要读取 ML307 的实时接收状态，代码检查会继续进行。
+
+回答：已断开
+
+## 426 · 助手 · 2026-11-04 14:15:14 +08:00
+
+我现在读取设备状态，确认联网模式，再看 ML307 和音频接收计数是否有积压。
+
+## 427 · 助手 · 2026-11-04 14:15:38 +08:00
+
+Wi‑Fi 这轮统计也正常：约 216 万字节回复完整播放，零重新缓冲，最大收包间隔只有 146ms。
+
+我会切回 4G，对比模组收到的 TCP 字节、ESP32 中待读取的数据，以及实际交给播放器的音频，定位变慢的层次。
+
+## 428 · 助手提问 · 2026-11-04 14:16:05 +08:00
+
+已切回纯 4G 并恢复 READY。请按住音量＋，让它讲一段约 30 秒的故事，松开发送；这次不用切模式或操作管理页，我会采集 TCP 接收量、待处理缓冲和音频处理量，卡顿时回复“卡了”即可。
+
+## 429 · 助手提问 · 2026-11-04 14:16:43 +08:00
+
+故事正在播放或卡顿时，请在云端执行这条只读命令并贴出结果，用来检查到 4G 设备的 TCP 重传和延迟：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+不需要安装软件或修改服务器配置。
+
+## 430 · 助手 · 2026-11-04 14:17:10 +08:00
+
+这轮已把范围进一步缩小：模组交给 ESP32 的 TCP 数据平均约 6KB/s，解码后的音频约 5.3KB/s，低于连续播放所需的 24KB/s。
+
+ESP32 的待读取 TCP 缓冲最高只有约 1.3KB，也没有接收溢出，暂不支持“数据已大量到达、却被 TLS 处理堵住”的判断。现在重点是模组输出之前的链路；云端 TCP 重传和延迟统计能帮助继续区分。
+
+## 431 · 助手 · 2026-11-04 14:18:04 +08:00
+
+这轮已进一步定位：
+
+- ML307 交给 ESP32 的 TCP 数据仅约 **5KB/s**，连续播放需要 **24KB/s**。
+- 最长收包空档 **16.6 秒**。
+- ESP32 待读取缓冲几乎为空，接收无溢出，扬声器无错误。
+
+因此更指向 **蜂窝网络到模组、或模组输出这一段变慢**，暂不支持 TLS 解密积压的判断，也还不能认定模组硬件有问题。
+
+设备目前已切回 4G。请在卡顿时贴出下面命令的结果，用 TCP 重传、延迟和发送积压继续区分：
+
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+
+## 432 · 用户 · 2026-11-04 14:18:05 +08:00
+
+问题：已切回纯 4G 并恢复 READY。请按住音量＋，让它讲一段约 30 秒的故事，松开发送；这次不用切模式或操作管理页，我会采集 TCP 接收量、待处理缓冲和音频处理量，卡顿时回复“卡了”即可。
+
+回答：卡了
+
+问题：故事正在播放或卡顿时，请在云端执行这条只读命令并贴出结果，用来检查到 4G 设备的 TCP 重传和延迟：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+不需要安装软件或修改服务器配置。
+
+回答：root@VM-0-14-ubuntu:~# sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+Recv-Q                          Send-Q                                                         Local Address:Port                                                            Peer Address:Port                           Process
+0                               60720                                                    [::ffff:172.20.0.2]:443                                                     [::ffff:36.7.99.190]:56864
+         cubic wscale:1,7 rto:2188 backoff:2 rtt:218.934/82.001 ato:40 mss:1380 pmtu:1500 rcvmss:1380 advmss:1460 cwnd:2 ssthresh:2 bytes_sent:516679 bytes_retrans:153853 bytes_acked:357306 bytes_received:222765 segs_out:576 segs_in:485 data_segs_out:399 data_segs_in:178 send 100852bps lastsnd:954 lastrcv:34061 lastack:954 pacing_rate 121016bps delivery_rate 5240bps delivered:276 busy:80182ms unacked:4 retrans:0/121 lost:1 sacked:1 rcv_rtt:1920.31 rcv_space:64860 rcv_ssthresh:399640 notsent:55200 minrtt:124.951 rcv_ooopack:1 snd_wnd:62860
+
+## 433 · 助手 · 2026-11-04 14:18:30 +08:00
+
+这条日志抓到关键原因了：**公网到这张 4G SIM 的 TCP 链路正在大量重传，导致音频供给不足。**
+
+- `bytes_retrans:153853`：约 30% 的发送字节用于重传，**不等于 30% 丢包率**。
+- `cwnd:2`：发送窗口已缩到约两个数据包，吞吐受到严重限制。
+- `rto:2188 backoff:2`：出现重传超时并退避，足以造成数秒停顿。
+- `Send-Q:60720`：约 60KB 数据积压在服务器 TCP 层。
+
+这也解释了之前“网关发送完成，设备却迟迟没收到”：数据交给了服务器网络栈，尚未可靠送达设备。**目前更应查蜂窝链路，而非继续调 ESP32 播放缓冲；也不能据此认定 ML307 硬件坏了。**
+
+下一步按这个顺序做对比：
+
+1. 检查 4G 天线接头是否牢靠，把天线移到窗边、远离屏幕和主板，再测相同故事。
+2. 若仍卡顿，用另一张可用 SIM，最好不同运营商，再测。
+3. 每次卡顿时重复刚才的 `ss` 命令，对比重传是否明显下降、`cwnd` 是否恢复。
+
+如果换位置无改善、换运营商明显改善，就更指向当前运营商链路；若都一样，再深入检查模组射频、供电和固件设置。
+
+## 434 · 用户 · 2026-11-04 14:19:50 +08:00
+
+我调整了一下天线位置，再试试，我现在让他讲两分钟故事
+
+## 435 · 助手 · 2026-11-04 14:19:55 +08:00
+
+我会采集这两分钟的收包速度、音频空档和缓冲次数，和调整天线前对比。先保持这轮故事继续播放。
+
+## 436 · 助手 · 2026-11-04 14:21:17 +08:00
+
+前半分钟的数据有所改善：音频接收约 13.6KB/s，高于调整前的约 5KB/s；但仍低于播放所需的 24KB/s，已经发生一次缓冲耗尽。我会继续看后半段，暂不判断已经解决。
+
+## 437 · 助手提问 · 2026-11-04 14:21:55 +08:00
+
+调整天线后速度提高了，但仍有卡顿。请在这轮播放期间再执行一次下面命令并贴出输出，我会和调整前的 TCP 重传情况对比：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+
+## 438 · 用户 · 2026-11-04 14:22:17 +08:00
+
+问题：调整天线后速度提高了，但仍有卡顿。请在这轮播放期间再执行一次下面命令并贴出输出，我会和调整前的 TCP 重传情况对比：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+
+回答：root@VM-0-14-ubuntu:~# sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+Recv-Q                               Send-Q                                                                    Local Address:Port                                                                        Peer Address:Port                                Process
+0                                    0                                                                            172.20.0.2:59680                                                                         172.20.0.3:8787
+         cubic wscale:7,7 rto:205 rtt:4.867/9.058 ato:90 mss:1448 pmtu:1500 rcvmss:536 advmss:1448 cwnd:10 bytes_sent:152906 bytes_acked:152907 bytes_received:1080427 segs_out:1724 segs_in:2371 data_segs_out:167 data_segs_in:2283 send 23801110bps lastsnd:3416 lastrcv:3744 lastack:3416 pacing_rate 47599768bps delivery_rate 1053090904bps delivered:168 app_limited busy:107ms rcv_rtt:3251.84 rcv_space:64421 rcv_ssthresh:1180014 minrtt:0.022 snd_wnd:85248
+0                                    0                                                                   [::ffff:172.20.0.2]:443                                                                 [::ffff:36.7.99.190]:56866
+         cubic wscale:1,7 rto:519 rtt:236.852/68.547 ato:40 mss:1380 pmtu:1500 rcvmss:1380 advmss:1460 cwnd:4 ssthresh:3 bytes_sent:1329012 bytes_retrans:237847 bytes_acked:1091165 bytes_received:155708 segs_out:1101 segs_in:884 data_segs_out:978 data_segs_in:124 send 186446bps lastsnd:3741 lastrcv:3416 lastack:3416 pacing_rate 223728bps delivery_rate 38016bps delivered:802 app_limited busy:89857ms retrans:0/176 rcv_rtt:1966.27 rcv_space:65887 rcv_ssthresh:253800 minrtt:121.477 snd_wnd:64208
+
+## 439 · 助手 · 2026-11-04 14:23:00 +08:00
+
+这轮已结束：收到的音频全部播放完毕，校验一致，没有中途断线；但仍发生了 6 次缓冲耗尽，最长收包空档约 5.2 秒。
+
+云端统计也显示改善：重传字节占比从约 30% 降到约 18%，发送窗口从 2 个包恢复到 4 个包。不过链路仍不够稳定，还不能算解决。
+
+## 440 · 助手 · 2026-11-04 14:23:09 +08:00
+
+调整后有改善，但还没解决。这轮音频完整播放、校验一致，没有断线，但仍卡顿了 **6 次**。
+
+| 指标 | 调整前 | 调整后 |
+|---|---:|---:|
+| 重传字节占比 | 29.8% | 17.9% |
+| TCP 发送窗口 | 2 个包 | 4 个包 |
+| 设备最大收包空档 | 16.6 秒 | 5.2 秒 |
+
+下一步最有价值的对比是：**同一张 SIM 放进手机，手机使用 4G 开热点，让设备通过 Wi‑Fi 连接热点**。
+
+- 如果顺畅：更指向 ML307、天线或供电。
+- 如果仍卡：更指向运营商到服务器的链路。
+
+这样比继续调缓冲更容易找到原因。
+
+## 441 · 用户 · 2026-11-04 14:23:10 +08:00
+
+还是卡了，可能4g物联网卡的流量就是有速率限制，是不是传输音频的码率可以再降一些？
+
+## 442 · 助手 · 2026-11-04 14:23:32 +08:00
+
+可以降。目前 4G 回复音频的有效码率约为 192kbps，弱网下负担确实偏大。我先核对压缩方案和设备端支持情况，选一个能明显降流量、又尽量保留语音清晰度的方案。
+
+## 443 · 助手 · 2026-11-04 14:23:44 +08:00
+
+可以，而且值得优先做。**是否限速尚未确认**，但当前音频码率确实偏高。
+
+目前 4G 使用 µ-law、24kHz 单声道，音频本身就需要 **192kbps（24KB/s）**，还没算协议和重传开销。
+
+| 方案 | 音频码率 | 相比现在 |
+|---|---:|---:|
+| 当前 µ-law 24kHz | 192kbps | — |
+| µ-law 8kHz | 64kbps | 降至 1/3，电话音质 |
+| Opus 语音压缩 | 16–24kbps | 降至约 1/8–1/12 |
+
+我建议采用 **Opus，先以 24kbps 为目标**，不够再降到 16kbps。它支持低码率语音和可调码率，更适合这种受限链路。[Opus 官方说明](https://opus-codec.org/)
+
+这需要云端增加编码、S3 增加解码，并同步更新格式协商，不能只改一个码率数字。按 24kbps 算，音频负载约 **3KB/s**，比目前实测的 5–13KB/s 接收速度更有余量；但严重断网或长时间重传仍可能造成停顿。
+
+## 444 · 用户 · 2026-11-04 14:23:55 +08:00
+
+好的，执行吧
+
+## 445 · 助手 · 2026-11-04 14:23:59 +08:00
+
+我开始实现 4G 下行 Opus 压缩，先以 24kbps 为目标。会保留旧格式兼容，验证云端编码和 S3 解码后再烧录，并把云端更新步骤准备好。
+
+## 446 · 助手提问 · 2026-11-04 14:25:00 +08:00
+
+目前 COM15 又处于待机后的无响应状态。请唤醒设备并拔插一次 USB，管理页保持断开，回复“已重新插线”。我会继续开发和测试 Opus，稍后需要读取实际按键版本并烧录。
+
+## 447 · 用户 · 2026-11-04 14:25:24 +08:00
+
+问题：目前 COM15 又处于待机后的无响应状态。请唤醒设备并拔插一次 USB，管理页保持断开，回复“已重新插线”。我会继续开发和测试 Opus，稍后需要读取实际按键版本并烧录。
+
+回答：已重新插线
+
+## 448 · 助手 · 2026-11-04 14:27:11 +08:00
+
+方案已定：云端用 Opus 将回复压到约 24kbps，S3 解码成原来的 24kHz 音频再播放，目标是把音频负载从约 24KB/s 降到 3KB/s。
+
+仓库里还有较新的 GPIO11 改装板支持，我已先合并这部分更新，避免覆盖。新旧格式会通过协商选择；旧云端尚未更新时，设备仍能使用原格式。
+
+## 449 · 助手 · 2026-11-04 14:28:00 +08:00
+
+云端编码已跑通：每 20ms 音频压成约 60 字节，加上顺序编号后约 3.2KB/s。接下来接入 S3 解码，并测试末尾音节、帧顺序和旧格式兼容。
+
+目前电脑没有枚举到 USB 设备，我会在烧录前重新检查。
+
+## 450 · 助手 · 2026-11-04 14:31:39 +08:00
+
+云端 49 项测试已通过，包含 Opus 协商、解码和末尾音频保留；S3 解码库也已成功链接，固件增加约 90KB。
+
+USB 已恢复，确认当前设备仍是音量＋录音版。接下来会烧录新版，并用与云端相同编码器生成的测试帧，在真实 S3 上验证解码。
+
+## 451 · 助手 · 2026-11-04 14:34:04 +08:00
+
+设备固件和 C6 兼容构建均已通过。正在验证真实 S3 的解码与错误帧拒绝；云端代码测试也已通过。
+
+接下来需要更新腾讯云上的 Voxi 网关，低码率才会实际启用。我会先推送已验证的代码，再给你部署命令；不需要更新 Pocket 后端。
+
+## 452 · 助手 · 2026-11-04 14:35:39 +08:00
+
+真实 S3 自检已通过：云端编码器生成的帧在设备上解码为 480 个采样，耗时约 3ms；错序帧和非法帧也按预期被拒绝。新固件已烧录，原有令牌、CA 和按键配置保留。
+
+我现在推送代码和交接记录，随后就可以更新云端、测试实际通话。

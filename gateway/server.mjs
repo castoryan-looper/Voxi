@@ -40,7 +40,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
   wss.on('connection',(device,req)=>{
-    const audioFormat=req.headers['x-voxi-audio-format']==='mulaw8-24000'?'mulaw8-24000':'pcm16-24000';
+    const offered=String(req.headers['x-voxi-downlink-codecs']||'').split(',').map(s=>s.trim());
+    const audioFormat=mode==='pocket'&&offered.includes('opus-24000-v1')?'opus-24000-v1':req.headers['x-voxi-audio-format']==='mulaw8-24000'?'mulaw8-24000':'pcm16-24000';
     const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
     const connection=++connectionSequence;let inputBytes=0;
     let observedChannel=null,observedBusy=false;

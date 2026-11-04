@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {WebSocketServer,WebSocket} from 'ws';
 import {createGateway} from './server.mjs';
 
-for(const audioFormat of [undefined,'mulaw8-24000'])test('Pocket proxy preserves uplink and negotiated downlink '+(audioFormat||'PCM16'),async t=>{
+for(const audioFormat of [undefined,'mulaw8-24000','opus-24000-v1'])test('Pocket proxy preserves uplink and negotiated downlink '+(audioFormat||'PCM16'),async t=>{
   const upstream=new WebSocketServer({port:0,host:'127.0.0.1'});
   await new Promise(r=>upstream.once('listening',r));
   const seen=[];const records=[];
@@ -24,7 +24,7 @@ for(const audioFormat of [undefined,'mulaw8-24000'])test('Pocket proxy preserves
   const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
-  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111',...(audioFormat?{'X-Voxi-Audio-Format':audioFormat}:{})}});
+  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111',...(audioFormat?{'X-Voxi-Audio-Format':'mulaw8-24000'}:{}),...(audioFormat==='opus-24000-v1'?{'X-Voxi-Downlink-Codecs':'opus-24000-v1,mulaw8-24000'}:{})}});
   const messages=[];let pcm=0;
   device.on('message',(raw,binary)=>{if(binary)pcm+=raw.length;else messages.push(JSON.parse(raw));});
   async function until(check){const start=Date.now();while(!check()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}
@@ -33,8 +33,8 @@ for(const audioFormat of [undefined,'mulaw8-24000'])test('Pocket proxy preserves
   await until(()=>messages.some(e=>e.type==='audio_end'));
   const downlink=records.find(e=>e.event==='pocket_downlink');
   assert.equal(downlink.connection,1);assert.equal(downlink.reply,1);assert.equal(downlink.outcome,'complete');
-  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,audioFormat?480:960);
-  assert.equal(messages.find(e=>e.type==='ready').audioFormat,audioFormat||'pcm16-24000');assert.equal(pcm,audioFormat?480:960);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
+  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,audioFormat==='opus-24000-v1'?128:audioFormat?480:960);
+  assert.equal(messages.find(e=>e.type==='ready').audioFormat,audioFormat||'pcm16-24000');assert.equal(pcm,audioFormat==='opus-24000-v1'?128:audioFormat?480:960);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
   device.send(JSON.stringify({type:'channel',channel:2}));await until(()=>seen.some(e=>e.channel===2));
   device.close();
 });

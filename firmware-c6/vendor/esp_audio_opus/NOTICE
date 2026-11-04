@@ -1,0 +1,7 @@
+Espressif esp_audio_codec 2.6.2, ESP32-S3 prebuilt decoder library and API headers.
+Source: https://github.com/espressif/esp-adf-libs/tree/6555790eb34de71339656f704d322b3db7fe0079/esp_audio_codec
+Upstream commit: 6555790eb34de71339656f704d322b3db7fe0079
+Archive SHA256: dc511e7ac323fd7a32a50ecb022608ec21a2e4eab3b5e075cf7fa1478612293c
+Only the Opus decoder entry points are linked into the MiniCam firmware.
+Licensed exclusively for use with Espressif products; see LICENSE and header notices.
+The archive is upstream's unmodified ESP32-S3 library, not host/server code.

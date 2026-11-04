@@ -18,6 +18,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "radio_network.h"
 #ifdef VOXI_BOARD_MINICAM
 #include "cellular_socket.h"
+#include "opus_reply.h"
 #endif
 #include "diagnostics.h"
 #include "ble_knob.h"
@@ -87,6 +88,9 @@ static uint8_t playback[CAP];
 #endif
 static void deviceIdentity(char* target,size_t size){uint8_t mac[6]={};if(esp_efuse_mac_get_default(mac)!=ESP_OK){if(size)target[0]=0;return;}formatDeviceIdentity(mac,target,size);}
 static size_t replyBytesPerSample=2;
+static bool replyOpus=false;
+static uint32_t replyWireBytes=0;
+static const char* replyFormat(){return replyOpus?"opus-24000-v1":replyBytesPerSample==1?"mulaw8-24000":"pcm16-24000";}
 size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
@@ -100,6 +104,13 @@ static PlaybackGate playbackGate;
 #endif
 static size_t fadeRemaining=120;
 void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyBytesPerSample==1?"mulaw8-24000":"pcm16-24000";out["replyWireBytesPerSecond"]=replyBytesPerSample*24000;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
+void opusDiagnostics(JsonDocument& out){
+ out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=replyOpus?3200:replyBytesPerSample*24000;
+ out["replyWireReceivedBytes"]=replyWireBytes;out["replyAudioBitrate"]=replyOpus?24000:replyBytesPerSample*24000*8;
+#ifdef VOXI_BOARD_MINICAM
+ out["opusDecodedFrames"]=opusReplyFrames;out["opusDecodeErrors"]=opusReplyErrors;out["opusDecodeMaxUs"]=opusReplyMaxUs;
+#endif
+}
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
@@ -198,7 +209,7 @@ static void networkTask(void*){
 #if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
   authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
 #elif defined(VOXI_BOARD_MINICAM)
-  if(radioUsesCellular())authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000";
+  if(radioUsesCellular())authorizationHeader+="\r\nX-Voxi-Audio-Format: mulaw8-24000\r\nX-Voxi-Downlink-Codecs: opus-24000-v1,mulaw8-24000,pcm16-24000";
 #endif
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
@@ -255,6 +266,14 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     radioDebugRx(len);
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
+#ifdef VOXI_BOARD_MINICAM
+    int16_t opusPcm[OPUS_REPLY_SAMPLES];
+    if(replyOpus){
+      if(!opusReplyDecode(data,len,opusPcm)){diagnosticError("Invalid Opus packet/sequence or decode failure");fault();return;}
+      replyWireBytes+=len;data=reinterpret_cast<uint8_t*>(opusPcm);len=sizeof(opusPcm);
+    }else
+#endif
+    replyWireBytes+=len;
     if(len%replyBytesPerSample||len>CAP-used){diagnosticError(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
     replyRxCrc=esp_rom_crc32_le(replyRxCrc,data,len);replyRxBytes+=len;
     for(size_t i=0;i<len;i++){playback[head]=data[i];head=(head+1)%CAP;}used+=len;playbackPeakBytes=max(playbackPeakBytes,used);return;
@@ -266,10 +285,17 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="ready"){
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular()){
-      size_t negotiated=String(d["audioFormat"]|"")=="mulaw8-24000"?1:2;
-      if(negotiated!=replyBytesPerSample||playbackGate.initialBytes!=6*24000*negotiated){replyBytesPerSample=negotiated;playbackGate.configure(6*24000*negotiated,12*24000*negotiated,2*24000*negotiated,true);}
+      String format=d["audioFormat"]|"pcm16-24000";
+      bool negotiatedOpus=format=="opus-24000-v1";
+      if(format!="opus-24000-v1"&&format!="mulaw8-24000"&&format!="pcm16-24000"){diagnosticError("Unsupported reply audio format");fault();return;}
+      size_t negotiated=format=="mulaw8-24000"?1:2;
+      size_t initial=(negotiatedOpus?2:6)*24000*negotiated;
+      if(negotiatedOpus&&!replyOpus&&!opusReplyReset()){diagnosticError("Cannot initialize Opus decoder");fault();return;}
+      if(replyOpus&&!negotiatedOpus)opusReplyClose();
+      if(negotiatedOpus!=replyOpus||negotiated!=replyBytesPerSample||playbackGate.initialBytes!=initial){replyBytesPerSample=negotiated;playbackGate.configure(initial,(negotiatedOpus?6:12)*24000*negotiated,(negotiatedOpus?1:2)*24000*negotiated,true);}
+      replyOpus=negotiatedOpus;
       // A mid-sentence refill must not repeat the growing 6--12s startup reserve.
-      playbackGate.resumeBytes=2*24000*negotiated;
+      playbackGate.resumeBytes=(replyOpus?1:2)*24000*negotiated;
     }
 #endif
 #if !defined(VOXI_BOARD_S3G)&&!defined(VOXI_BOARD_AMOLED)&&!defined(VOXI_BOARD_MINICAM)
@@ -290,7 +316,12 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush")flushAudio();
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
-  if(type=="audio_start"){replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("PLAYING","Reply audio started");thinking=false;played=0;ending=false;playing=true;}
+  if(type=="audio_start"){
+#ifdef VOXI_BOARD_MINICAM
+    if(replyOpus&&!opusReplyReset()){diagnosticError("Opus reset failed");fault();return;}
+#endif
+    replyWireBytes=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
+  }
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
 static bool startCachedUpload(bool test){
@@ -450,7 +481,8 @@ void loop(){
   for(int i=0;i<8&&xQueuePeek(incoming,&p,0)==pdTRUE;i++){
     // Leave a valid PCM frame queued until playback frees room. This pauses
     // socket reads via the bounded incoming queue, instead of discarding audio.
-    if(p.type==WStype_BIN&&p.len%replyBytesPerSample==0&&p.len<=CAP&&p.len>CAP-used)break;
+    size_t decodedBytes=replyOpus?960:p.len;
+    if(p.type==WStype_BIN&&(replyOpus||p.len%replyBytesPerSample==0)&&decodedBytes<=CAP&&decodedBytes>CAP-used)break;
     if(xQueueReceive(incoming,&p,0)!=pdTRUE)break;
     onWs(p.type,p.data,p.len);
   }
