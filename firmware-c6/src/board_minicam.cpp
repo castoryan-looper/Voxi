@@ -26,7 +26,7 @@ static const audio_codec_ctrl_if_t* codecControl;
 static esp_err_t codecWrite(uint8_t reg,uint8_t value){return codecControl->write_reg(codecControl,reg,1,&value,1);}
 static int volumePercent=45,batteryMv=-1,batteryLevel=-1;
 static bool displayReady=false;
-static bool mainHeld=false;
+static bool mainHeld=false,pttHeld=false;
 static int mainRaw=1,volumeKeyMv=0;
 static uint32_t mainClicks=0;
 static volatile bool standbyRequested=false,standbyDisplayReady=false;
@@ -36,7 +36,7 @@ bool speakerSetVolume(int value){if(value<0||value>100)return false;Preferences 
 int batteryPercent(){return batteryLevel;}
 int batteryMillivolts(){return batteryMv;}
 bool boardPowerPressed(){return false;}
-bool boardTouchPttPressed(){return mainHeld;}
+bool boardTouchPttPressed(){return pttHeld;}
 bool boardTouchActive(){return false;}
 int boardTouchWakePin(){return -1;}
 struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
@@ -59,6 +59,7 @@ void boardStatusTick(){
   auto action=controls.sample(now,volumeKeyMv,mainRaw==LOW);
   if(standbySuppressInput()){controls=MiniCamControls();action={};}
   mainHeld=controls.pressed();
+  pttHeld=controls.pttPressed();
   if(action.volumeDelta){standbyActivity();speakerSetVolume(constrain(volumePercent+action.volumeDelta,0,100));postView();}
   if(action.channelDelta){standbyActivity();requestChannelDelta(action.channelDelta);}
   if(action.talkChanged){
@@ -85,8 +86,8 @@ static void screenTask(void*){
   canvas.setTextColor(0x8c92);canvas.setTextSize(1);canvas.setCursor(12,166);canvas.printf("MIC %luK TX %luK RX %luK",(unsigned long)(s.debug.micBytes/1024),(unsigned long)(s.debug.txBytes/1024),(unsigned long)(s.debug.rxBytes/1024));
   canvas.setCursor(12,181);canvas.printf("VOL %d%%   BAT %d%%",s.volume,s.battery);
   for(int i=0;i<3;i++){canvas.setCursor(12,200+i*15);canvas.print(s.debug.logs[i]);}
-  canvas.setCursor(12,253);canvas.print(s.setup?(s.hotspot?s.name:"USB SETUP: 127.0.0.1:8788"):"Hold: talk / release: send");
-  canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Hold +/-: channel +/-");
+  canvas.setCursor(12,253);canvas.print(s.setup?(s.hotspot?s.name:"USB SETUP: 127.0.0.1:8788"):"Hold +: talk / release: send");
+  canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Hold -: previous channel");
   canvas.setCursor(12,290);canvas.print("Tap +/-: volume - / +");
   canvas.flush();displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
@@ -149,7 +150,7 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]="volume_up";out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 
 size_t audioWrite(const int16_t* mono,size_t samples){
   int16_t stereo[480];samples=min(samples,(size_t)240);
