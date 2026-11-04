@@ -29,3 +29,7 @@ bool boardTouchPttPressed();
 bool boardTouchActive();
 int boardTouchWakePin();
 bool boardPrepareStandby();
+#ifdef VOXI_BOARD_MINICAM
+bool boardSetIdle(bool idle);
+bool boardIdleInputActive();
+#endif

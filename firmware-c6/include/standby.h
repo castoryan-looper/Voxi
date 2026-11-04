@@ -5,3 +5,4 @@ void standbyActivity();
 void standbyTick(bool busy,bool provisioning);
 bool standbySuppressInput();
 void standbyDiagnostics(JsonDocument& out);
+bool standbySaveSettings(JsonVariantConst body,JsonDocument& out);

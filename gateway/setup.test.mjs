@@ -9,6 +9,21 @@ function page(){
  const context=vm.createContext({document:{getElementById:get,createElement:()=>({append(){}})},location:{protocol:'http:',hostname:'localhost'},TextDecoder,TextEncoder,Map,Set,Promise,Error,Number,JSON,Math,Option:class{constructor(text,value){this.text=text;this.value=value;}},setInterval(){},setTimeout,clearTimeout,sessionStorage:{setItem:(k,v)=>stored.set(k,v),getItem:k=>stored.get(k),removeItem:k=>stored.delete(k)}});
  vm.runInContext(source,context);return {context,get,stored};
 }
+
+test('standby settings preserve edits during polling, validate order and save without reboot',async()=>{
+ const {context,get}=page();
+ vm.runInContext("updateStandby({standbyMode:'tiered',standbyScreenMinutes:1,standbyLinkMinutes:5,standbySleepMinutes:15});",context);
+ assert.equal(get('standby').hidden,false);assert.equal(get('standbyLink').value,'5');
+ get('standbyLink').value='8';get('standbyLink').oninput();
+ vm.runInContext("updateStandby({standbyMode:'tiered',standbyScreenMinutes:1,standbyLinkMinutes:5,standbySleepMinutes:15});",context);
+ assert.equal(get('standbyLink').value,'8');
+ context.calls=[];vm.runInContext("api=async(method,body)=>{calls.push({method,body});return {standbyMode:'tiered',standbyScreenMinutes:1,standbyLinkMinutes:8,standbySleepMinutes:15,message:'已保存'};};",context);
+ get('standbySleep').value='2';await get('saveStandby').onclick();assert.equal(context.calls.length,0);
+ get('standbySleep').value='15';await get('saveStandby').onclick();assert.equal(context.calls.length,1);
+ assert.equal(context.calls[0].method,'standby_settings');assert.equal(context.calls[0].body.linkMinutes,8);
+ assert.equal(get('standbyMessage').textContent,'已保存');
+ await get('disconnect').onclick();assert.equal(get('standby').hidden,true);
+});
 test('save reports write failure and retains secrets for correction',async()=>{
  const {context,get}=page();get('password').value='password';get('token').value='test-token';
  vm.runInContext("api=async()=>{throw Error('存储写入失败');}",context);

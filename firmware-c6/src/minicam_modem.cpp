@@ -93,13 +93,14 @@ static void manager(void*){
  if(command("AT+CGMM",3000,&reply)){reply.trim();xSemaphoreTake(stateMutex,portMAX_DELAY);reply.toCharArray(state.model,sizeof(state.model));xSemaphoreGive(stateMutex);}
  if(selected&&apn[0]){command("AT+CFUN=0",5000);if(!command(String("AT+CGDCONT=1,\"IP\",\"")+apn+"\""))status("APN configuration rejected");}
  command("AT+CFUN=1",5000);command("AT+CEREG=2");
- uint32_t activationAt=0;
+ uint32_t activationAt=0;bool activationAttempted=false;
  for(;;){
   if(stopping){minicamTcpClose();bool ok=command("AT+CFUN=0",5000);if(ok)modem.StopReceive();stopped=ok;vTaskSuspend(nullptr);}
   if(!command("AT+CPIN?")){xSemaphoreTake(stateMutex,portMAX_DELAY);state.pollFailures++;xSemaphoreGive(stateMutex);}command("AT+CEREG?");command("AT+CSQ");
+  xSemaphoreTake(stateMutex,portMAX_DELAY);bool sim=state.simReady,reg=state.registered;xSemaphoreGive(stateMutex);
   if(selected){
    command("AT+MIPCALL?");
-   if(!ipUp&&millis()-activationAt>15000){activationAt=millis();command(apn[0]?String("AT+MIPCALL=1,1,\"")+apn+"\"":String("AT+MIPCALL=1,1"),10000);}
+   if(!ipUp&&sim&&reg&&(!activationAttempted||millis()-activationAt>15000)){activationAttempted=true;activationAt=millis();command(apn[0]?String("AT+MIPCALL=1,1,\"")+apn+"\"":String("AT+MIPCALL=1,1"),10000);}
    if(time(nullptr)<1700000000&&command("AT+CCLK?",3000,&reply)){
     int at=reply.indexOf(':');int64_t epoch=at>=0?cellularClock(std::string_view(reply.c_str()+at+1,reply.length()-at-1)):0;
     // Drop the trailing line terminator before parsing a quoted CCLK field.
@@ -107,9 +108,12 @@ static void manager(void*){
     if(epoch){timeval tv={(time_t)epoch,0};settimeofday(&tv,nullptr);}
    }
   }
-  xSemaphoreTake(stateMutex,portMAX_DELAY);bool sim=state.simReady,reg=state.registered;xSemaphoreGive(stateMutex);
   status(!sim?"SIM not ready":!reg?"registering":selected?(ipUp?"4G data ready":"activating data"):"registered; Wi-Fi selected");
-  for(int i=0;i<100&&!stopping;i++)vTaskDelay(pdMS_TO_TICKS(100));
+  for(int i=0;i<100&&!stopping;i++){
+   vTaskDelay(pdMS_TO_TICKS(100));
+   // Registration URCs can arrive between polls: start data immediately then.
+   if(selected&&!reg){xSemaphoreTake(stateMutex,portMAX_DELAY);bool nowRegistered=state.registered;xSemaphoreGive(stateMutex);if(nowRegistered)break;}
+  }
  }
 }
 void minicamModemBegin(){

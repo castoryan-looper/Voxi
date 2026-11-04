@@ -39,6 +39,8 @@ static constexpr const char* talkHint="Hold +: talk / release: send";
 static int mainRaw=1,volumeKeyMv=0;
 static uint32_t mainClicks=0;
 static volatile bool standbyRequested=false,standbyDisplayReady=false;
+static volatile bool idleDisplay=false,idleDisplayApplied=false;
+static bool idleAudio=false;
 static volatile uint32_t displayFrames=0;
 int speakerVolume(){return volumePercent;}
 bool speakerSetVolume(int value){if(value<0||value>100)return false;Preferences p;if(!p.begin("voxi-audio",false))return false;bool ok=p.putUChar("volume",value)==1;p.end();if(ok)volumePercent=value;return ok;}
@@ -47,6 +49,7 @@ int batteryMillivolts(){return batteryMv;}
 bool boardPowerPressed(){return false;}
 bool boardTouchPttPressed(){return pttHeld;}
 bool boardTouchActive(){return false;}
+bool boardIdleInputActive(){return mainRaw==LOW||MiniCamControls::volumeKey(volumeKeyMv)!=0;}
 int boardTouchWakePin(){return -1;}
 struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
 static View baseView;static QueueHandle_t views;
@@ -84,6 +87,12 @@ static void screenTask(void*){
  View s,previous;bool drawn=false;
  for(;;){
   if(standbyRequested){digitalWrite(42,HIGH);panel.displayOff();standbyDisplayReady=true;vTaskSuspend(nullptr);}
+  if(idleDisplay!=idleDisplayApplied){
+   if(idleDisplay){digitalWrite(42,HIGH);panel.displayOff();}
+   else{panel.displayOn();drawn=false;}
+   idleDisplayApplied=idleDisplay;
+  }
+  if(idleDisplay){vTaskDelay(pdMS_TO_TICKS(25));continue;}
   if(xQueueReceive(views,&s,pdMS_TO_TICKS(25))!=pdTRUE)continue;
   View next;while(xQueueReceive(views,&next,0)==pdTRUE)s=next;
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
@@ -98,7 +107,7 @@ static void screenTask(void*){
   canvas.setCursor(12,253);canvas.print(s.setup?(s.hotspot?s.name:"USB SETUP: 127.0.0.1:8788"):talkHint);
   canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Hold -: previous channel");
   canvas.setCursor(12,290);canvas.print("Tap +/-: volume - / +");
-  canvas.flush();displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
+  canvas.flush();digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
 }
 void displayChannel(int channel,bool){baseView.channel=channel;postView();}
@@ -140,7 +149,23 @@ void boardInit(){
  views=xQueueCreate(1,sizeof(View));assert(views);xTaskCreatePinnedToCore(screenTask,"st7789",6144,nullptr,1,nullptr,0);boardStatusTick();
 }
 bool boardPrepareStandby(){if(!minicamModemStandby())return false;standbyRequested=true;uint32_t began=millis();while(!standbyDisplayReady&&millis()-began<5000)delay(10);if(!standbyDisplayReady)return false;esp_codec_dev_set_out_mute(codec,true);esp_codec_dev_close(codec);i2s_channel_disable(output);i2s_channel_disable(input);return true;}
+bool boardSetIdle(bool idle){
+ if(idle==idleAudio){idleDisplay=idle;return true;}
+ if(idle){
+  if(esp_codec_dev_set_out_mute(codec,true)!=ESP_OK||esp_codec_dev_close(codec)!=ESP_OK)return false;
+ }else{
+  esp_codec_dev_sample_info_t fs={};fs.sample_rate=24000;fs.channel=2;fs.bits_per_sample=16;
+  if(esp_codec_dev_open(codec,&fs)!=ESP_OK)return false;
+  if(esp_codec_dev_set_out_vol(codec,80)!=ESP_OK||esp_codec_dev_set_in_gain(codec,24)!=ESP_OK||codecWrite(0x09,0xb0)!=ESP_OK)return false;
+  for(int reg=46;reg<=49;reg++)if(codecWrite(reg,30)!=ESP_OK)return false;
+  if(esp_codec_dev_set_out_mute(codec,false)!=ESP_OK)return false;
+ }
+ idleAudio=idle;idleDisplay=idle;
+ if(!idle)audioFlush();
+ return true;
+}
 void audioFlush(){
+  if(idleAudio)return;
   // Stop DMA and replace the whole six-descriptor queue with silence.
   if(!output)return;
   esp_err_t stopped=i2s_channel_disable(output);
@@ -151,6 +176,7 @@ void audioFlush(){
   if(enabled!=ESP_OK&&enabled!=ESP_ERR_INVALID_STATE)diagnosticError("audio enable failed");
 }
 size_t audioRead(int16_t* mono,size_t samples){
+  if(idleAudio)return 0;
   int16_t stereo[480];samples=min(samples,(size_t)240);size_t bytes=0;
   i2s_channel_read(input,stereo,samples*4,&bytes,0);
   for(size_t i=0;i<bytes/4;i++)mono[i]=stereo[2*i+MIC_SLOT];
@@ -162,6 +188,7 @@ bool speakerTestPending(){return testPending;}
 void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]=talkButtonName;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
 
 size_t audioWrite(const int16_t* mono,size_t samples){
+  if(idleAudio)return 0;
   int16_t stereo[480];samples=min(samples,(size_t)240);
   for(size_t i=0;i<samples;i++)stereo[2*i]=stereo[2*i+1]=speakerSample(mono[i],volumePercent);
   size_t bytes=0;esp_err_t err=i2s_channel_write(output,stereo,samples*4,&bytes,0);

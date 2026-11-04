@@ -15,6 +15,7 @@
 - [正辰 MiniCam 2.0 英寸适配进度](docs/zhengchen-minicam-2.0.md)：独立构建、ES8388 / ST7789，已实测显示、出声与 ML307R 4G 对话。
 - [MiniCam 4G 配置与验证](docs/MINICAM-4G.md)：Wi-Fi / 4G 切换、APN、CA 校验和 DMA 串口。
 - [统一 Opus 下行](docs/MINICAM-OPUS.md)：所有维护板型、Wi-Fi/4G 均为 16kbps Opus，不再回退旧下行格式；更新网关时需同步更新各设备固件。
+- [MiniCam 分级待机](docs/MINICAM-STANDBY.md)：1 分钟关屏保连接、5 分钟释放云端会话、15 分钟休眠，USB 页面可调整。
 - [AMOLED 1.8 V2 支持](docs/WAVESHARE-AMOLED18-V2.md)：实时状态、触摸对讲、CO5300/CST820。
 - [S3G 四彩屏编译与接线](docs/WAVESHARE-S3G.md)：8MB PSRAM、独立构建目标和静态彩屏。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
@@ -65,4 +66,4 @@ API Key、设备令牌和 TLS 私钥不能提交仓库。服务器配置在 `/et
 
 公网设备管理：见 [部署和使用说明](docs/CLOUD-ADMIN.md)，支持在线连接查看与数量上限实时调整。
 
-设备自动待机：空闲60秒关闭无线、音频和显示，通过按键/AMOLED触摸唤醒，详见 [待机设计与验收](docs/STANDBY.md)。
+设备自动待机：MiniCam 使用可配置的 [1／5／15 分钟分级待机](docs/MINICAM-STANDBY.md)，前两级唤醒无需整机重启；其他板型空闲60秒关闭无线、音频和显示，通过按键/AMOLED触摸唤醒，详见 [待机设计与验收](docs/STANDBY.md)。

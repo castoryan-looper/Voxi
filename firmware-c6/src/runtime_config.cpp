@@ -170,7 +170,7 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
 }
 void opusDiagnostics(JsonDocument& out);
 static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out){
-  standbyActivity();
+  if(method!="status"||!body["keepAwake"].is<bool>()||body["keepAwake"].as<bool>())standbyActivity();
   if(method=="config")fillConfig(out);
   else if(method=="status"){
     out["networkMode"]=radioConfig.networkMode;out["networkConnected"]=radioNetworkConnected();out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
@@ -205,6 +205,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     opusReplyClose();return ok?200:422;
   }
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
+  else if(method=="standby_settings"){if(busyNow){out["error"]="请等待录音或播放结束后设置";return 409;}if(!standbySaveSettings(body,out))return 400;}
   else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}
   else if(method=="squelch_test"){if(busyNow||!radioConfig.valid){out["error"]="请等待设备配置完成且空闲";return 409;}requestRadioCueTest();out["message"]="即将播放220ms无线电开台噪声";}
   else if(method=="speaker_test"){if(busyNow){out["error"]="请先等待录音或回复结束";return 409;}speakerTestRequest();out["message"]="即将播放两声本地测试音（不经过云端）";}
@@ -253,6 +254,7 @@ void setupBegin(){
   web.on("/api/bluetooth/scan",HTTP_POST,[](){webCall("bluetooth_scan_start");});web.on("/api/bluetooth/scan",HTTP_GET,[](){webCall("bluetooth_scan_results");});
   web.on("/api/bluetooth/pair",HTTP_POST,[](){webCall("bluetooth_pair");});web.on("/api/bluetooth/forget",HTTP_POST,[](){webCall("bluetooth_forget");});
   web.on("/api/speaker/volume",HTTP_POST,[](){webCall("speaker_volume");});
+  web.on("/api/standby",HTTP_POST,[](){webCall("standby_settings");});
   web.on("/api/speaker/test",HTTP_POST,[](){webCall("speaker_test");});
   web.on("/api/setup/open",HTTP_POST,[](){webCall("open");});web.on("/api/setup/close",HTTP_POST,[](){webCall("close");});
   web.onNotFound([](){web.sendHeader("Location","http://192.168.4.1/",true);web.send(302,"text/plain","");});

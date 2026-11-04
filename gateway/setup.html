@@ -14,19 +14,33 @@
 <section><h2>2 · 云端连接</h2><label for="import">导入连接配置 JSON（可选）</label><input id="import" type="file" accept=".json,application/json"><div class="row"><div><label for="host">云端 IP 或域名</label><input id="host" value="43.160.215.253" maxlength="253" required></div><div><label for="port">端口</label><input id="port" type="number" min="1" max="65535" value="9443" required></div></div><label class="check"><input id="tls" type="checkbox" checked>使用 TLS 加密（云端保持开启）</label><p id="cloudSaved" class="muted"></p><label for="token">设备令牌</label><input id="token" type="password" autocomplete="new-password" placeholder="已有令牌时留空保留"><label for="ca">服务器根 CA 证书（PEM，已保存时留空保留）</label><textarea id="ca" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>填写设备令牌，不是 OpenAI API Key。Pocket 账户模式无需 OpenAI API Key。</small></section>
 <button id="save" class="primary" type="submit">保存并重启设备</button><p id="saveMessage" role="status" aria-live="polite" style="white-space:pre-wrap;overflow-wrap:anywhere"></p><p class="muted">保存后等待状态变为「云端就绪」，按住 BOOT 说话，松开听回复。服务器处于 mock 时会返回短测试音。</p>
 </form>
+<section id="standby" hidden><h2>分级待机</h2><p>按空闲累计时间逐级进入。关屏保留连接；断开云端后保留网络；休眠最省电，唤醒需要重新联网。USB 管理页连接期间保持唤醒。</p><label for="standbyScreen">关屏并关闭音频（分钟）</label><input id="standbyScreen" type="number" min="1" max="1438" value="1"><label for="standbyLink">断开云端语音会话（分钟）</label><input id="standbyLink" type="number" min="2" max="1439" value="5"><label for="standbySleep">进入休眠（分钟）</label><input id="standbySleep" type="number" min="3" max="1440" value="15"><button type="button" id="saveStandby">保存待机设置</button><p id="standbyMessage" role="status" aria-live="polite"></p></section>
 <details><summary>没有 USB 时如何配置？</summary><p>设备上同时按住 BOOT + PWR 约 3 秒，连接墨水屏显示的 VOXI 热点，在浏览器打开 http://192.168.4.1/，使用屏幕 KEY 登录。检测到 USB 主机时优先使用 USB，配置热点关闭。</p></details>
 <script>
 'use strict';
 const $=id=>document.getElementById(id),apMode=location.protocol==='http:'&&!['localhost','127.0.0.1','[::1]'].includes(location.hostname);
 let port,reader,writer,buffer='',nextId=0,pending=new Map(),writing=Promise.resolve(),polling=false,saving=false,loaded=false,connecting=false;
-let volumeDirty=false;
+let volumeDirty=false,standbyDirty=false;
+function hideStandby(){$('standby').hidden=true;$('saveStandby').disabled=true;standbyDirty=false;}
+function updateStandby(s){
+ $('standby').hidden=s.standbyMode!=='tiered';if($('standby').hidden)return;
+ $('saveStandby').disabled=!!s.busy;
+ if(!standbyDirty){$('standbyScreen').value=String(s.standbyScreenMinutes);$('standbyLink').value=String(s.standbyLinkMinutes);$('standbySleep').value=String(s.standbySleepMinutes);}
+}
+for(const id of ['standbyScreen','standbyLink','standbySleep'])$(id).oninput=()=>{standbyDirty=true;$('standbyMessage').textContent='待机时间尚未保存';};
+$('saveStandby').onclick=async()=>{
+ const screenMinutes=Number($('standbyScreen').value),linkMinutes=Number($('standbyLink').value),sleepMinutes=Number($('standbySleep').value);
+ if(![screenMinutes,linkMinutes,sleepMinutes].every(Number.isInteger)||screenMinutes<1||screenMinutes>=linkMinutes||linkMinutes>=sleepMinutes||sleepMinutes>1440){$('standbyMessage').textContent='需要 1 ≤ 关屏 < 断开云端 < 休眠 ≤ 1440 分钟';return;}
+ $('saveStandby').disabled=true;$('standbyMessage').textContent='正在保存…';
+ try{const r=await api('standby_settings',{screenMinutes,linkMinutes,sleepMinutes});standbyDirty=false;updateStandby(r);$('standbyMessage').textContent=r.message;}catch(e){$('standbyMessage').textContent=e.message;}finally{$('saveStandby').disabled=false;}
+};
 const decoder=new TextDecoder();
 function message(s){$('message').textContent=s;$('saveMessage').textContent=s;}
 function rejectPending(){for(const p of pending.values()){clearTimeout(p.timer);p.reject(Error('USB 已断开，请重新连接'));}pending.clear();}
 async function readUsb(){
  try{while(port&&port.readable){reader=port.readable.getReader();try{while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});if(buffer.length>40000)buffer=buffer.slice(-16000);let n;while((n=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,n).trim();buffer=buffer.slice(n+1);if(!line.startsWith('VOXI_USB '))continue;let r;try{r=JSON.parse(line.slice(9));}catch{continue;}const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.status>=400?p.reject(Error(r.data?.error||'设备操作失败')):p.resolve(r.data);}}}}finally{reader.releaseLock();reader=null;}break;}}
  catch{message('USB 连接中断，请点击连接 USB 设备重连。');}
- finally{rejectPending();loaded=false;$('audio').hidden=true;for(const id of ['volumeSlider','speakerVolume','saveVolume','speakerTest'])$(id).disabled=true;}
+ finally{rejectPending();loaded=false;hideStandby();$('audio').hidden=true;for(const id of ['volumeSlider','speakerVolume','saveVolume','speakerTest'])$(id).disabled=true;}
 }
 async function connect(){
  if(connecting)return;connecting=true;
@@ -38,6 +52,7 @@ async function connect(){
  }catch(e){message(e.message);await disconnect(false);}finally{connecting=false;}
 }
 async function disconnect(notify=true){
+ hideStandby();
  rejectPending();if(reader)await reader.cancel().catch(()=>{});if(writer){try{writer.releaseLock();}catch{}writer=null;}
  if(port){await port.close().catch(()=>{});port=null;}
  buffer='';writing=Promise.resolve();loaded=false;volumeDirty=false;$('audio').hidden=true;for(const id of ['volumeSlider','speakerVolume','saveVolume','speakerTest'])$(id).disabled=true;$('volumeHint').textContent='连接 USB 设备后，自动读取已保存音量。';$('disconnect').disabled=true;
@@ -45,7 +60,7 @@ async function disconnect(notify=true){
 }
 async function api(method,body){
  if(apMode){const routes={config:'/api/config',status:'/api/status',save:'/api/config',scan_start:'/api/wifi/scan',scan_results:'/api/wifi/scan',wifi_forget:'/api/wifi/forget',bluetooth_scan_start:'/api/bluetooth/scan',bluetooth_scan_results:'/api/bluetooth/scan',bluetooth_pair:'/api/bluetooth/pair',bluetooth_forget:'/api/bluetooth/forget',open:'/api/setup/open',close:'/api/setup/close',speaker_test:'/api/speaker/test',speaker_volume:'/api/speaker/volume'};
-   const post=['save','scan_start','wifi_forget','bluetooth_scan_start','bluetooth_pair','bluetooth_forget','open','close','speaker_test','speaker_volume'].includes(method);const r=await fetch(routes[method],{method:post?'POST':'GET',headers:{'X-Setup-Key':$('setupKey').value,'Content-Type':'application/json'},body:post?JSON.stringify(body||{}):undefined,cache:'no-store'});
+   routes.standby_settings='/api/standby';const post=['save','scan_start','wifi_forget','bluetooth_scan_start','bluetooth_pair','bluetooth_forget','open','close','speaker_test','speaker_volume','standby_settings'].includes(method);const r=await fetch(routes[method],{method:post?'POST':'GET',headers:{'X-Setup-Key':$('setupKey').value,'Content-Type':'application/json'},body:post?JSON.stringify(body||{}):undefined,cache:'no-store'});
    const d=await r.json();if(!r.ok)throw Error(d.error||'设备操作失败');return d;}
  if(!writer)throw Error('请先连接 USB 设备');const id=++nextId;
  return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{pending.delete(id);reject(Error('设备响应超时，请稍后重试或重新连接'));},12000);pending.set(id,{resolve,reject,timer});
@@ -56,7 +71,7 @@ async function api(method,body){
    }).catch(e=>{const p=pending.get(id);if(p){clearTimeout(p.timer);pending.delete(id);p.reject(e);}});
  });
 }
-function wifiList(c){const selected=$('savedWifi').value;$('savedWifi').replaceChildren(new Option('选择已保存网络',''));for(const n of c.wifiProfiles||[])$('savedWifi').add(new Option(n.ssid+(n.connected?' · 已连接':n.preferred?' · 优先':''),n.ssid));$('savedWifi').value=selected;}
+function wifiList(c){if('standbyMode' in c)updateStandby(c);const selected=$('savedWifi').value;$('savedWifi').replaceChildren(new Option('选择已保存网络',''));for(const n of c.wifiProfiles||[])$('savedWifi').add(new Option(n.ssid+(n.connected?' · 已连接':n.preferred?' · 优先':''),n.ssid));$('savedWifi').value=selected;}
 function networkFields(){const cell=$('networkMode').value==='cellular';$('wifiFields').hidden=cell;$('cellularFields').hidden=!cell;$('ssid').required=!cell;}
 $('networkMode').onchange=networkFields;
 function fill(c){wifiList(c);$('cellularOption').disabled=!c.cellularSupported;$('networkMode').value=c.networkMode||'wifi';$('apn').value=c.apn||'';networkFields();for(const k of ['ssid','host','ca'])if(typeof c[k]==='string')$(k).value=c[k];if(Number.isInteger(c.port))$('port').value=c.port;if(typeof c.tls==='boolean')$('tls').checked=c.tls;

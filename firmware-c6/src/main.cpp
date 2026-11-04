@@ -119,6 +119,7 @@ struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
 struct TxPacket{WStype_t type;size_t len;uint8_t data[2048];};
 static QueueHandle_t incoming,outgoing;
 static volatile bool resetLink=false,queueFault=false,networkBusy=false,standbyNetworkRequested=false,standbyNetworkReady=false;
+static volatile bool warmNetworkRequested=false,warmNetworkReady=false;
 static volatile uint32_t networkLoopMaxMs=0,networkSendMaxMs=0,probeStallUntil=0;
 static uint8_t micBatch[1920],uploadBlock[1920];static size_t micBatchUsed=0,uploadBlockUsed=0;
 static bool uploadEof=false,submitQueued=false;
@@ -206,8 +207,10 @@ static void networkTask(void*){
   authorizationHeader="Authorization: Bearer "+radioConfig.token+"\r\nX-Voxi-Device-Id: "+identity;
   authorizationHeader+="\r\nX-Voxi-Audio-Format: opus-24000-v1\r\nX-Voxi-Downlink-Codecs: opus-24000-v1";
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
-  TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false;
+  TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false,wasWarm=false;
   while(true){if(standbyNetworkRequested){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
+    if(warmNetworkRequested){if(!warmNetworkReady){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);warmNetworkReady=true;}wasWarm=true;vTaskDelay(pdMS_TO_TICKS(10));continue;}
+    if(wasWarm){wasWarm=false;warmNetworkReady=false;retryAt=0;ws.setReconnectInterval(0);}
     if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();retryAt=millis()+5000;}
     if(radioNetworkConnected()&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
       if(probeStallUntil&&(int32_t)(millis()-probeStallUntil)<0){vTaskDelay(pdMS_TO_TICKS(10));continue;}
@@ -216,7 +219,7 @@ static void networkTask(void*){
       bool sending=connected&&(uploading||uxQueueMessagesWaiting(outgoing)>0);
       if(sending&&!heartbeatPaused){ws.disableHeartbeat();heartbeatPaused=true;}
       if(!sending&&heartbeatPaused){ws.resumeHeartbeat();heartbeatPaused=false;}
-      pumpSocket();
+      pumpSocket();ws.setReconnectInterval(5000);
       // Flash absorbs slow reads; receive control/heartbeat frames while uploading.
       for(int budget=0;budget<4&&!resetLink&&!queueFault;budget++){
         if(!ws.isConnected()||xQueueReceive(outgoing,&p,0)!=pdTRUE)break;
@@ -241,6 +244,13 @@ bool radioPrepareStandby(){
  while(!standbyNetworkReady&&millis()-at<5000)delay(10);
  if(!standbyNetworkReady){standbyNetworkRequested=false;return false;}
  return true;
+}
+bool radioSetWarmStandby(bool idle){
+ if(!idle){warmNetworkRequested=false;return true;}
+ warmNetworkRequested=true;uint32_t at=millis();
+ while(!warmNetworkReady&&millis()-at<5000)delay(10);
+ if(!warmNetworkReady){warmNetworkRequested=false;return false;}
+ gatewayLinked=ready=replyCodecReady=false;thinking=false;diagnosticStage("warm_standby");return true;
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
