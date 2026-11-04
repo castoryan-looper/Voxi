@@ -35,4 +35,18 @@ int main(){
  assert(talk.update(11900,true,true)==PttHold::Start);
  assert(talk.update(11900+RECORDING_MAX_MS,true,true)==PttHold::Stop);
  assert(talk.update(12000+RECORDING_MAX_MS,true,true)==PttHold::None);
+
+ // The optional rewired board uses the debounced GPIO11 signal only.
+ MiniCamControls rewired;
+ PttHold mainTalk;
+ rewired.sample(0,3200,true);rewired.sample(40,3200,true);
+ assert(!rewired.pttPressed());assert(rewired.pttPressed(true));
+ assert(mainTalk.update(40,rewired.pttPressed(true),true)==PttHold::None);
+ assert(mainTalk.update(339,rewired.pttPressed(true),true)==PttHold::None);
+ assert(mainTalk.update(340,rewired.pttPressed(true),true)==PttHold::Start);
+ rewired.sample(4000,3200,false);rewired.sample(4040,3200,false);
+ assert(mainTalk.update(4040,rewired.pttPressed(true),true)==PttHold::Stop);
+ assert(mainTalk.update(4060,rewired.pttPressed(true),true)==PttHold::None);
+ rewired.sample(4100,1000,false);rewired.sample(4120,1000,false);rewired.sample(4140,1000,false);
+ assert(rewired.pttPressed());assert(!rewired.pttPressed(true));
 }
