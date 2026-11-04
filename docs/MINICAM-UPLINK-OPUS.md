@@ -1,6 +1,6 @@
-# ESP32-S3 录音上行 Opus
+# ESP32 录音上行 Opus
 
-MiniCam 的标准音量＋录音和 GPIO11 改装目标支持压缩上行，Wi-Fi/ML307 共用；后续也已移植到 S3 AMOLED 和 S3G（宏 `VOXI_OPUS_UPLINK`），两类任务的栈均使用 32KB。C6 暂保留原有 PCM 上行。所有维护板型的回复下行仍统一为 16kbps Opus。
+所有维护目标默认同时启用 Opus 上行和下行，包括 C6、S3G、AMOLED 和 MiniCam 两个目标。S3 两类任务的栈使用 32KB；C6 使用临时编码工作任务与半双工内存复用，不照搬 S3 的常驻资源。完整默认策略及 C6 验证边界见 [Opus 默认功能](OPUS-DEFAULTS.md)。
 
 ## 目的与边界
 
@@ -20,7 +20,7 @@ MiniCam 的标准音量＋录音和 GPIO11 改装目标支持压缩上行，Wi-F
 
 ## 协议
 
-网关 READY 增加 `uplinkFormat: "opus-24000-uplink-v1"`。MiniCam 仅在网关明确确认后在 `ptt_down` 带 `audioFormat` 同值，随后本轮使用压缩包；尚未更新的网关不会被误送压缩音频。原有板型及合成 PCM 压测省略该字段，沿用 PCM。网关下行 Opus-only 要求保持不变。
+网关 READY 增加 `uplinkFormat: "opus-24000-uplink-v1"`。所有维护设备仅在网关明确确认上下行格式后开始普通对讲，在 `ptt_down` 带 `audioFormat` 同值，随后本轮使用压缩包；未支持上行的旧网关需更新，不静默退回 PCM。显式合成 PCM 压测省略该字段。网关下行 Opus-only 要求保持不变。
 
 每个二进制包：
 

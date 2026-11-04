@@ -2,8 +2,9 @@
 import json,sys,time,serial,subprocess
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
-with serial.Serial(port=None,baudrate=115200,timeout=.3,write_timeout=3) as s:
- s.dtr=False;s.rts=False;s.port=sys.argv[1] if len(sys.argv)>1 else 'COM15';s.open()
+s=serial.Serial(port=None,baudrate=115200,timeout=.3,write_timeout=3)
+s.dtr=False;s.rts=False;s.port=sys.argv[1] if len(sys.argv)>1 else 'COM15'
+with s:
  def request(method):
   ident=str(time.monotonic_ns());s.write((json.dumps(dict(type='voxi_config',id=ident,method=method,body={}))+'\n').encode());deadline=time.monotonic()+12;partial=b''
   while time.monotonic()<deadline:

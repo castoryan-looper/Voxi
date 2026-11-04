@@ -204,6 +204,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     String hex=body["packet"]|"";size_t n=hex.length()/2;uint8_t packet[1279];int16_t pcm[OPUS_REPLY_SAMPLES];
     if(hex.length()%2||n<5||n>sizeof(packet))return fail(out,"Invalid Opus probe size");
     for(size_t i=0;i<n;i++){int a=cellularHexDigit(hex[2*i]),b=cellularHexDigit(hex[2*i+1]);if(a<0||b<0)return fail(out,"Invalid Opus probe hex");packet[i]=(a<<4)|b;}
+    if(!prepareOpusReplyMemory()){out["error"]="Reply playback memory unavailable";return 503;}
     bool ok=opusReplyReset()&&opusReplyDecode(packet,n,pcm);
     out["decoded"]=ok;out["samples"]=ok?OPUS_REPLY_SAMPLES:0;out["decodeMaxUs"]=opusReplyMaxUs;
     if(ok){unsigned peak=0;for(auto value:pcm){unsigned magnitude=value<0?-int(value):int(value);if(magnitude>peak)peak=magnitude;}out["peak"]=peak;out["pcmCrc"]=esp_rom_crc32_le(0,reinterpret_cast<uint8_t*>(pcm),sizeof(pcm));}
@@ -213,6 +214,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   else if(method=="uplink_probe"){
 #ifdef VOXI_OPUS_UPLINK
     if(busyNow||!cloudNow){out["error"]="Wait for idle READY";return 409;}
+    prepareOpusUplinkMemory();
     uplinkProbePackets=out["packets"].to<JsonArray>();bool ok=opusUplinkReset();
     int16_t pcm[480];for(int frame=0;frame<10&&ok;frame++){for(int i=0;i<480;i++)pcm[i]=((frame*480+i)/24)%2?10000:-10000;ok=opusUplinkAudio(reinterpret_cast<uint8_t*>(pcm),sizeof(pcm),uplinkProbeSend);}
     if(ok)ok=opusUplinkFinish(uplinkProbeSend);

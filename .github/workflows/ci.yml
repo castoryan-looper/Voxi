@@ -59,6 +59,12 @@ jobs:
       - run: g++ -std=c++17 tools/test_upload_recovery.cpp -o /tmp/voxi-recovery && /tmp/voxi-recovery
       - run: g++ -std=c++17 tools/test_amoled_controls.cpp -o /tmp/voxi-touch && /tmp/voxi-touch
       - run: g++ -std=c++17 tools/test_opus_reply.cpp -o /tmp/voxi-opus && /tmp/voxi-opus
+      - name: Require default Opus uplink on every maintained board
+        run: |
+          for board in C6 VOXI_BOARD_S3G VOXI_BOARD_AMOLED VOXI_BOARD_MINICAM; do
+            g++ -std=c++17 -D$board tools/test_opus_defaults.cpp -o /tmp/voxi-opus-defaults
+            /tmp/voxi-opus-defaults
+          done
       - run: g++ -std=c++17 tools/test_standby.cpp -o /tmp/voxi-standby && /tmp/voxi-standby
       - run: g++ -std=c++17 tools/test_minicam_controls.cpp -o /tmp/voxi-minicam && /tmp/voxi-minicam
       - run: g++ -std=c++17 tools/test_cellular_protocol.cpp -o /tmp/voxi-cellular && /tmp/voxi-cellular

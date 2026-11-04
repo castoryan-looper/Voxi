@@ -1,5 +1,7 @@
 # Voxi · AI 对讲机
 
+**默认音频约定：所有维护 C6/S3 板型同时启用 Opus 上行与下行。** 网关明确协商，不静默退回普通 PCM 对讲。板型资源差异和实机验证边界见 [Opus 默认功能](docs/OPUS-DEFAULTS.md)。
+
 支持 **微雪 ESP32-C6-ePaper-1.54** 、**ESP32-S3-ePaper-1.54G 四彩屏** 与 **ESP32-S3-Touch-AMOLED-1.8 V2**：按住 BOOT 讲话，松开听 AI；EC11 旋钮切换四个 AI 频道。复用板载麦克风、ES8311、功放与墨水屏，云端语音网关部署在腾讯云 Linux 主机。
 
 仓库：https://github.com/castoryan-looper/Voxi
