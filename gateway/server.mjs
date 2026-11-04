@@ -1,4 +1,5 @@
 import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
+import {UplinkDecoder,UPLINK_FORMAT} from './uplink.mjs';
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
@@ -86,12 +87,13 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       return;
     }
     let upstream,channel=0,ready=false,recording=false,bytes=0,epoch=0,timer,deadline,turn=0,responseId=null;
+    const uplink=new UplinkDecoder();uplink.reset();device.on('close',()=>uplink.close());
     let item=null,playedMs=0,responding=false,acceptOutput=false,filter=new RadioFilter(),released=0,first=true;
     let queued=Buffer.alloc(0),pump,sourceDone=false;
     const opus=new OpusDownlink();
     const send=o=>{
       if(device.readyState!==1)return;
-      if(o.type==='ready')o={...o,audioFormat,audioBitrate:OPUS_BITRATE};
+      if(o.type==='ready')o={...o,audioFormat,audioBitrate:OPUS_BITRATE,uplinkFormat:UPLINK_FORMAT};
       if(o.type==='audio_start')opus.reset();
       if(o.type==='audio_end')for(const packet of opus.finish())device.send(packet,{binary:true});
       if(['flush','error','offline'].includes(o.type))opus.close();
@@ -157,9 +159,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     device.on('message',(raw,binary)=>{
       if(binary){
         if(!recording||!ready)return;
-        if(raw.length%2)return fail('PCM must contain complete samples');
+        try{raw=uplink.audio(raw);}catch(e){return fail(e.message);}
         bytes+=raw.length;
-        if(bytes>48000*20)return fail('PTT exceeded 20 seconds; reconnect');
         if(mode==='openai'){
           if(upstream.bufferedAmount>48000)return fail('Upload network too slow');
           api({type:'input_audio_buffer.append',audio:raw.toString('base64')});
@@ -170,8 +171,9 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       if(!e||typeof e!=='object'||Array.isArray(e))return send({type:'error',message:'Expected event object'});
       if(e.type==='channel'&&Number.isInteger(e.channel)&&channels[e.channel]){channel=e.channel;connect();}
       else if(e.type==='played'&&Number.isFinite(e.ms))playedMs=Math.max(0,Math.min(e.ms,60000));
-      else if(e.type==='ptt_down'&&ready&&!recording){interrupt();filter=new RadioFilter();api({type:'input_audio_buffer.clear'});recording=true;bytes=0;send({type:'recording'});}
+      else if(e.type==='ptt_down'&&ready&&!recording){try{uplink.reset(e.audioFormat);}catch(err){return fail(err.message);}interrupt();filter=new RadioFilter();api({type:'input_audio_buffer.clear'});recording=true;bytes=0;send({type:'recording'});}
       else if(e.type==='ptt_up'&&recording){
+        try{uplink.finish();}catch(err){return fail(err.message);}
         recording=false;
         if(bytes<4800){api({type:'input_audio_buffer.clear'});send({type:'idle',reason:'too_short'});return;}
         released=Date.now();first=true;acceptOutput=true;send({type:'thinking'});

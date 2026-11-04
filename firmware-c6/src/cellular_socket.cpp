@@ -16,7 +16,7 @@ bool CellularSocket::minicamConnected(){return minicamTcpConnected();}
 void CellularSocket::begin(const char* h,uint16_t p,const char* url,const char* certificate){host=h;port=p;path=url;secure=certificate!=nullptr;ca=certificate?certificate:"";attemptAt=millis()-retryMs;}
 int CellularSocket::sendBio(void*,const unsigned char* p,size_t n){int sent=minicamTcpSend(p,n);return sent<0?MBEDTLS_ERR_NET_SEND_FAILED:sent;}
 int CellularSocket::readBio(void*,unsigned char* p,size_t n){int count=minicamTcpRead(p,n);if(count)return count;return minicamTcpConnected()?MBEDTLS_ERR_SSL_WANT_READ:MBEDTLS_ERR_NET_CONN_RESET;}
-void CellularSocket::fail(const char* reason,int code){error=code;char text[160];snprintf(text,sizeof(text),"4G %s (%d)",reason,code);diagnosticError(text);disconnect();minicamTlsStatus(false,code);}
+void CellularSocket::fail(const char* reason,int code){error=code;char text[160];snprintf(text,sizeof(text),"4G %s (%d)",reason,code);lastFailureText=text;lastFailureAt=millis();remoteCloseCode=0;diagnosticError(text);disconnect();minicamTlsStatus(false,code);}
 void CellularSocket::disconnect(){bool was=connected;connected=false;buffered=messageLength=0;fragmented=false;heartbeat.reset(millis());minicamTcpClose();freeTls();initTls();attemptAt=millis();if(was&&callback)callback(WStype_DISCONNECTED,nullptr,0);}
 int CellularSocket::readSome(uint8_t* p,size_t n){return secure?mbedtls_ssl_read(&ssl,p,n):readBio(nullptr,p,n);}
 bool CellularSocket::writeAll(const uint8_t* p,size_t n){
@@ -71,7 +71,7 @@ bool CellularSocket::receiveFrame(){
  if(!parsed||buffered<f.header+f.length)return false;
  heartbeat.received(millis());
  uint8_t* p=wire+f.header;
- if(f.opcode==8){disconnect();return true;}
+ if(f.opcode==8){remoteCloseCode=f.length>=2?(uint16_t(p[0])<<8)|p[1]:1005;lastFailureText="Gateway WS close "+String(remoteCloseCode);if(f.length>2){lastFailureText+=": ";for(size_t i=2;i<f.length;i++)lastFailureText+=p[i]>=32&&p[i]<127?char(p[i]):'?';}lastFailureAt=millis();diagnosticError(lastFailureText.c_str());disconnect();return true;}
  if(f.opcode==9){if(callback)callback(WStype_PING,p,f.length);if(!frame(10,p,f.length))return true;}
  else if(f.opcode==10){if(callback)callback(WStype_PONG,p,f.length);}
  else{

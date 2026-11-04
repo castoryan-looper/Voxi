@@ -15,11 +15,15 @@ class CellularSocket {
  bool connected=false,tlsReady=false,secure=true,fragmented=false;
  uint32_t attemptAt=0,retryMs=5000;uint8_t fragmentOpcode=0;CellularHeartbeat heartbeat;
  int error=0;size_t buffered=0,messageLength=0;uint8_t wire[4096],message[2048];
+ String lastFailureText;uint32_t lastFailureAt=0;uint16_t remoteCloseCode=0;
  void initTls();void freeTls();bool connect();void fail(const char*,int code=0);
  bool writeAll(const uint8_t*,size_t);int readSome(uint8_t*,size_t);bool frame(uint8_t,const uint8_t*,size_t);
  bool receiveFrame();
  static int sendBio(void*,const unsigned char*,size_t);static int readBio(void*,unsigned char*,size_t);
 public:
+ String lastFailure()const{return lastFailureText;}
+ uint32_t lastFailureTime()const{return lastFailureAt;}
+ uint16_t lastRemoteCloseCode()const{return remoteCloseCode;}
  CellularSocket();~CellularSocket();
  void begin(const char* h,uint16_t p,const char* url,const char* certificate);
  void onEvent(WebSocketsClient::WebSocketClientEvent f){callback=f;}
