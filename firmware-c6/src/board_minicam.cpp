@@ -51,7 +51,7 @@ bool boardTouchPttPressed(){return pttHeld;}
 bool boardTouchActive(){return false;}
 bool boardIdleInputActive(){return mainRaw==LOW||MiniCamControls::volumeKey(volumeKeyMv)!=0;}
 int boardTouchWakePin(){return -1;}
-struct View{int channel=0,battery=-1,rssi=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false;char name[32]={},key[16]={};RadioDebugSnapshot debug;};
+struct View{int channel=0,battery=-1,rssi=-127,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false,cellularUp=false,cloud=false;char name[32]={},key[16]={},phase[24]={};};
 static View baseView;static QueueHandle_t views;
 static Arduino_ESP32SPI displayBus(39,40,46,41,GFX_NOT_DEFINED);
 static Arduino_ST7789 panel(&displayBus,GFX_NOT_DEFINED,0,true,240,320,0,0);
@@ -63,7 +63,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;s.debug=radioDebugRead();s.cellular=radioUsesCellular();s.wifi=radioNetworkConnected();s.rssi=s.cellular?(-113+2*minicamSignal()):(s.wifi?WiFi.RSSI():0);s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static void postView(){if(!views)return;View s=baseView;auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();int csq=minicamSignal();s.rssi=s.cellular?(csq>=0&&csq<=31?-113+2*csq:-127):(s.wifi?WiFi.RSSI():-127);s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -81,6 +81,32 @@ void boardStatusTick(){
  }
  if(!batteryAt||now-batteryAt>10000){batteryAt=now;int mv=analogReadMilliVolts(3),ref=analogReadMilliVolts(4);batteryMv=ref>2300?mv*2:ref>500?mv*2540/ref:-1;batteryLevel=batteryMv>0?constrain((batteryMv-3400)*100/800,0,100):-1;}
 }
+static constexpr uint16_t UI_BG=0x0000,UI_CARD=0x1082,UI_EDGE=0x2945,UI_WHITE=0xef7d,UI_MUTED=0x8c51,UI_DIM=0x4208,UI_GREEN=0x4f5b,UI_BLUE=0x45ff,UI_AMBER=0xfd20,UI_RED=0xf9e7;
+static void wifiIcon(int x,int y,uint16_t color){
+ canvas.drawLine(x,y+4,x+4,y+1,color);canvas.drawLine(x+4,y+1,x+10,y+1,color);canvas.drawLine(x+10,y+1,x+14,y+4,color);
+ canvas.drawLine(x+3,y+7,x+6,y+5,color);canvas.drawLine(x+6,y+5,x+8,y+5,color);canvas.drawLine(x+8,y+5,x+11,y+7,color);canvas.fillCircle(x+7,y+11,1,color);
+}
+static void usbIcon(int x,int y,uint16_t color){
+ canvas.drawLine(x+7,y+12,x+7,y,color);canvas.fillTriangle(x+4,y+3,x+10,y+3,x+7,y,color);
+ canvas.drawLine(x+7,y+9,x+2,y+6,color);canvas.drawLine(x+2,y+6,x+2,y+3,color);canvas.fillCircle(x+2,y+2,1,color);
+ canvas.drawLine(x+7,y+7,x+12,y+4,color);canvas.fillRect(x+11,y+1,3,3,color);canvas.drawCircle(x+7,y+13,2,color);
+}
+static void statusBadge(int x,int width,const char* text,int icon,bool connected,int bars=0){
+ canvas.fillRoundRect(x,57,width,30,7,UI_CARD);uint16_t color=connected?UI_GREEN:UI_DIM;
+ if(icon==0)wifiIcon(x+7,65,color);
+ else if(icon==1){for(int b=0;b<4;b++){int h=3+b*3;canvas.fillRect(x+7+b*4,78-h,3,h,b<bars&&connected?UI_GREEN:UI_DIM);}}
+ else usbIcon(x+7,64,color);
+ canvas.setTextSize(1);canvas.setTextColor(connected?UI_WHITE:UI_MUTED);canvas.setCursor(x+28,69);canvas.print(text);
+ if(!connected)canvas.drawLine(x+5,80,x+23,63,UI_MUTED);
+}
+static uint16_t phaseColor(const char* phase){
+ if(!strcmp(phase,"READY"))return UI_GREEN;
+ if(!strcmp(phase,"RECORDING"))return UI_RED;
+ if(!strcmp(phase,"PLAYING")||!strcmp(phase,"DRAINING"))return UI_BLUE;
+ if(!strcmp(phase,"OFFLINE")||!strcmp(phase,"ERROR"))return UI_RED;
+ return UI_AMBER;
+}
+static void centeredText(const char* text,int y,int size,uint16_t color){canvas.setTextSize(size);canvas.setTextColor(color);int x=(240-int(strlen(text))*6*size)/2;canvas.setCursor(x<12?12:x,y);canvas.print(text);}
 static void screenTask(void*){
  if(!canvas.begin(40000000)){diagnosticError("ST7789 initialization failed");vTaskDelete(nullptr);return;}
  panel.invertDisplay(true);digitalWrite(42,LOW);displayReady=true;canvas.setTextWrap(false);
@@ -96,22 +122,34 @@ static void screenTask(void*){
   if(xQueueReceive(views,&s,pdMS_TO_TICKS(25))!=pdTRUE)continue;
   View next;while(xQueueReceive(views,&next,0)==pdTRUE)s=next;
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
-  canvas.fillScreen(0x0843);canvas.setTextColor(0xffff);canvas.setTextSize(3);canvas.setCursor(12,12);canvas.print("VOXI");
-  canvas.setTextSize(1);canvas.setCursor(164,24);canvas.print(s.usb?"USB":"RADIO");
-  canvas.setTextSize(2);canvas.setTextColor(s.wifi?0x4f5b:0xfd20);canvas.setCursor(12,48);if(s.cellular)canvas.printf(s.wifi?"4G %ddBm":"4G CONNECT",s.rssi);else canvas.printf(s.wifi?"WiFi %ddBm":"WiFi OFF",s.rssi);
-  canvas.fillRoundRect(10,76,220,76,8,0x10a5);canvas.setTextColor(0xffff);canvas.setTextSize(3);canvas.setCursor(20,86);canvas.printf("CH %02d",s.channel+1);
-  canvas.setTextSize(2);canvas.setTextColor(!strcmp(s.debug.phase,"READY")?0x4f5b:0xfd20);canvas.setCursor(20,124);canvas.print(s.debug.phase);
-  canvas.setTextColor(0x8c92);canvas.setTextSize(1);canvas.setCursor(12,166);canvas.printf("MIC %luK TX %luK RX %luK",(unsigned long)(s.debug.micBytes/1024),(unsigned long)(s.debug.txBytes/1024),(unsigned long)(s.debug.rxBytes/1024));
-  canvas.setCursor(12,181);canvas.printf("VOL %d%%   BAT %d%%",s.volume,s.battery);
-  for(int i=0;i<3;i++){canvas.setCursor(12,200+i*15);canvas.print(s.debug.logs[i]);}
-  canvas.setCursor(12,253);canvas.print(s.setup?(s.hotspot?s.name:"USB SETUP: 127.0.0.1:8788"):talkHint);
-  canvas.setCursor(12,268);if(s.setup&&s.hotspot)canvas.printf("KEY %s / 192.168.4.1",s.key);else canvas.print("Hold -: previous channel");
-  canvas.setCursor(12,290);canvas.print("Tap +/-: volume - / +");
+  canvas.fillScreen(UI_BG);canvas.setTextColor(UI_WHITE);canvas.setTextSize(3);canvas.setCursor(12,13);canvas.print("VOXI");
+  canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(14,40);canvas.print("AI WALKIE-TALKIE");
+  canvas.setCursor(151,22);if(s.battery>=0)canvas.printf("%d%%",s.battery);else canvas.print("--%");
+  canvas.drawRoundRect(188,18,31,14,3,UI_MUTED);canvas.fillRect(219,22,3,6,UI_MUTED);
+  if(s.battery>0)canvas.fillRect(191,21,25*constrain(s.battery,0,100)/100,8,s.battery<20?UI_AMBER:UI_GREEN);
+  int bars=s.rssi==-127?0:s.rssi>-75?4:s.rssi>-85?3:s.rssi>-95?2:1;
+  statusBadge(12,68,"WiFi",0,s.wifi);statusBadge(86,62,"4G",1,s.cellularUp,s.cellular?bars:0);statusBadge(154,74,"USB",2,s.usb);
+  canvas.fillRoundRect(12,105,216,113,12,UI_CARD);canvas.drawRoundRect(12,105,216,113,12,UI_EDGE);
+  canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(25,116);canvas.print("CHANNEL");
+  canvas.fillCircle(185,119,3,s.cloud?UI_GREEN:UI_DIM);canvas.setCursor(194,116);canvas.print("AI");
+  canvas.setTextSize(4);canvas.setTextColor(UI_WHITE);canvas.setCursor(25,135);canvas.printf("CH %02d",s.channel+1);
+  canvas.drawLine(25,174,215,174,UI_EDGE);centeredText(s.phase,188,2,phaseColor(s.phase));
+  canvas.fillRect(16,236,5,8,UI_MUTED);canvas.fillTriangle(21,236,27,231,27,249,UI_MUTED);
+  canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(37,237);canvas.printf("VOL %d%%",s.volume);
+  canvas.fillRoundRect(105,238,120,5,2,UI_EDGE);if(s.volume>0)canvas.fillRoundRect(105,238,120*s.volume/100,5,2,UI_GREEN);
+  if(s.setup){
+   centeredText(s.hotspot?"HOTSPOT SETUP":"USB SETUP",266,1,UI_BLUE);
+   if(s.hotspot){centeredText(s.name,280,1,UI_WHITE);char hint[40];snprintf(hint,sizeof(hint),"KEY %s / 192.168.4.1",s.key);centeredText(hint,296,1,UI_MUTED);}
+   else{centeredText("127.0.0.1:8788",283,1,UI_WHITE);centeredText(talkHint,301,1,UI_MUTED);}
+  }else{
+   const char* hint=!strcmp(s.phase,"RECORDING")?"RELEASE TO SEND":!strcmp(s.phase,"READY")?(mainKeyPtt?"HOLD MAIN TO TALK":"HOLD + TO TALK"):!strcmp(s.phase,"PLAYING")?"LISTENING":!strcmp(s.phase,"BUFFERING")?"BUFFERING AUDIO":!strcmp(s.phase,"RETRY LINK")?"RESTORING LINK":s.cloud?"PLEASE WAIT":"CONNECTING";
+   centeredText(hint,270,2,phaseColor(s.phase));centeredText("Tap +/-: volume | Hold -: CH",301,1,UI_MUTED);
+  }
   canvas.flush();digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
 }
-void displayChannel(int channel,bool){baseView.channel=channel;postView();}
-void displayConnection(int channel,const char*,bool,bool,bool){baseView.channel=channel;postView();}
+void displayChannel(int channel,bool online){baseView.channel=channel;baseView.cloud=online;postView();}
+void displayConnection(int channel,const char*,bool,bool gateway,bool){baseView.channel=channel;baseView.cloud=gateway;postView();}
 void displaySetup(const char* name,const char* key,bool hotspot){baseView.setup=true;baseView.hotspot=hotspot;strlcpy(baseView.name,name,sizeof(baseView.name));strlcpy(baseView.key,key,sizeof(baseView.key));postView();}
 void displayDebugTick(){static uint32_t at=0;if(millis()-at<250)return;at=millis();baseView.setup=setupScreenActive();postView();}
 void boardInit(){

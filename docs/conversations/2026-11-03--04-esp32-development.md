@@ -6,7 +6,7 @@
 
 接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。
 
-共 539 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
+共 554 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
 
 ## 001 · 用户 · 2026-11-03 16:17:12 +08:00
 
@@ -4756,3 +4756,123 @@ Cloud inputs unchanged; keeping 595bf72274fadabeaed02a123b5d77292f342a02 (source
 sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
 ```
 我继续采集 USB，先不要切模式或重启。
+
+## 540 · 助手 · 2026-11-04 16:34:34 +08:00
+
+这轮最终中断也抓到了：设备记录为 **4G 心跳超时**，没有新增模组断网记录，上行已完整发送。设备随后自动恢复了 READY。
+
+这次的关闭来源与先前的云端 WebRTC 错误不同。我会核对心跳计时逻辑，并结合刚请求的 TCP 统计，区分收包停滞和设备侧误判。
+
+## 541 · 助手 · 2026-11-04 16:35:00 +08:00
+
+云端和设备均已启用上行 Opus，最新代码与记录已同步 GitHub。
+
+这轮实测：**4.26 秒录音压缩为 9.6KB，无重试，松手后设备发送收尾仅 117ms**。
+
+但回复下行仍出现 **21 秒以上空档，随后设备心跳超时重连**。因此上传等待已改善，整体卡顿和 offline 尚未解决。
+
+USB 采集仍在运行；接下来需要播放期间的 TCP 统计，定位下行阻塞。
+
+## 542 · 用户 · 2026-11-04 16:35:00 +08:00
+
+这次上传很快，buffering这个状态等了很久，现在还没完。。
+
+## 543 · 助手 · 2026-11-04 16:35:06 +08:00
+
+我马上读取当前缓冲和连接状态，确认它是在持续收音频，还是收包已经停住了。
+
+## 544 · 助手 · 2026-11-04 16:35:56 +08:00
+
+刚读到最新状态：**这轮回复已因 4G 心跳超时中断，设备重连后恢复了 READY，并非还在正常等待缓冲。**
+
+这轮只收到约 **2 秒音频**，中间最长断流 **21.38 秒**；上传已完整完成，解码没有错误。
+
+如果屏幕现在仍显示 `BUFFERING`，还可能有显示状态不同步的问题。请告诉我当前屏幕文字，并贴出下面这条 TCP 统计；我已继续采集 USB：
+
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" \
+  -n ss -tin state established
+```
+
+## 545 · 用户 · 2026-11-04 16:37:37 +08:00
+
+问题：这轮已确认压缩上传成功、无重试，但回复下行又出现超过 21 秒的收包空档。请在故事播放或 buffering 时执行这条只读命令并贴出输出，用来确认是否仍是公网 TCP 重传阻塞：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+我继续采集 USB，先不要切模式或重启。
+
+回答：root@VM-0-14-ubuntu:~/Voxi# sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+Recv-Q                               Send-Q                                                                    Local Address:Port                                                                        Peer Address:Port                                Process
+0                                    0                                                                            172.20.0.2:41816                                                                         172.20.0.3:8787
+         cubic wscale:7,7 rto:202 rtt:1.546/2.926 ato:42 mss:1448 pmtu:1500 rcvmss:536 advmss:1448 cwnd:10 bytes_sent:11500 bytes_acked:11501 bytes_received:53398 segs_out:1095 segs_in:1244 data_segs_out:74 data_segs_in:1180 send 74928849bps lastsnd:4999 lastrcv:2 lastack:2 pacing_rate 149833464bps delivery_rate 1654857136bps delivered:75 app_limited busy:308ms rcv_space:14480 rcv_ssthresh:64088 minrtt:0.007 snd_wnd:64128
+0                                    10068                                                               [::ffff:172.20.0.2]:443                                                                 [::ffff:36.7.99.190]:50040
+         cubic wscale:1,7 rto:484 rtt:230.631/26.811 ato:40 mss:1380 pmtu:1500 rcvmss:1380 advmss:1460 cwnd:2 ssthresh:2 bytes_sent:125657 bytes_retrans:43831 bytes_acked:79066 bytes_received:13896 segs_out:176 segs_in:136 data_segs_out:136 data_segs_in:48 send 95737bps lastsnd:131 lastrcv:5001 lastack:131 pacing_rate 114880bps delivery_rate 38320bps delivered:89 busy:41595ms unacked:2 retrans:0/45 rcv_space:14600 rcv_ssthresh:64000 notsent:7308 minrtt:155.84 snd_wnd:64240
+
+## 546 · 助手 · 2026-11-04 16:37:44 +08:00
+
+这份统计确认公网到 4G 设备的 TCP 链路有明显重传：重传字节约占发送字节的 35%，拥塞窗口降到了 2；容器内部链路则正常。我先检查代理发送配置和 ML307 接收配置，看看有没有可以验证的优化点。
+
+## 547 · 助手 · 2026-11-04 16:38:51 +08:00
+
+这份数据确认：**问题主要在云端代理到 4G 设备的公网链路。**
+
+- 已发送约 **126KB**，重传约 **44KB**，重传字节占比约 **35%**，不是“丢包率 35%”。
+- TCP 拥塞窗口降到 **2**，仍积压约 **10KB**。
+- 容器内部链路没有相同的积压现象。
+
+因此，平均速度即使够播放，反复重传仍会造成十几秒停顿，并拖住同一连接中的心跳。
+
+我检查了代理配置，没有人为设置延迟刷新；WebSocket 使用双向隧道。[Caddy 文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+
+**下一步最有价值的是同板换卡对照**：如果手边有可用的普通手机 SIM，请暂时替换物联网卡，保持板子、天线位置和服务器不变，再测同样的故事。这能区分卡/运营商路径与模组、天线、供电问题。
+
+上行压缩已生效；继续增加缓冲或延长心跳，只能缓解症状，无法消除这类重传。
+
+## 548 · 用户 · 2026-11-04 16:39:20 +08:00
+
+root@VM-0-14-ubuntu:~/Voxi# sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)"   -n ss -tin state established
+Recv-Q                               Send-Q                                                                    Local Address:Port                                                                        Peer Address:Port                                Process
+0                                    0                                                                            172.20.0.2:41816                                                                         172.20.0.3:8787
+         cubic wscale:7,7 rto:206 rtt:5.639/10.235 ato:40 mss:1448 pmtu:1500 rcvmss:536 advmss:1448 cwnd:10 bytes_sent:11560 bytes_acked:11561 bytes_received:240367 segs_out:3679 segs_in:5326 data_segs_out:84 data_segs_in:5260 send 20542649bps lastsnd:2023 lastrcv:2023 lastack:2023 pacing_rate 41080744bps delivery_rate 1654857136bps delivered:85 app_limited busy:365ms rcv_rtt:28266.5 rcv_space:64392 rcv_ssthresh:64088 minrtt:0.007 snd_wnd:64128
+0                                    28237                                                               [::ffff:172.20.0.2]:443                                                                 [::ffff:36.7.99.190]:50040
+         cubic wscale:1,7 rto:2248 backoff:2 rtt:222.942/34.524 ato:40 mss:1380 pmtu:1500 rcvmss:1380 advmss:1460 cwnd:1 ssthresh:2 bytes_sent:558200 bytes_retrans:190368 bytes_acked:363692 bytes_received:14246 segs_out:589 segs_in:434 data_segs_out:540 data_segs_in:59 send 49520bps lastsnd:273 lastrcv:2023 lastack:1003 pacing_rate 178264bps delivery_rate 32448bps delivered:347 busy:143619ms unacked:3 retrans:1/176 lost:3 rcv_space:14600 rcv_ssthresh:64000 notsent:24097 minrtt:149.092 snd_wnd:64240
+
+## 549 · 助手 · 2026-11-04 16:39:30 +08:00
+
+同一连接进一步恶化了：
+
+| 指标 | 上一次 | 这一次 |
+|---|---:|---:|
+| 待发送积压 | 10KB | **28KB** |
+| 拥塞窗口 | 2 | **1** |
+| 重传超时 RTO | 484ms | **2248ms，已退避** |
+| 累计重传字节占比 | 34.9% | **34.1%** |
+
+两次之间新增发送约 **433KB**，新增重传约 **147KB**，说明重传问题仍在持续，不只是历史计数。
+
+当前积压按 Opus 音频数据量粗算已超过 **10 秒**，足以解释长时间 `BUFFERING`。设备通告的接收窗口仍约 **64KB**，不像是接收窗口耗尽造成的停发；但仍不能单凭这些数据区分运营商链路、射频环境或模组问题。
+
+**建议优先做同板换 SIM 对照。** 若这次已经换过卡，请告诉我；若还没有，这份结果继续支持先换卡验证，暂时不要再增大缓冲。
+
+## 550 · 用户 · 2026-11-04 16:40:23 +08:00
+
+当前设备的界面和C6, S3风格有些不同，帮我做成暗色调的，并且增加wifi, 4g, usb 状态icon。可以不用debug log了。
+
+## 551 · 助手 · 2026-11-04 16:40:27 +08:00
+
+我会把这块 MiniCam 的界面改成暗色风格，加入 Wi‑Fi、4G、USB 状态图标，移除屏幕上的 debug log，保留频道、音量、电量和对讲状态。先检查现有绘制代码，再编译烧录验证。
+
+## 552 · 助手 · 2026-11-04 16:43:47 +08:00
+
+新界面已改为纯黑底、深灰卡片和绿色/青色状态强调。顶部加入了 Wi‑Fi、4G 信号格和 USB 图标，断开时显示灰色斜线；主区域保留大号频道和对讲状态，屏幕上的日志、收发字节数已移除。
+
+同时把画面刷新改为仅在可见状态变化时触发，减少日志更新造成的重复重绘。正在完成两个 MiniCam 版本的编译。
+
+## 553 · 助手 · 2026-11-04 16:46:15 +08:00
+
+两个版本都已编译通过，当前设备也已烧录并通过写入校验。新界面已启动，原有 4G、Opus、按键和待机设置保留；这次无需更新云端。
+
+## 554 · 助手提问 · 2026-11-04 16:46:17 +08:00
+
+新界面已烧录。请看一下：是否已显示黑底深灰卡片、顶部 Wi‑Fi／4G／USB 图标，以及大号频道和状态文字？也请告诉我有没有文字重叠或图标不清楚。
