@@ -60,3 +60,5 @@ GPIO47/48 不用于 LED。ES8388 无独立 PA 控制脚。ESP32 为 I2S 时钟�
 USB 状态包含 `mainButtonRaw`、`volumeKeyMv`、`mainButtonClicks`（主键有效按下次数）、`mainButtonHeld`、`pttButtonHeld`、`talkButton=volume_up`、`talkMode=hold_to_talk`、`recordingActive`、`canStartRecording`；旧字段 `talkLatched` 固定为 false。音量＋仅在允许录音时启动，离线或忙碌时按住不会在恢复 READY 后自动开始，需松开重按。休眠唤醒按键被消耗，不会直接发起录音。
 
 三键修正版实测：主键触发录音约 8.07 秒，`micBytes=sentBytes=387360`，麦克风峰值 5591；云端回复返回并进入 PLAYING，用户确认录音和回复均正常。验证完成后释放 USB 串口。
+
+音量＋ PTT 版实测：侧键持续按住约 6 秒正常采集，主键 GPIO11 始终未按下；松开后自动结束录音并提交，`micBytes=sentBytes=291840`，采集/发送 CRC 均为 `2403396620`。纯 4G 下网关确认提交，随后收到回复并进入 PLAYING，全程未触发主键硬件关机。该项证明侧键录音、松开发送和回复接收已实机跑通；音频主观听感以用户反馈为准。
