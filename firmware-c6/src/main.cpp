@@ -324,7 +324,7 @@ void button(){
   if(standbySuppressInput())return;
   if(probeActive||probeFinishing||(uploading&&!tx))return;
 #ifdef VOXI_BOARD_MINICAM
-  // The MiniCam main button is also a hardware power button: do not require a long hold.
+  // MiniCam supplies the debounced physical key, sharing the normal hold-to-talk policy.
   bool down=boardTouchPttPressed();
 #else
   bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
@@ -342,6 +342,7 @@ void button(){
     radioDebug("OPEN MIC","TX squelch: mic guard");diagnosticStage("recording");
     Serial.println("VOXI_PTT recording");
   }else if(action==PttHold::Stop&&tx){
+    micCueGuard=false;
     turnTiming.released=millis();bytesSentAtRelease=radioDebugRead().txBytes;tx=false;
     if(!radioDebugRead().micBytes&&!uploading){audioCacheRemove();flushAudio();radioDebug("READY","Released during TX cue");return;}
     if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
