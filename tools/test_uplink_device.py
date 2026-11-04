@@ -4,7 +4,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 with serial.Serial(port=None,baudrate=115200,timeout=.3,write_timeout=3) as s:
  s.dtr=False;s.rts=False;s.port=sys.argv[1] if len(sys.argv)>1 else 'COM15';s.open()
- def rpc(method):
+ def request(method):
   ident=str(time.monotonic_ns());s.write((json.dumps(dict(type='voxi_config',id=ident,method=method,body={}))+'\n').encode());deadline=time.monotonic()+12;partial=b''
   while time.monotonic()<deadline:
    partial+=s.readline()
@@ -17,12 +17,19 @@ with serial.Serial(port=None,baudrate=115200,timeout=.3,write_timeout=3) as s:
    except ValueError:continue
    if str(r.get('id'))==ident:return r
   raise TimeoutError(method)
+ def rpc(method):
+  for attempt in range(3):
+   try:return request(method)
+   except TimeoutError:
+    if attempt==2:raise
+    print('USB response retry: '+method,flush=True)
  deadline=time.monotonic()+65
  while True:
   response=rpc('status');d=response['data']
   if d.get('cloudReady') and not d.get('busy'):break
   if time.monotonic()>deadline:raise TimeoutError('Wait for idle READY')
   time.sleep(1)
+ print(json.dumps({k:d.get(k) for k in ['deviceId','networkMode','cloudReady','uplinkOpusReady','freeHeap','minFreeHeap']},ensure_ascii=False),flush=True)
  r=rpc('uplink_probe');assert r['status']==200,r
  fixture=r['data'];assert fixture['encoded'] and fixture['errors']==0,fixture
  print(json.dumps({k:fixture[k] for k in ['encoded','frames','errors','maxUs','wireBytes']}),flush=True)
@@ -39,3 +46,4 @@ with serial.Serial(port=None,baudrate=115200,timeout=.3,write_timeout=3) as s:
  }finally{decoder.close();}'''
  result=subprocess.run(['node','--input-type=module','-e',js],cwd=root/'gateway',input=json.dumps(fixture),text=True,encoding='utf-8',capture_output=True,check=True)
  print(result.stdout.strip())
+ status=rpc('status')['data'];print(json.dumps({k:status.get(k) for k in ['cloudReady','uplinkOpusReady','opusUplinkFrames','opusUplinkErrors','freeHeap','minFreeHeap','cellularLinkFailure','cellularRemoteCloseCode']},ensure_ascii=False),flush=True)

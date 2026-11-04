@@ -6,7 +6,7 @@
 
 接续开发请先读 [最新交接](../handoffs/LATEST.md)。历史回复可能已被后续修正，最终状态以交接文件、测试记录和当前代码为准。
 
-共 532 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
+共 539 条可见消息／提问；时间采用 Asia/Shanghai（UTC+08:00）。
 
 ## 001 · 用户 · 2026-11-03 16:17:12 +08:00
 
@@ -4695,3 +4695,64 @@ docker logs --since=10m --timestamps codex-pocket-gateway-1 2>&1 \
 我还加上了设备端的 WebSocket 关闭码和首次中断原因记录。下次 offline 时，可以更直接地区分云端关闭、TLS/传输错误和模组故障。
 
 压缩上行的实机自检已通过；接下来需要更新 Voxi 网关，Pocket 后端不用改。我会继续完成最终固件验证。
+
+## 533 · 助手提问 · 2026-11-04 16:26:32 +08:00
+
+上行 Opus 代码已推送 GitHub（595bf72），网关 55 项测试和真实 S3 编解码自检通过。请在腾讯云执行下面命令，贴出最后的自检输出；我会继续完成最终固件烧录，先不用录音测试。
+```bash
+cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-uplink.sh
+```
+只更新 Voxi 网关，不需要更新 Pocket。
+
+## 534 · 助手 · 2026-11-04 16:28:32 +08:00
+
+代码已推送为 `595bf72`，云端部署命令已发出。最终设备固件正在烧录；它会在网关确认支持后启用压缩上行。
+
+这版主要减少录音上传和重试耗时。长故事中途 offline 还需要部署后继续验证，不能仅凭编码自检认定已解决。
+
+## 535 · 用户 · 2026-11-04 16:28:51 +08:00
+
+问题：上行 Opus 代码已推送 GitHub（595bf72），网关 55 项测试和真实 S3 编解码自检通过。请在腾讯云执行下面命令，贴出最后的自检输出；我会继续完成最终固件烧录，先不用录音测试。
+```bash
+cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-uplink.sh
+```
+只更新 Voxi 网关，不需要更新 Pocket。
+
+回答：root@VM-0-14-ubuntu:~/Voxi# cd ~/Voxi
+git -c core.hooksPath=/dev/null pull --ff-only
+sudo bash deploy/deploy.sh
+sudo bash deploy/check-uplink.sh
+Already up to date.
+From https://github.com/castoryan-looper/Voxi
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+Cloud inputs unchanged; keeping 595bf72274fadabeaed02a123b5d77292f342a02 (source 595bf72274fadabeaed02a123b5d77292f342a02)
+{"ok":true,"revision":"595bf72274fadabeaed02a123b5d77292f342a02","uplinkFormat":"opus-24000-uplink-v1","audioBitrate":16000,"wireBytesPerSecond":2250}
+
+## 536 · 助手 · 2026-11-04 16:28:57 +08:00
+
+云端自检通过，已部署 `595bf72`，支持 16kbps 压缩上行。我继续核对设备是否收到了格式确认，以及最终固件的编码自检结果。
+
+## 537 · 助手提问 · 2026-11-04 16:30:42 +08:00
+
+最终固件已烧录，设备已确认 uplinkOpusReady:true，真实编码和网关解码自检通过。请先按住音量＋说一句短话，松开发送，告诉我等待是否缩短、能否正常回复；我已开始连续采集，这轮先不用讲五分钟故事。
+
+## 538 · 助手 · 2026-11-04 16:32:23 +08:00
+
+已经抓到一轮真实录音：4.26 秒语音压缩为约 9.6KB，上传 CRC 一致、没有重试，松手后设备端发送收尾约 117ms，上行等待已明显缩短。
+
+这轮回复仍出现约 16 秒的接收空档，尚未攒够起播缓冲。我继续记录它是否恢复；这说明上传优化有效，但下行卡顿仍是独立问题。
+
+## 539 · 助手提问 · 2026-11-04 16:33:05 +08:00
+
+这轮已确认压缩上传成功、无重试，但回复下行又出现超过 21 秒的收包空档。请在故事播放或 buffering 时执行这条只读命令并贴出输出，用来确认是否仍是公网 TCP 重传阻塞：
+```bash
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' voxi-proxy-1)" -n ss -tin state established
+```
+我继续采集 USB，先不要切模式或重启。
