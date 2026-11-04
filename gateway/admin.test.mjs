@@ -13,7 +13,7 @@ async function setup(t,options={}){
   t.after(()=>{for(const c of app.wss.clients)c.terminate();app.wss.close();app.server.close();});
   const base=`http://127.0.0.1:${app.server.address().port}`;
   const api=(path,body,secret='admin-secret',extra={})=>fetch(base+'/api/admin/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+secret,...(body?{'Content-Type':'application/json'}:{}),...extra},...(body?{body:JSON.stringify(body)}:{})});
-  const connect=()=>new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer device-secret'}});
+  const connect=()=>new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer device-secret','X-Voxi-Audio-Format':'opus-24000-v1'}});
   return {base,api,connect};
 }
 test('admin authentication is separate from device authentication; cross-origin mutations rejected',async t=>{

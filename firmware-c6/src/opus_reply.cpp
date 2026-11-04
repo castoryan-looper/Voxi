@@ -1,4 +1,3 @@
-#ifdef VOXI_BOARD_MINICAM
 #include "opus_reply.h"
 #include <esp_opus_dec.h>
 #include <esp_timer.h>
@@ -23,4 +22,3 @@ bool opusReplyDecode(const uint8_t* wire,size_t bytes,int16_t* pcm){
  if(rc!=ESP_AUDIO_ERR_OK||input.consumed!=input.len||output.decoded_size!=OPUS_REPLY_SAMPLES*2||info.sample_rate!=24000||info.channel!=1){opusReplyErrors++;return false;}
  sequence++;opusReplyFrames++;return true;
 }
-#endif

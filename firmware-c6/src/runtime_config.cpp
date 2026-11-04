@@ -15,11 +15,9 @@
 #include <time.h>
 #include <mbedtls/x509_crt.h>
 #include "setup_page.h"
-#ifdef VOXI_BOARD_MINICAM
 #include "opus_reply.h"
 #include "cellular_protocol.h"
 #include <esp_rom_crc.h>
-#endif
 
 RadioConfig radioConfig;
 static Preferences prefs;
@@ -196,7 +194,6 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     return fail(out,"此板型不支持4G");
 #endif
   }
-#ifdef VOXI_BOARD_MINICAM
   else if(method=="opus_probe"){
     if(busyNow){out["error"]="请先等待录音和播放结束";return 409;}
     String hex=body["packet"]|"";size_t n=hex.length()/2;uint8_t packet[1279];int16_t pcm[OPUS_REPLY_SAMPLES];
@@ -207,7 +204,6 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     if(ok){unsigned peak=0;for(auto value:pcm){unsigned magnitude=value<0?-int(value):int(value);if(magnitude>peak)peak=magnitude;}out["peak"]=peak;out["pcmCrc"]=esp_rom_crc32_le(0,reinterpret_cast<uint8_t*>(pcm),sizeof(pcm));}
     opusReplyClose();return ok?200:422;
   }
-#endif
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
   else if(method=="speaker_volume"){if(busyNow){out["error"]="请等待录音或播放结束后调节";return 409;}if(!body["volume"].is<int>()||!speakerSetVolume(body["volume"].as<int>()))return fail(out,"音量需要 0–100，或设备存储失败");out["speakerVolume"]=speakerVolume();out["message"]="音量已保存，下次开机自动恢复";}
   else if(method=="squelch_test"){if(busyNow||!radioConfig.valid){out["error"]="请等待设备配置完成且空闲";return 409;}requestRadioCueTest();out["message"]="即将播放220ms无线电开台噪声";}

@@ -1,7 +1,7 @@
 import OpusScript from 'opusscript';
 
 export const OPUS_FORMAT='opus-24000-v1';
-export const OPUS_BITRATE=24000;
+export const OPUS_BITRATE=16000;
 export const OPUS_SAMPLES=480; // 20 ms, mono, 24 kHz; one packet per WebSocket message.
 
 export class OpusDownlink {
@@ -10,7 +10,7 @@ export class OpusDownlink {
     this.close();
     this.codec=new OpusScript(24000,1,OpusScript.Application.VOIP);
     this.codec.setBitrate(OPUS_BITRATE);
-    this.codec.encoderCTL(4006,0); // OPUS_SET_VBR: bounded 24 kbps CBR.
+    this.codec.encoderCTL(4006,0); // OPUS_SET_VBR: bounded 16 kbps CBR.
     this.codec.encoderCTL(4010,5); // OPUS_SET_COMPLEXITY.
   }
   packet(pcm){

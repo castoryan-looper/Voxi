@@ -56,7 +56,9 @@ struct CellularHeartbeat {
  Action tick(uint32_t now){
   if(!interval)return None;
   if(waiting&&uint32_t(now-lastPing)>=timeout){if(++missed>=limit)return Dead;waiting=false;}
-  if(!waiting&&uint32_t(now-lastRx)>=interval){waiting=true;lastPing=now;return Ping;}
+  // Keep a bidirectional probe cadence during continuous downlink too. Only
+  // probing on RX silence can leave the server without any timely peer traffic.
+  if(!waiting&&uint32_t(now-lastPing)>=interval){waiting=true;lastPing=now;return Ping;}
   return None;
  }
 };

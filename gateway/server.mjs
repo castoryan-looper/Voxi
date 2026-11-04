@@ -1,4 +1,4 @@
-import {encodeMulaw} from './mulaw.mjs';
+import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
@@ -27,7 +27,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       res.end(readFileSync(new URL('./setup.html',import.meta.url)));return;
     }
     if(req.url!=='/healthz'){res.writeHead(404);res.end();return;}
-    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision}));
+    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision,downlinkFormat:OPUS_FORMAT,opusOnly:true,audioBitrate:OPUS_BITRATE}));
   });
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
@@ -40,8 +40,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
   wss.on('connection',(device,req)=>{
-    const offered=String(req.headers['x-voxi-downlink-codecs']||'').split(',').map(s=>s.trim());
-    const audioFormat=mode==='pocket'&&offered.includes('opus-24000-v1')?'opus-24000-v1':req.headers['x-voxi-audio-format']==='mulaw8-24000'?'mulaw8-24000':'pcm16-24000';
+    const audioFormat=OPUS_FORMAT;
     const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
     const connection=++connectionSequence;let inputBytes=0;
     let observedChannel=null,observedBusy=false;
@@ -51,6 +50,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     // so one bad/disconnected client cannot terminate the whole gateway.
     device.on('error',error=>console.error(JSON.stringify({event:'device_ws_error',connection,code:/^[A-Z0-9_]+$/.test(error.code||'')?error.code:'OTHER'})));
     device.on('message',(raw,binary)=>{
+      if(device.authenticated)device.isAlive=true;
       if(binary){inputBytes+=raw.length;return;}
       let control;try{control=JSON.parse(raw);}catch{return;}
       if(control?.type==='channel'&&Number.isInteger(control.channel)&&channels[control.channel])observedChannel=control.channel;
@@ -61,10 +61,15 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
 
     if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
     if([...wss.clients].filter(c=>c.authenticated).length>=admin.limit){device.closeOrigin='device_limit';admin.record({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'device_limit',maxConnections:admin.limit}));device.send(JSON.stringify({type:'error',message:'Gateway device limit reached; check MAX_CONNECTIONS'}));device.close(1013,'Device limit reached');return;}
+    if(req.headers['x-voxi-audio-format']!==OPUS_FORMAT){
+      device.closeOrigin='codec_required';
+      device.send(JSON.stringify({type:'error',message:'Opus firmware required; update device firmware',code:'opus_required'}));
+      device.close(1008,'Opus firmware required');return;
+    }
     device.authenticated=true;
     connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
-    device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{pings++;lastPingAt=Date.now();});
+    device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{device.isAlive=true;pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));
     const heartbeat=setInterval(()=>{
       if(!device.isAlive){device.closeOrigin='heartbeat_timeout';console.warn(JSON.stringify({event:'device_heartbeat_timeout',connection,...connectionMetrics()}));device.terminate();return;}
@@ -83,7 +88,15 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     let upstream,channel=0,ready=false,recording=false,bytes=0,epoch=0,timer,deadline,turn=0,responseId=null;
     let item=null,playedMs=0,responding=false,acceptOutput=false,filter=new RadioFilter(),released=0,first=true;
     let queued=Buffer.alloc(0),pump,sourceDone=false;
-    const send=o=>{if(o.type==='ready')o={...o,audioFormat};if(device.readyState===1)device.send(JSON.stringify(o));};
+    const opus=new OpusDownlink();
+    const send=o=>{
+      if(device.readyState!==1)return;
+      if(o.type==='ready')o={...o,audioFormat,audioBitrate:OPUS_BITRATE};
+      if(o.type==='audio_start')opus.reset();
+      if(o.type==='audio_end')for(const packet of opus.finish())device.send(packet,{binary:true});
+      if(['flush','error','offline'].includes(o.type))opus.close();
+      device.send(JSON.stringify(o));
+    };
     const fail=message=>{clearTimeout(deadline);clearInterval(timer);clearInterval(pump);queued=Buffer.alloc(0);recording=false;ready=false;acceptOutput=false;send({type:'error',message});upstream?.close();};
     const api=o=>{if(upstream?.readyState===1)upstream.send(JSON.stringify(o));};
     function interrupt(){
@@ -137,7 +150,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
         if(queued.length){
           if(first){first=false;console.log(JSON.stringify({event:'first_audio',channel,ms:Date.now()-released}));}
           const frame=queued.subarray(0,960);queued=queued.subarray(frame.length);
-          if(device.readyState===1)device.send(audioFormat==='mulaw8-24000'?encodeMulaw(frame):frame);
+          if(device.readyState===1){try{for(const packet of opus.audio(frame))device.send(packet,{binary:true});}catch{return fail('Opus audio encoding failed');}}
         }else if(sourceDone){clearInterval(pump);pump=null;acceptOutput=false;send({type:'audio_end'});}
       },20);
     }
@@ -169,7 +182,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
         }
       }
     });
-    device.on('close',()=>{epoch++;clearInterval(heartbeat);clearInterval(lifetime);clearInterval(timer);clearInterval(pump);clearTimeout(deadline);upstream?.close();});
+    device.on('close',()=>{epoch++;clearInterval(heartbeat);clearInterval(lifetime);clearInterval(timer);clearInterval(pump);clearTimeout(deadline);opus.close();upstream?.close();});
     device.on('error',()=>{});
     connect();
   });

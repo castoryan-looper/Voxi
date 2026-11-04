@@ -14,6 +14,7 @@
 - [腾讯云部署命令](docs/TENCENT-CLOUD.md)：管理页面主机终端操作，不需要 SSH。默认 WSS `43.160.215.253:9443`，保留已有 8448 服务。
 - [正辰 MiniCam 2.0 英寸适配进度](docs/zhengchen-minicam-2.0.md)：独立构建、ES8388 / ST7789，已实测显示、出声与 ML307R 4G 对话。
 - [MiniCam 4G 配置与验证](docs/MINICAM-4G.md)：Wi-Fi / 4G 切换、APN、CA 校验和 DMA 串口。
+- [统一 Opus 下行](docs/MINICAM-OPUS.md)：所有维护板型、Wi-Fi/4G 均为 16kbps Opus，不再回退旧下行格式；更新网关时需同步更新各设备固件。
 - [AMOLED 1.8 V2 支持](docs/WAVESHARE-AMOLED18-V2.md)：实时状态、触摸对讲、CO5300/CST820。
 - [S3G 四彩屏编译与接线](docs/WAVESHARE-S3G.md)：8MB PSRAM、独立构建目标和静态彩屏。
 - [C6 接线与编译](docs/WAVESHARE-C6.md)：BOOT 对讲、GPIO16/17 旋钮、证书与 Wi-Fi 配置。
@@ -26,7 +27,7 @@
 | 目录 | 用途 |
 |---|---|
 | firmware-c6/ | 共用 C6 / S3G / AMOLED V2 / MiniCam 源码，四个 PlatformIO 构建目标 |
-| firmware/ | 历史 S3 外接音频原型，不能刷到 C6 |
+| firmware/ | 历史 S3 外接音频原型，不再兼容当前统一 Opus 网关，请使用 firmware-c6/ |
 | gateway/ | Node.js 22+ 流式网关，mock / OpenAI Realtime |
 | deploy/ | Docker Compose、TLS、首次部署、自动拉取与健康检查 |
 | .github/workflows/ | 网关测试、镜像构建与 C6 编译 CI |

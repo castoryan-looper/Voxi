@@ -8,9 +8,7 @@ inline bool opusReplyHeader(const uint8_t* p,size_t bytes,uint32_t expected){
  uint32_t sequence=uint32_t(p[0])|(uint32_t(p[1])<<8)|(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
  return sequence==expected;
 }
-#ifdef VOXI_BOARD_MINICAM
 bool opusReplyReset();
 bool opusReplyDecode(const uint8_t* wire,size_t bytes,int16_t* pcm);
 void opusReplyClose();
 extern uint32_t opusReplyFrames,opusReplyErrors,opusReplyMaxUs;
-#endif

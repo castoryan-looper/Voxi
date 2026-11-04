@@ -4,6 +4,14 @@ import WebSocket from 'ws';
 import {createGateway} from './server.mjs';
 import {RadioFilter} from './radio.mjs';
 
+for(const format of [undefined,'pcm16-24000','mulaw8-24000','opus-unsupported'])test('old or absent downlink format is explicitly rejected: '+format,async t=>{
+ const {server,wss}=createGateway({token:'test'});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
+ const ws=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer test',...(format?{'X-Voxi-Audio-Format':format}:{})}});
+ let error;ws.on('message',raw=>{error=JSON.parse(raw);});
+ const code=await new Promise(r=>ws.once('close',r));assert.equal(code,1008);assert.equal(error.code,'opus_required');
+});
+
 test('mock: authentication, short press, streaming, interruption and channel reset',async t=>{
   const {server,wss}=createGateway({token:'test'});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -11,9 +19,9 @@ test('mock: authentication, short press, streaming, interruption and channel res
   t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
   const rejected=new WebSocket(url);
   const code=await new Promise(r=>rejected.on('close',r));assert.equal(code,1008);
-  const ws=new WebSocket(url,{headers:{Authorization:'Bearer test'}});
+  const ws=new WebSocket(url,{headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}});
   const messages=[];let audio=0;
-  ws.on('message',(b,binary)=>{if(binary){assert.equal(b.length,960);audio++;}else messages.push(JSON.parse(b));});
+  ws.on('message',(b,binary)=>{if(binary){assert.equal(b.length,44);audio++;}else messages.push(JSON.parse(b));});
   async function until(predicate){const start=Date.now();while(!predicate()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}
   const send=o=>ws.send(JSON.stringify(o));
   await until(()=>messages.some(e=>e.type==='ready'));
@@ -35,17 +43,28 @@ test('filter rejects DC and stays in PCM16 range',()=>{
   assert.equal(out.length,input.length);
 });
 
+test('peer Ping and incoming device traffic refresh liveness during downlink',async t=>{
+ const {server,wss}=createGateway({token:'test'});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
+ const ws=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}});
+ await new Promise(r=>ws.once('open',r));const peer=[...wss.clients][0];
+ const until=async check=>{const end=Date.now()+1000;while(!check()){if(Date.now()>end)throw Error('Peer activity did not refresh liveness');await new Promise(r=>setTimeout(r,5));}};
+ peer.isAlive=false;ws.ping();await until(()=>peer.isAlive);
+ peer.isAlive=false;ws.send(JSON.stringify({type:'played',ms:0}));await until(()=>peer.isAlive);
+ ws.close();
+});
+
 test('cloud health, connection budget and malformed events',async t=>{
   const {server,wss}=createGateway({token:'test',maxConnections:1,revision:'test-sha'});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
   const port=server.address().port;
   const health=await fetch(`http://127.0.0.1:${port}/healthz`);
-  assert.deepEqual(await health.json(),{ok:true,mode:'mock',revision:'test-sha'});
+  assert.deepEqual(await health.json(),{ok:true,mode:'mock',revision:'test-sha',downlinkFormat:'opus-24000-v1',opusOnly:true,audioBitrate:16000});
   assert.equal((await fetch(`http://127.0.0.1:${port}/unknown`)).status,404);
   const setup=await fetch(`http://127.0.0.1:${port}/setup/`);
   assert.equal(setup.status,200);assert.match(await setup.text(),/navigator\.serial/);
-  const options={headers:{Authorization:'Bearer test'}};
+  const options={headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}};
   const first=new WebSocket(`ws://127.0.0.1:${port}/radio`,options);
   await new Promise(r=>first.once('open',r));
   const second=new WebSocket(`ws://127.0.0.1:${port}/radio`,options);
@@ -61,7 +80,7 @@ test('setup route returns HTML and malformed WebSocket frames do not crash gatew
  const base=`http://127.0.0.1:${server.address().port}`;
  t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
  const page=await fetch(base+'/setup/');assert.equal(page.status,200);assert.match(await page.text(),/Voxi/);
- const client=new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer test'}});
+ const client=new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}});
  client.on('error',()=>{});
  await new Promise(r=>client.once('open',r));
  const closed=new Promise(r=>client.once('close',r));
@@ -76,7 +95,7 @@ test('two authenticated devices keep independent channels and a third gets an ex
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
  const url=`ws://127.0.0.1:${server.address().port}/radio`;
- const connect=()=>new WebSocket(url,{headers:{Authorization:'Bearer shared-device-token'}});
+ const connect=()=>new WebSocket(url,{headers:{Authorization:'Bearer shared-device-token','X-Voxi-Audio-Format':'opus-24000-v1'}});
  const a=connect(),b=connect(),ma=[],mb=[];
  a.on('message',(d,binary)=>{if(!binary)ma.push(JSON.parse(d));});b.on('message',(d,binary)=>{if(!binary)mb.push(JSON.parse(d));});
  const until=async fn=>{const end=Date.now()+2000;while(!fn()){if(Date.now()>end)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}};

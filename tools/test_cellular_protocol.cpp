@@ -13,7 +13,8 @@ int main(){
  uint8_t reserved[]={0xc2,0};assert(cellularFrameHeader(reserved,2,f)==-1);
  CellularHeartbeat h;h.configure(15000,3000,2,0);assert(h.timeout==15000);assert(h.tick(14999)==CellularHeartbeat::None);assert(h.tick(15000)==CellularHeartbeat::Ping);
  h.received(18154);assert(h.tick(20000)==CellularHeartbeat::None); // delayed voice instead of Pong keeps the peer alive
- for(uint32_t now=19000;now<120000;now+=1000){h.received(now);assert(h.tick(now)==CellularHeartbeat::None);}
+ h.reset(0);
+ for(uint32_t now=1000;now<=120000;now+=1000){h.received(now);assert(h.tick(now)==(now%15000==0?CellularHeartbeat::Ping:CellularHeartbeat::None));}
  h.configure(15000,3000,2,0);assert(h.tick(15000)==CellularHeartbeat::Ping);assert(h.tick(29999)==CellularHeartbeat::None);assert(h.tick(30000)==CellularHeartbeat::Ping);assert(h.tick(45000)==CellularHeartbeat::Dead);
  h.configure(0,3000,2,0);assert(h.tick(100000)==CellularHeartbeat::None);
 }
