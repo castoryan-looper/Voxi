@@ -46,10 +46,14 @@ $env:PYTHONIOENCODING='utf-8'
 
 板型使用通用 C6 DevKitC 定义，覆盖 Flash 为板载 16MB，分配 4MB factory 应用分区；硬件引脚由本项目板级驱动指定。先 USB 供电联调，接好板载扬声器接口，从保守音量开始。编译成功不代表已经验证板载电源、电池续航、左右槽、屏幕与真实语音延迟。
 
-## 最新功能与播放优化（2026-11-04）
+## 默认 Opus 上下行（2026-11-04）
 
-C6支持固定芯片ID握手，可在云端设备列表改显示名称、进入绑定用户的长期记忆。更新固件保留原Wi-Fi、CA、令牌和音量，不需要清空NVS。后台功能依赖对应版本Pocket和Voxi已部署。
+项目约定：所有维护板型同时默认启用 16kbps Opus 录音上行和回复下行，网关必须明确确认协议，不在普通对话中静默退回 PCM。C6 使用 `waveshare_c6` 目标，不复用 S3/4G 引脚和 PSRAM 配置。
 
-新增可协商μ-law8 24kHz下行：保持96KB RAM，容量由2秒提高至4秒，起播预缓冲3秒、抖动后最高3.6秒并在开机期间保留学习结果。麦克风上行仍PCM16，记忆识别不受编码影响。相对PCM会有压扩量化音质损失、首声等待增加；不保证消除上游WebRTC丢包造成的缺音。更新Voxi网关后自动协商；旧网关仍可用PCM16，固件不会把旧格式误当成压缩语音。
+C6 没有 PSRAM。96KB 回复 PCM 缓存容量保持不变，改为按阶段分配：上传前释放闲置播放缓存和解码器，使用临时 32KB 栈任务编码；上传结束或网络故障释放编码资源，回复开始时恢复播放缓存。原有 Flash 录音缓存、20 秒时长限制和有界补传继续保留。
 
-USB状态的 `replyTransportFormat=mulaw8-24000` 与 `playbackCapacityMs=4000` 表示优化已启用；`pcm16-24000`/2000表示兼容旧网关。CRC只校验网关到设备的传输字节。新协议与测试见PROTOCOL.md。
+状态应显示 `uplinkOpusReady:true`、`replyCodecConfirmed:true`、`replyTransportFormat:opus-24000-v1`。`opusUplinkWorkerActive` 与 `playbackMemoryAllocated` 用于核验半双工资源切换。`upload_test` 仍是显式 PCM 大流量诊断，不表示普通对话使用 PCM。
+
+固定芯片 ID、云端显示名称与单用户长期记忆继续有效。更新应用保留原 Wi-Fi、CA、令牌和音量，不清空 NVS；后台功能仍依赖已部署的 Pocket 和 Voxi。
+
+实现与实机验证边界见 [Opus 默认功能](OPUS-DEFAULTS.md)。当前已刷入的 `53e3802` C6 是此前的仅 Opus 下行版本；补齐上行的候选需要另行烧录、芯片自检及真实语音验收，不能将新代码默认值等同于设备已更新。

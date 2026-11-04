@@ -3,7 +3,7 @@
 #include "standby.h"
 #include <Arduino.h>
 // USB status serialization and audio/file bookkeeping share the Arduino task.
-#ifdef VOXI_OPUS_UPLINK
+#if defined(VOXI_OPUS_UPLINK)&&!defined(VOXI_OPUS_C6)
 SET_LOOP_TASK_STACK_SIZE(32768);
 #else
 SET_LOOP_TASK_STACK_SIZE(16384);
@@ -129,7 +129,8 @@ constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not inte
 static uint8_t* playback=nullptr;
 #else
 constexpr size_t CAP=96000;
-static uint8_t playback[CAP];
+// Allocated only for downlink; microphone encoding borrows this internal RAM.
+static uint8_t* playback=nullptr;
 #endif
 static void deviceIdentity(char* target,size_t size){uint8_t mac[6]={};if(esp_efuse_mac_get_default(mac)!=ESP_OK){if(size)target[0]=0;return;}formatDeviceIdentity(mac,target,size);}
 static constexpr size_t replyBytesPerSample=2;
@@ -153,7 +154,8 @@ void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(ide
 void opusDiagnostics(JsonDocument& out){
 #ifdef VOXI_OPUS_UPLINK
  out["opusUplinkFrames"]=opusUplinkFrames;out["opusUplinkErrors"]=opusUplinkErrors;out["opusUplinkMaxUs"]=opusUplinkMaxUs;out["opusUplinkWireBytes"]=opusUplinkWireBytes;
- out["uplinkOpusReady"]=uplinkOpusReady;
+ out["uplinkOpusReady"]=uplinkOpusReady;out["opusUplinkDefault"]=true;out["opusUplinkWorkerActive"]=opusUplinkWorkerActive();
+ out["playbackMemoryAllocated"]=playback!=nullptr;
 #endif
 #ifdef VOXI_BOARD_MINICAM
  ws.linkDiagnostics(out);
@@ -268,14 +270,14 @@ static void networkTask(void*){
   bool encodedUpload=false;
   auto sendOpus=[](const uint8_t* data,size_t len){return ws.sendPcm(data,len);};
 #endif
-  while(true){if(standbyNetworkRequested){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
-    if(warmNetworkRequested){if(!warmNetworkReady){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);warmNetworkReady=true;}wasWarm=true;vTaskDelay(pdMS_TO_TICKS(10));continue;}
+  while(true){if(standbyNetworkRequested){opusUplinkClose();encodedUpload=false;ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
+    if(warmNetworkRequested){if(!warmNetworkReady){opusUplinkClose();encodedUpload=false;ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);warmNetworkReady=true;}wasWarm=true;vTaskDelay(pdMS_TO_TICKS(10));continue;}
     if(wasWarm){wasWarm=false;warmNetworkReady=false;retryAt=0;ws.setReconnectInterval(0);}
-    if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();bool quick=fastUploadReconnect;fastUploadReconnect=false;ws.setReconnectInterval(quick?1000:5000);retryAt=millis()+(quick?1000:5000);}
+    if(resetLink){resetLink=false;opusUplinkClose();encodedUpload=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();bool quick=fastUploadReconnect;fastUploadReconnect=false;ws.setReconnectInterval(quick?1000:5000);retryAt=millis()+(quick?1000:5000);}
     if(radioNetworkConnected()&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
       if(probeStallUntil&&(int32_t)(millis()-probeStallUntil)<0){vTaskDelay(pdMS_TO_TICKS(10));continue;}
       bool connected=ws.isConnected();
-      if(!connected)xQueueReset(outgoing);
+      if(!connected){opusUplinkClose();encodedUpload=false;xQueueReset(outgoing);}
       bool sending=connected&&(uploading||uxQueueMessagesWaiting(outgoing)>0);
       if(sending&&!heartbeatPaused){ws.disableHeartbeat();heartbeatPaused=true;}
       if(!sending&&heartbeatPaused){ws.resumeHeartbeat();heartbeatPaused=false;}
@@ -309,7 +311,7 @@ static void networkTask(void*){
         if(!uploading&&uxQueueMessagesWaiting(outgoing)==0)pumpSocket();
       }
     }
-    else xQueueReset(outgoing);
+    else {opusUplinkClose();encodedUpload=false;xQueueReset(outgoing);}
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 }
@@ -329,6 +331,20 @@ bool radioSetWarmStandby(bool idle){
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void prepareOpusUplinkMemory(){
+#ifdef VOXI_OPUS_C6
+ // Only the Arduino task releases decoder/playback memory. Network encoding
+ // starts later, from the queued PTT message; speaker use is already idle.
+ opusReplyClose();free(playback);playback=nullptr;head=tail=used=0;
+#endif
+}
+bool prepareOpusReplyMemory(){
+#ifdef VOXI_OPUS_C6
+ if(opusUplinkWorkerActive())return false;
+ for(int retry=0;!playback&&retry<3;retry++){playback=(uint8_t*)malloc(CAP);if(!playback)delay(2);}
+#endif
+ return playback!=nullptr;
+}
 static bool deferUploadRecovery(){
   if(uploadRecovery.pending){ready=false;return true;}
   if(!uploadRecovery.request(millis(),uploading,submissionAttempted,(probeActive||probeFinishing)&&!probeAllowRecovery))return false;
@@ -351,7 +367,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
     if(tx)return;
     int16_t opusPcm[OPUS_REPLY_SAMPLES];
-    if(!replyCodecReady||!opusReplyDecode(data,len,opusPcm)){diagnosticError("Invalid Opus packet/sequence or decode failure");fault();return;}
+    if(!playback||!replyCodecReady||!opusReplyDecode(data,len,opusPcm)){diagnosticError("Invalid Opus packet/sequence or decode failure");fault();return;}
     replyWireBytes+=len;data=reinterpret_cast<uint8_t*>(opusPcm);len=sizeof(opusPcm);
     if(len%replyBytesPerSample||len>CAP-used){diagnosticError(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");diagnosticTurnFailure(len%replyBytesPerSample?"Reply PCM sample alignment error":"Reply playback buffer overflow");fault();return;}
     replyRxCrc=esp_rom_crc32_le(replyRxCrc,data,len);replyRxBytes+=len;
@@ -365,7 +381,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
 #ifdef VOXI_OPUS_UPLINK
     uplinkOpusReady=String(d["uplinkFormat"]|"")=="opus-24000-uplink-v1";
 #endif
-    if(String(d["audioFormat"]|"")!="opus-24000-v1"){
+    if(String(d["audioFormat"]|"")!="opus-24000-v1"||!uplinkOpusReady){
       fault();radioDebug("UPDATE CLOUD","Opus required: update gateway");diagnosticError("Gateway protocol mismatch: Opus required; update Voxi gateway");return;
     }
     if(!replyCodecReady&&!opusReplyReset()){diagnosticError("Cannot initialize Opus decoder");fault();return;}
@@ -388,7 +404,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="flush")flushAudio();
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
   if(type=="audio_start"){
-    if(!replyCodecReady||!opusReplyReset()){diagnosticError("Opus not confirmed or decoder reset failed");fault();return;}
+    if(!replyCodecReady||!prepareOpusReplyMemory()||!opusReplyReset()){diagnosticError("Opus reply memory unavailable or decoder reset failed");fault();return;}
     replyWireBytes=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
   }
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
@@ -400,7 +416,10 @@ static bool startCachedUpload(bool test){
   probeStallUntil=test&&probeSimulateStall?millis()+3500:0;
   JsonDocument start;start["type"]="ptt_down";
 #ifdef VOXI_OPUS_UPLINK
-  if(uplinkOpusReady&&!test&&!probeActive&&!probeFinishing)start["audioFormat"]="opus-24000-uplink-v1";
+  if(!test&&!probeActive&&!probeFinishing){
+    if(!uplinkOpusReady){diagnosticError("Opus uplink required: update gateway");fault();return false;}
+    prepareOpusUplinkMemory();start["audioFormat"]="opus-24000-uplink-v1";
+  }
 #endif
   String request;serializeJson(start,request);sendText(request);radioDebug("SENDING",test?(probeSimulateStall?"Test: 3.5s network stall":"Test: normal live uplink"):(tx?"Recording: live uplink":"Cache tail: upload"));return true;
 }
@@ -529,6 +548,11 @@ void setup(){
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
+#else
+  // Reserve the full reply buffer before TLS allocations fragment internal RAM.
+  // Recording releases it temporarily for the C6 encoder worker.
+  playback=(uint8_t*)malloc(CAP);
+  if(!playback){diagnosticError("C6 playback memory allocation failed");radioConfig.valid=false;}
 #endif
   if(!radioConfig.valid){radioDebug("SETUP NEEDED","Cloud config not saved");displayConnection(channel,"SETUP NEEDED",radioNetworkConnected(),false,HWCDC::isPlugged());return;}
   displayChannel(channel,false);
