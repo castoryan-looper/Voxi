@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {WebSocketServer,WebSocket} from 'ws';
 import {createGateway} from './server.mjs';
+import {OPUS_BITRATE} from './opus.mjs';
 
 test('Pocket proxy preserves PCM uplink and uses only Opus downlink',async t=>{
   const upstream=new WebSocketServer({port:0,host:'127.0.0.1'});
@@ -33,8 +34,9 @@ test('Pocket proxy preserves PCM uplink and uses only Opus downlink',async t=>{
   await until(()=>messages.some(e=>e.type==='audio_end'));
   const downlink=records.find(e=>e.event==='pocket_downlink');
   assert.equal(downlink.connection,1);assert.equal(downlink.reply,1);assert.equal(downlink.outcome,'complete');
-  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,88);
-  assert.equal(messages.find(e=>e.type==='ready').audioFormat,'opus-24000-v1');assert.equal(pcm,88);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
+  const expectedBytes=2*(4+OPUS_BITRATE/400);
+  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,expectedBytes);
+  assert.equal(messages.find(e=>e.type==='ready').audioFormat,'opus-24000-v1');assert.equal(messages.find(e=>e.type==='ready').audioBitrate,OPUS_BITRATE);assert.equal(pcm,expectedBytes);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
   device.send(JSON.stringify({type:'channel',channel:2}));await until(()=>seen.some(e=>e.channel===2));
   device.close();
 });

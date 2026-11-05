@@ -11,10 +11,13 @@ import time
 import serial
 
 root = Path(__file__).resolve().parents[1]
+bitrate = int(sys.argv[2]) if len(sys.argv) > 2 else 16000
+if bitrate not in (8000, 12000, 16000):
+    raise ValueError('Bitrate must be 8000, 12000 or 16000')
 js = '''import {OpusDownlink} from './opus.mjs';
-const e=new OpusDownlink();e.reset();const pcm=Buffer.alloc(960);
+const e=new OpusDownlink(BITRATE);e.reset();const pcm=Buffer.alloc(960);
 for(let i=0;i<480;i++)pcm.writeInt16LE(Math.round(10000*Math.sin(2*Math.PI*440*i/24000)),i*2);
-console.log(JSON.stringify({packet:e.audio(pcm)[0].toString('hex')}));e.close();'''
+console.log(JSON.stringify({packet:e.audio(pcm)[0].toString('hex')}));e.close();'''.replace('BITRATE', str(bitrate))
 fixture = json.loads(subprocess.check_output(
     ['node', '--input-type=module', '-e', js], cwd=root/'gateway', text=True, encoding='utf-8'))
 s = serial.Serial(port=None, baudrate=115200, timeout=.2, write_timeout=3)
@@ -45,7 +48,7 @@ with s:
     code, result = rpc('opus_probe', fixture)
     assert code == 200 and result.get('decoded') and result.get('samples') == 480, result
     assert 1000 < result['peak'] <= 32768, result
-    print('Opus gateway-to-S3 decoder passed: '+json.dumps(result), flush=True)
+    print('Opus gateway-to-S3 decoder passed at '+str(bitrate)+' bps: '+json.dumps(result), flush=True)
     bad = bytearray.fromhex(fixture['packet'])
     bad[0] = 1
     code, result = rpc('opus_probe', {'packet': bad.hex()})

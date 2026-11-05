@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import {createGateway} from './server.mjs';
 import {RadioFilter} from './radio.mjs';
+import {OPUS_BITRATE} from './opus.mjs';
 
 for(const format of [undefined,'pcm16-24000','mulaw8-24000','opus-unsupported'])test('old or absent downlink format is explicitly rejected: '+format,async t=>{
  const {server,wss}=createGateway({token:'test'});await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -21,7 +22,7 @@ test('mock: authentication, short press, streaming, interruption and channel res
   const code=await new Promise(r=>rejected.on('close',r));assert.equal(code,1008);
   const ws=new WebSocket(url,{headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}});
   const messages=[];let audio=0;
-  ws.on('message',(b,binary)=>{if(binary){assert.equal(b.length,44);audio++;}else messages.push(JSON.parse(b));});
+  ws.on('message',(b,binary)=>{if(binary){assert.equal(b.length,4+OPUS_BITRATE/400);audio++;}else messages.push(JSON.parse(b));});
   async function until(predicate){const start=Date.now();while(!predicate()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}
   const send=o=>ws.send(JSON.stringify(o));
   await until(()=>messages.some(e=>e.type==='ready'));
@@ -60,7 +61,7 @@ test('cloud health, connection budget and malformed events',async t=>{
   t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
   const port=server.address().port;
   const health=await fetch(`http://127.0.0.1:${port}/healthz`);
-  assert.deepEqual(await health.json(),{ok:true,mode:'mock',revision:'test-sha',downlinkFormat:'opus-24000-v1',opusOnly:true,audioBitrate:16000});
+  assert.deepEqual(await health.json(),{ok:true,mode:'mock',revision:'test-sha',downlinkFormat:'opus-24000-v1',opusOnly:true,audioBitrate:OPUS_BITRATE});
   assert.equal((await fetch(`http://127.0.0.1:${port}/unknown`)).status,404);
   const setup=await fetch(`http://127.0.0.1:${port}/setup/`);
   assert.equal(setup.status,200);assert.match(await setup.text(),/navigator\.serial/);

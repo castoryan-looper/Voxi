@@ -8,7 +8,7 @@ function bundle(packets,sequence=0,valid=480){
  return Buffer.concat(chunks);
 }
 test('uplink bundles decode ordered 16kbps speech with bounded original duration and tail',()=>{
- const enc=new OpusDownlink(),dec=new UplinkDecoder();
+ const enc=new OpusDownlink(16000),dec=new UplinkDecoder();
  try{
   enc.reset();dec.reset(UPLINK_FORMAT);const pcm=Buffer.alloc(96000);for(let i=0;i<48000;i++)pcm.writeInt16LE(Math.round(10000*Math.sin(i*2*Math.PI*500/24000)),i*2);
   const frames=enc.audio(pcm),output=[];
@@ -22,7 +22,7 @@ test('uplink bundles decode ordered 16kbps speech with bounded original duration
  }finally{enc.close();dec.close();}
 });
 test('uplink rejects malformed bundles, duplicate sequences, duration overflow and unsupported formats',()=>{
- const enc=new OpusDownlink(),dec=new UplinkDecoder();enc.reset();const frames=enc.audio(Buffer.alloc(960));
+ const enc=new OpusDownlink(16000),dec=new UplinkDecoder();enc.reset();const frames=enc.audio(Buffer.alloc(960));
  try{
   for(const raw of [Buffer.alloc(4),Buffer.from([0,0,0,0,0]),bundle(frames,1),Buffer.concat([bundle(frames),Buffer.alloc(1)])]){dec.reset(UPLINK_FORMAT);assert.throws(()=>dec.audio(raw));}
   dec.reset(UPLINK_FORMAT);dec.originalSamples=480000;assert.throws(()=>dec.audio(bundle(frames)),/overlong/);

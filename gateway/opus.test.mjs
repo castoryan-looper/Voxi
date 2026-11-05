@@ -3,8 +3,33 @@ import assert from 'node:assert/strict';
 import OpusScript from 'opusscript';
 import {OpusDownlink} from './opus.mjs';
 
+for(const bitrate of [8000,12000]){
+ test('low-bandwidth '+bitrate+'bps keeps 20ms frames, sequence and final tail',()=>{
+  const encoder=new OpusDownlink(bitrate),decoder=new OpusScript(24000,1,OpusScript.Application.VOIP);
+  try{
+   encoder.reset();const pcm=Buffer.alloc(48000);
+   for(let n=0;n<24000;n++)pcm.writeInt16LE(Math.round(10000*Math.sin(n*2*Math.PI*440/24000)),n*2);
+   const packets=encoder.audio(pcm);
+   assert.equal(packets.length,50);
+   assert.equal(packets.reduce((size,packet)=>size+packet.length,0),bitrate/8+200);
+   packets.push(...encoder.finish());
+   for(const [index,packet] of packets.entries()){
+    assert.equal(packet.readUInt32LE(),index);
+    assert.equal(packet.length,4+bitrate/400);
+    assert.equal(decoder.decode(packet.subarray(4)).length,960);
+   }
+   assert.deepEqual(encoder.finish(),[]);
+  }finally{encoder.close();decoder.delete();}
+ });
+}
+
+test('unsupported downlink bitrate is rejected',()=>{
+ assert.throws(()=>new OpusDownlink(0),/OPUS_DOWNLINK_BITRATE/);
+ assert.throws(()=>new OpusDownlink(64000),/OPUS_DOWNLINK_BITRATE/);
+});
+
 test('Opus CBR is 16kbps, ordered, decodable and preserves the final codec tail',()=>{
- const encoder=new OpusDownlink(),decoder=new OpusScript(24000,1,OpusScript.Application.VOIP);
+ const encoder=new OpusDownlink(16000),decoder=new OpusScript(24000,1,OpusScript.Application.VOIP);
  try{
   encoder.reset();const pcm=Buffer.alloc(24000*2);
   for(let n=0;n<24000;n++)pcm.writeInt16LE(Math.round(10000*Math.sin(n*2*Math.PI*440/24000)),n*2);

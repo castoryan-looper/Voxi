@@ -1,5 +1,11 @@
 # 设备协议 · Opus 下行 v1
 
+## 低带宽档位
+
+网关支持 `OPUS_DOWNLINK_BITRATE=8000`、`12000` 或 `16000`，默认仍为 16000。该设置作用于本网关全部设备及 mock/OpenAI/Pocket 模式的回复下行；采样率、20ms 帧、序号格式和录音上行保持原配置。8kbps 每帧为 20 字节 Opus 加 4 字节序号，约 1200B/s；12kbps 约 1700B/s；16kbps 约 2200B/s。这些数字均未计入 WebSocket/TLS/TCP 开销。
+
+在服务器 `/etc/voxi/gateway.env` 设置该变量并重新部署网关。`/healthz` 与设备 `ready.audioBitrate` 返回实际档位。`sudo bash deploy/check-opus.sh` 可核对运行版本、帧大小和解码。已接入 MiniCam 可运行 `python tools/test_opus_device.py COM4 8000` 验证真实芯片解码，无需为此改变固件协议。低码率会影响音质，实际卡顿和心跳超时仍需分别实测。
+
 连接 `ws://<gateway>:8787/radio`（生产环境使用受信任 CA 的 WSS）；HTTP Header：`Authorization: Bearer <DEVICE_TOKEN>` 和 `X-Voxi-Audio-Format: opus-24000-v1`。API Key 仅网关持有。缺失或声明旧下行格式时返回 `opus_required` 错误并以 1008 关闭；不再回退到 PCM/µ-law。
 
 上行录音仍为无头 PCM16LE、24kHz 单声道，每帧最多 1920 字节；本次只统一回复下行。所有维护中的 C6/S3 板型、Wi-Fi/4G 连接和网关 mock/OpenAI/Pocket 模式均只发送 Opus 下行：24kHz 单声道、20ms、16kbps CBR。每个 binary 消息为 4 字节 little-endian 顺序号加一个原始 Opus packet，编号在每个 audio_start 从 0 开始。20ms 帧通常共 44 字节，约 2200B/s，不含 WebSocket/TLS/TCP 开销。JSON 为文本帧，音频为 binary 帧；同连接顺序传输。
