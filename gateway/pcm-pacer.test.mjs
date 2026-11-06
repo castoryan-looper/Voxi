@@ -37,15 +37,15 @@ test('credit refill is twice realtime but never exceeds unconsumed capacity',()=
  for(let t=2005;t<3000;t+=5){f.at(t);f.pacer.tick();}
  assert.equal(f.pacer.sentPcm,72000);assert.equal(f.pacer.bytes,24000);
 });
-test('stale, wrong-turn and impossible credit cannot open an unsafe send window',()=>{
+test('wrong-turn and impossible credit cannot open an unsafe send window',()=>{
  const f=fixture();f.pacer.beginStream('new');f.pacer.audio(Buffer.alloc(96000));
  assert(!f.pacer.feedback({flowId:'old',consumedBytes:0,capacityBytes:576000}));
  assert(!f.pacer.feedback({flowId:'new',consumedBytes:960000,capacityBytes:576000}));
  assert(!f.pacer.feedback({flowId:'new',consumedBytes:0,capacityBytes:1e9}));
  assert(f.pacer.feedback({flowId:'new',consumedBytes:0,capacityBytes:576000}));
- f.at(6001);f.pacer.tick();assert.equal(f.sent.length,0);
+ f.at(6001);f.pacer.tick();assert.equal(f.sent.length,1);
  assert(f.pacer.feedback({flowId:'new',consumedBytes:0,capacityBytes:576000}));
- f.pacer.tick();assert.equal(f.sent.length,1);
+ f.at(6011);f.pacer.tick();assert.equal(f.sent.length,2);
  f.pacer.clear();assert(!f.pacer.feedback({flowId:'new',consumedBytes:0,capacityBytes:576000}));
 });
 test('long credit-controlled reply keeps in-flight plus buffered PCM bounded across stalls',()=>{
@@ -68,4 +68,16 @@ test('lost feedback fails explicitly after a bounded wait',()=>{
  assert(f.pacer.feedback({flowId:'r',consumedBytes:0,capacityBytes:576000}));
  f.at(15001);f.pacer.tick();assert.equal(f.sent.length,0);
  assert.deepEqual(f.errors,['Playback feedback timed out']);assert.equal(f.pacer.bytes,0);
+});
+
+test('delayed feedback preserves unspent credit without exceeding absolute window',()=>{
+ const f=fixture();f.pacer.beginStream('r');f.pacer.audio(Buffer.alloc(96000));
+ f.pacer.feedback({flowId:'r',consumedBytes:0,capacityBytes:96000});
+ for(let t=6500;t<7500;t+=10){f.at(t);f.pacer.tick();}
+ assert.equal(f.pacer.sentPcm,48000);assert.equal(f.pacer.bytes,48000);
+ assert(f.pacer.metrics().creditWindowBlockedChecks>0);
+ f.pacer.feedback({flowId:'r',consumedBytes:24000,capacityBytes:96000});
+ assert.equal(f.pacer.metrics().creditMaxFeedbackGapMs,7490);
+ for(let t=7500;t<8500;t+=10){f.at(t);f.pacer.tick();}
+ assert.equal(f.pacer.sentPcm,72000);
 });
