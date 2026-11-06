@@ -148,9 +148,16 @@ static PlaybackGate playbackGate(2*48000,6*48000,48000,true);
 #else
 static PlaybackGate playbackGate;
 #endif
+#ifdef VOXI_BOARD_MINICAM
+static String playbackFlowId;
+static uint32_t playbackCreditAt=0;
+#endif
 static size_t fadeRemaining=120;
 void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 void opusDiagnostics(JsonDocument& out){
+#ifdef VOXI_BOARD_MINICAM
+ out["playbackCreditActive"]=playbackFlowId.length()>0;out["playbackResumeMs"]=playbackGate.threshold()/48;
+#endif
 #ifdef VOXI_OPUS_UPLINK
  out["opusUplinkFrames"]=opusUplinkFrames;out["opusUplinkErrors"]=opusUplinkErrors;out["opusUplinkMaxUs"]=opusUplinkMaxUs;out["opusUplinkWireBytes"]=opusUplinkWireBytes;
  out["uplinkOpusReady"]=uplinkOpusReady;
@@ -328,7 +335,11 @@ bool radioSetWarmStandby(bool idle){
  gatewayLinked=ready=replyCodecReady=false;thinking=false;diagnosticStage("warm_standby");return true;
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
-void flushAudio(){cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+void flushAudio(){
+#ifdef VOXI_BOARD_MINICAM
+ playbackFlowId="";
+#endif
+ cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 static bool deferUploadRecovery(){
   if(uploadRecovery.pending){ready=false;return true;}
   if(!uploadRecovery.request(millis(),uploading,submissionAttempted,(probeActive||probeFinishing)&&!probeAllowRecovery))return false;
@@ -373,6 +384,9 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     replyAudioBitrate=d["audioBitrate"]|16000;
     // C6 must keep its watermarks below the 96KB internal PCM buffer.
     playbackGate.resumeBytes=CAP<=2*48000?28800:48000;
+#ifdef VOXI_BOARD_MINICAM
+    playbackGate.resumeBytes=2*48000;playbackGate.recoveryStepBytes=48000;playbackGate.recoveryMaxBytes=4*48000;
+#endif
     if(uploading||replyPending)return;
     int actual=d["channel"]|0;
     if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
@@ -389,6 +403,9 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
   if(type=="audio_start"){
     if(!replyCodecReady||!opusReplyReset()){diagnosticError("Opus not confirmed or decoder reset failed");fault();return;}
+#ifdef VOXI_BOARD_MINICAM
+    playbackFlowId=d["flowId"]|"";playbackCreditAt=0;
+#endif
     replyWireBytes=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
   }
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
@@ -514,6 +531,17 @@ void audioTick(){
   }
   if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
   if(!tx&&playing&&ending&&used==0){replyIntegrityComplete=true;playing=ending=thinking=false;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
+#ifdef VOXI_BOARD_MINICAM
+  // Best-effort nonblocking enqueue; network task owns all TLS writes.
+  // Absolute consumed bytes charge even delayed/in-flight audio to server credit.
+  if(playing&&gatewayLinked&&playbackFlowId.length()&&millis()-playbackCreditAt>=1500){
+    JsonDocument credit;credit["type"]="playback_credit";credit["flowId"]=playbackFlowId;
+    credit["consumedBytes"]=replyConsumedBytes;credit["capacityBytes"]=CAP;
+    String text;serializeJson(credit,text);TxPacket packet{};packet.type=WStype_TEXT;packet.len=text.length();
+    if(packet.len<=sizeof(packet.data)){memcpy(packet.data,text.c_str(),packet.len);
+      if(xQueueSend(outgoing,&packet,0)==pdTRUE)playbackCreditAt=millis();}
+  }
+#endif
   if(millis()-lastReport>250){lastReport=millis();JsonDocument d;d["type"]="played";
     // Approximate DAC position: subtract maximum queued DMA (60 ms).
     static uint32_t lastReported=UINT32_MAX;

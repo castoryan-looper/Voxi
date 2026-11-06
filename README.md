@@ -7,6 +7,7 @@
 ## 先看这里
 
 - [换电脑接续／最新开发交接](docs/handoffs/LATEST.md)
+- [MiniCam 4G 缓存补充优化](docs/MINICAM-JITTER.md)：小智策略参考、有界播放额度、2/3/4 秒恢复及验证边界。
 - [脱敏开发对话记录](docs/conversations/README.md)
 
 - [复用已登录的 Pocket Cloud，无需 API Key](docs/POCKET-BACKEND.md)

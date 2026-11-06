@@ -18,7 +18,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
     if(!reply)return;
     const {lastSourceAt,lastSendAt,startedAt,...metrics}=reply;
     console.log(JSON.stringify({event:'pocket_downlink',connection,reply:replyNumber,outcome,audioFormat,
-      elapsedMs:Math.round(performance.now()-startedAt),...metrics}));
+      elapsedMs:Math.round(performance.now()-startedAt),...pacer.metrics(),...metrics}));
     reply=null;
   };
   const error=message=>{
@@ -45,7 +45,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
       }
       const e=JSON.parse(data);
       if(e.type==='ready'){e.audioFormat=audioFormat;e.audioBitrate=OPUS_BITRATE;e.uplinkFormat=UPLINK_FORMAT;}
-      if(e.type==='audio_start')opus.reset();
+      if(e.type==='audio_start'){opus.reset();pacer.beginStream(e.flowId);}
       if(e.type==='audio_end')for(const packet of opus.finish())sendWire(packet,true);
       if(['flush','connecting','offline','error'].includes(e.type))opus.close();
       if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
@@ -81,12 +81,12 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
       if(['connecting','offline','error'].includes(e.type)){ready=false;recording=false;}
       if(e.type==='audio_start'||e.type==='flush')filter=new RadioFilter();
       if(e.type==='audio_start'){
-        finishReply('replaced');replyNumber++;
+        finishReply('replaced');replyNumber++;e.flowId=String(replyNumber);
         reply={startedAt:performance.now(),lastSourceAt:null,lastSendAt:null,sourcePcmBytes:0,sentBytes:0,
           maxSourceGapMs:0,maxSendGapMs:0,peakQueuedPcmBytes:0,peakTcpBufferedBytes:0};
       }
       if(['flush','connecting','offline','error'].includes(e.type)){finishReply(e.type);pacer.clear();}
-      pacer.control(raw.toString());
+      pacer.control(JSON.stringify(e));
     }
   });
   device.on('message',(raw,binary)=>{
@@ -99,6 +99,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
     }
     let e;try{e=JSON.parse(raw);}catch{return;}
     if(!e||typeof e!=='object'||Array.isArray(e))return;
+    if(e.type==='playback_credit'){pacer.feedback(e);return;}
     if(e.type==='ptt_down'&&ready){try{uplink.reset(e.audioFormat);}catch(err){return error(err.message);}recording=true;bytes=0;device.radioBusy=true;}
     else if(e.type==='ptt_up'){
       if(recording){try{uplink.finish();}catch(err){return error(err.message);}

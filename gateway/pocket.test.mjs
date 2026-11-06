@@ -18,7 +18,7 @@ test('Pocket proxy preserves PCM uplink and uses only Opus downlink',async t=>{
       if(binary){seen.push({pcm:raw.length});return;}
       const e=JSON.parse(raw);seen.push(e);
       if(e.type==='ptt_up'){
-        socket.send(JSON.stringify({type:'audio_start'}));socket.send(Buffer.alloc(960));socket.send(JSON.stringify({type:'audio_end'}));
+        socket.send(JSON.stringify({type:'audio_start'}));socket.send(Buffer.alloc(48000));socket.send(JSON.stringify({type:'audio_end'}));
       }
     });
   });
@@ -27,15 +27,20 @@ test('Pocket proxy preserves PCM uplink and uses only Opus downlink',async t=>{
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
   const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111','X-Voxi-Audio-Format':'opus-24000-v1'}});
   const messages=[];let pcm=0;
-  device.on('message',(raw,binary)=>{if(binary)pcm+=raw.length;else messages.push(JSON.parse(raw));});
+  device.on('message',(raw,binary)=>{if(binary)pcm+=raw.length;else {
+    const event=JSON.parse(raw);messages.push(event);
+    if(event.type==='audio_start')device.send(JSON.stringify({type:'playback_credit',flowId:event.flowId,consumedBytes:0,capacityBytes:576000}));
+  }});
   async function until(check){const start=Date.now();while(!check()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}
   await until(()=>messages.some(e=>e.type==='ready'));
   device.send(JSON.stringify({type:'ptt_down'}));device.send(Buffer.alloc(5760));device.send(JSON.stringify({type:'ptt_up'}));
   await until(()=>messages.some(e=>e.type==='audio_end'));
   const downlink=records.find(e=>e.event==='pocket_downlink');
+  assert.equal(downlink.creditEnabled,true);assert(downlink.creditUpdates>=1);
+  assert.equal(seen.some(e=>e.type==='playback_credit'),false);
   assert.equal(downlink.connection,1);assert.equal(downlink.reply,1);assert.equal(downlink.outcome,'complete');
-  const expectedBytes=2*(4+OPUS_BITRATE/400);
-  assert.equal(downlink.sourcePcmBytes,960);assert.equal(downlink.sentBytes,expectedBytes);
+  const expectedBytes=51*(4+OPUS_BITRATE/400);
+  assert.equal(downlink.sourcePcmBytes,48000);assert.equal(downlink.sentBytes,expectedBytes);
   assert.equal(messages.find(e=>e.type==='ready').audioFormat,'opus-24000-v1');assert.equal(messages.find(e=>e.type==='ready').audioBitrate,OPUS_BITRATE);assert.equal(pcm,expectedBytes);assert.deepEqual(seen.slice(0,3),[{type:'ptt_down'},{pcm:5760},{type:'ptt_up'}]);
   device.send(JSON.stringify({type:'channel',channel:2}));await until(()=>seen.some(e=>e.channel===2));
   device.close();

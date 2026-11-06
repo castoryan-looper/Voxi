@@ -55,4 +55,15 @@ int main(){
  fastRecovery.reset();assert(fastRecovery.threshold()==10*24000);
  assert(!fastRecovery.canWrite(2*24000,false));
  assert(fastRecovery.canWrite(10*24000,false));
+ // MiniCam adaptive recovery: 2s, 3s, 4s cap; final tail never waits.
+ PlaybackGate adaptive(2*48000,6*48000,48000,true);
+ adaptive.resumeBytes=2*48000;adaptive.recoveryStepBytes=48000;adaptive.recoveryMaxBytes=4*48000;
+ assert(adaptive.canWrite(2*48000,false));
+ for(int i=1;i<=6;i++){
+   assert(!adaptive.canWrite(0,false));assert(adaptive.rebuffers==(unsigned)i);
+   size_t threshold=(i==1?2:i==2?3:4)*48000;
+   assert(adaptive.threshold()==threshold);assert(!adaptive.canWrite(threshold-1,false));
+   assert(adaptive.canWrite(threshold,false));
+ }
+ adaptive.reset();assert(adaptive.canWrite(480,true));assert(adaptive.rebuffers==0);
 }
