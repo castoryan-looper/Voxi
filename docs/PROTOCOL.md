@@ -32,6 +32,16 @@
 
 ## 完整性与版本
 
+### MiniCam 可协商批量下行
+
+MiniCam 在 `X-Voxi-Downlink-Codecs` 中同时声明 `opus-24000-batch-v1,opus-24000-v1`；基础 `X-Voxi-Audio-Format` 仍为 `opus-24000-v1`，以兼容旧网关。Pocket 模式的新网关仅对声明支持批量格式的设备，在 ready 中选择 `audioFormat:opus-24000-batch-v1`。未声明的设备及非 Pocket 模式仍用原格式；新固件接受原格式回退。
+
+批量 binary 消息格式为 `count:u8`，随后重复 count 次 `length:u16LE + 原 v1 帧（seq:u32LE + Opus）`。count 为 1–3；每个编码帧仍为 24kHz/mono/20ms，序号逐帧递增而非逐消息递增。设备先校验整个包的长度和数量，再逐帧解码。现有 8/12/16kbps CBR 下三帧消息分别为 79/109/139 字节，均小于设备 2048 字节消息上限。
+
+三帧即发送，首帧待发达到 40ms 时也发送未满批次（实际调度受事件循环延迟影响）。这最多合并 60ms 音频，不等待更大的长包。编码器尾帧和部分批次在 audio_end 前排空；flush、错误、换台、断开时丢弃旧待发批次。发送进度额度仍按 PCM 计费，待合并的帧也已计入，容量上限不变。
+
+正常满批次时消息频率由 50/s 降至约 16.7/s。批量头反而略增加 WebSocket payload 字节，目标是减少消息/TLS/系统调用的固定开销；实际 TLS 记录、TCP 包数及总流量取决于代理和网络栈，不能直接把消息数减少当成总流量同幅度下降。`pocket_downlink.sentMessages` 与设备 `replyWireMessages` 可核对实际发送次数；压缩字节计数包含批量头。
+
 错序、缺失或无效的 Opus 帧明确报错，不丢帧续播。每轮尾帧补齐后排空编码器延迟，避免最后一个音节被截断；最多额外约 40ms。`audio_end` 在所有 Opus 尾帧之后发送。
 
 `replyWireReceivedBytes` 统计压缩数据；`replyReceivedBytes`、`replyConsumedBytes` 和 CRC 比较本机解码后 PCM 的接收/播放完整性，不比较有损压缩前后的 PCM。`replyCodecConfirmed` 表示云端已确认正确协议，不能仅凭字段名称判断连接已可录音。

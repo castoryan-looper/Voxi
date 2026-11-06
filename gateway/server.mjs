@@ -1,4 +1,5 @@
 import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
+import {OPUS_BATCH_FORMAT} from './opus-batch.mjs';
 import {UplinkDecoder,UPLINK_FORMAT} from './uplink.mjs';
 import http from 'node:http';
 import {pathToFileURL} from 'node:url';
@@ -41,7 +42,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
   wss.on('connection',(device,req)=>{
-    const audioFormat=OPUS_FORMAT;
+    const codecs=String(req.headers['x-voxi-downlink-codecs']||'').split(',').map(s=>s.trim());
+    const audioFormat=mode==='pocket'&&codecs.includes(OPUS_BATCH_FORMAT)?OPUS_BATCH_FORMAT:OPUS_FORMAT;
     const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
     const connection=++connectionSequence;let inputBytes=0;
     let observedChannel=null,observedBusy=false;

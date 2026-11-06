@@ -15,6 +15,7 @@ FIELDS = (
     'deviceId', 'uptimeMs', 'networkMode', 'wifiConnected', 'cloudReady', 'busy',
     'connectionStage', 'turnFailure', 'turnFailureAtMs', 'replyReceivedBytes',
     'replyConsumedBytes', 'replyWireReceivedBytes', 'replyIntegrityComplete',
+    'replyTransportFormat', 'replyWireMessages',
     'replyIntegrityPassed', 'replyGapMaxMs', 'playbackBufferedMs',
     'playbackRebuffers', 'playbackTargetMs', 'playbackResumeMs',
     'playbackCreditActive', 'opusDecodeErrors', 'speakerWriteErrors',
