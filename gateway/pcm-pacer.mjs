@@ -1,8 +1,8 @@
 // Bound pending audio. Legacy clients remain realtime-paced. Credit-capable
 // clients may refill faster, with every byte in flight charged to their capacity.
 export class PcmPacer {
-  constructor({send,fail,now=()=>performance.now(),canSend=()=>true,maxBytes=30*48000}) {
-    Object.assign(this,{send,fail,now,canSend,maxBytes});this.clear();
+  constructor({send,fail,now=()=>performance.now(),canSend=()=>true,maxBytes=30*48000,feedbackTimeoutMs=60000}) {
+    Object.assign(this,{send,fail,now,canSend,maxBytes,feedbackTimeoutMs});this.clear();
   }
   clear(){this.queue=[];this.bytes=0;this.nextAt=0;this.flow=null;this.sentPcm=0;}
   beginStream(id){this.flow={id,consumed:0,limit:0,updatedAt:0,enabled:false,updates:0,peakOutstanding:0,maxFeedbackGapMs:0,windowBlockedChecks:0,transportBlockedChecks:0,tickGapMaxMs:0,lastTickAt:this.now()};this.sentPcm=0;}
@@ -35,7 +35,7 @@ export class PcmPacer {
     while(this.queue.length&&!this.queue[0].pcm)this.send(this.queue.shift().raw,false);
     if(!this.queue.length||this.now()<this.nextAt)return;
     const f=this.flow;
-    if(f?.enabled&&this.now()-f.updatedAt>15000){f.maxFeedbackGapMs=Math.max(f.maxFeedbackGapMs,this.now()-f.updatedAt);this.fail('Playback feedback timed out');this.clear();return;}
+    if(f?.enabled&&this.now()-f.updatedAt>this.feedbackTimeoutMs){f.maxFeedbackGapMs=Math.max(f.maxFeedbackGapMs,this.now()-f.updatedAt);this.fail('Playback feedback timed out');this.clear();return;}
     // Existing credit is an absolute capacity bound, not a timed lease.
     // Delayed ACKs must not suspend safe bytes that are still within that bound.
     if(f?.enabled&&this.sentPcm+this.queue[0].pcm.length-f.consumed>f.limit){f.windowBlockedChecks++;return;}

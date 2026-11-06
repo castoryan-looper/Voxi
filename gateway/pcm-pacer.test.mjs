@@ -66,7 +66,7 @@ test('long credit-controlled reply keeps in-flight plus buffered PCM bounded acr
 test('lost feedback fails explicitly after a bounded wait',()=>{
  const f=fixture();f.pacer.beginStream('r');f.pacer.audio(Buffer.alloc(960));
  assert(f.pacer.feedback({flowId:'r',consumedBytes:0,capacityBytes:576000}));
- f.at(15001);f.pacer.tick();assert.equal(f.sent.length,0);
+ f.at(60001);f.pacer.tick();assert.equal(f.sent.length,0);
  assert.deepEqual(f.errors,['Playback feedback timed out']);assert.equal(f.pacer.bytes,0);
 });
 
@@ -80,4 +80,23 @@ test('delayed feedback preserves unspent credit without exceeding absolute windo
  assert.equal(f.pacer.metrics().creditMaxFeedbackGapMs,7490);
  for(let t=7500;t<8500;t+=10){f.at(t);f.pacer.tick();}
  assert.equal(f.pacer.sentPcm,72000);
+});
+
+test('three-minute stream survives 26-second feedback blackout within capacity and backlog bounds',()=>{
+ const f=fixture();f.pacer.beginStream('long-cellular');
+ let consumed=0,maxOutstanding=0,frames=0,endQueued=false;
+ for(let t=0;t<220000;t+=5){
+   f.at(t);
+   if(t<180000&&t%20===0){f.pacer.audio(Buffer.alloc(960));frames++;}
+   if(t===180000){f.pacer.control('audio_end');endQueued=true;}
+   // Playback cannot consume more data than has been transmitted.
+   consumed=Math.min(f.pacer.sentPcm,consumed+240);
+   if(t%1500===0&&!(t>=19500&&t<46500))
+     assert(f.pacer.feedback({flowId:'long-cellular',consumedBytes:consumed,capacityBytes:576000}));
+   f.pacer.tick();maxOutstanding=Math.max(maxOutstanding,f.pacer.sentPcm-consumed);
+   assert(f.pacer.bytes<=30*48000);
+ }
+ assert(endQueued);assert.equal(frames,9000);assert.equal(f.pacer.bytes,0);
+ assert.equal(f.pacer.sentPcm,180*48000);assert(maxOutstanding<=8*48000);
+ assert.equal(f.sent.at(-1).data,'audio_end');assert.deepEqual(f.errors,[]);
 });
