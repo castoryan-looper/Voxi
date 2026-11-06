@@ -25,6 +25,7 @@ static constexpr size_t RING_SIZE=128*1024,LINE_SIZE=128*1024+256;
 static uint8_t* ring;static size_t ringHead=0,ringTail=0,ringUsed=0;
 struct State{bool detected=false,simReady=false,registered=false,tlsVerified=false;int signal=-1,tlsError=0,socketError=0;uint32_t rxBytes=0,txBytes=0,overflows=0,largestPacket=0,largestLine=0,ringPeak=0,pollFailures=0,dropAt=0;char dropReason[64]={};char model[48]={},status[48]="probing",lastAt[20]={};};
 static State state;
+static bool resourcesStarted=false;
 static void tcpFailed(const char* reason){socketUp=false;xSemaphoreTake(stateMutex,portMAX_DELAY);strlcpy(state.dropReason,reason,sizeof(state.dropReason));state.dropAt=millis();xSemaphoreGive(stateMutex);}
 static void status(const char* text){xSemaphoreTake(stateMutex,portMAX_DELAY);strlcpy(state.status,text,sizeof(state.status));xSemaphoreGive(stateMutex);}
 static bool command(const String& text,uint32_t timeout=3000,String* reply=nullptr){
@@ -117,7 +118,12 @@ static void manager(void*){
  }
 }
 void minicamModemBegin(){
- commandMutex=xSemaphoreCreateMutex();stateMutex=xSemaphoreCreateMutex();ringMutex=xSemaphoreCreateMutex();events=xEventGroupCreate();ring=(uint8_t*)heap_caps_malloc(RING_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);assert(commandMutex&&stateMutex&&ringMutex&&events&&ring);
+ // Keep status locks available in Wi-Fi mode, without starting the modem.
+ commandMutex=xSemaphoreCreateMutex();stateMutex=xSemaphoreCreateMutex();ringMutex=xSemaphoreCreateMutex();events=xEventGroupCreate();assert(commandMutex&&stateMutex&&ringMutex&&events);
+}
+static void startModemResources(){
+ if(resourcesStarted)return;
+ ring=(uint8_t*)heap_caps_malloc(RING_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);assert(ring);
  dmaQueue=xQueueCreate(64,sizeof(DmaItem));assert(dmaQueue);
  uart_config_t uart={};uart.baud_rate=921600;uart.data_bits=UART_DATA_8_BITS;uart.parity=UART_PARITY_DISABLE;uart.stop_bits=UART_STOP_BITS_1;uart.source_clk=UART_SCLK_DEFAULT;
  ESP_ERROR_CHECK(uart_param_config(UART_NUM_1,&uart));ESP_ERROR_CHECK(uart_set_pin(UART_NUM_1,47,48,UART_PIN_NO_CHANGE,UART_PIN_NO_CHANGE));gpio_set_pull_mode(GPIO_NUM_48,GPIO_PULLUP_ONLY);
@@ -130,14 +136,15 @@ void minicamModemBegin(){
   return higher==pdTRUE;
  },nullptr);
  ESP_ERROR_CHECK(modem.StartReceive());
+ resourcesStarted=true;
  assert(xTaskCreatePinnedToCore(receiver,"ml307-rx",4096,nullptr,4,nullptr,0)==pdPASS);
  assert(xTaskCreatePinnedToCore(manager,"ml307-net",6144,nullptr,1,nullptr,0)==pdPASS);
 }
-void minicamModemConfigure(bool enabled,const char* value){selected=enabled;strlcpy(apn,value,sizeof(apn));configured=true;}
-bool minicamModemReady(){return selected&&ipUp&&!stopping;}
+void minicamModemConfigure(bool enabled,const char* value){selected=enabled;strlcpy(apn,value,sizeof(apn));if(enabled)startModemResources();configured=true;}
+bool minicamModemReady(){return resourcesStarted&&selected&&ipUp&&!stopping;}
 int minicamSignal(){xSemaphoreTake(stateMutex,portMAX_DELAY);int v=state.signal;xSemaphoreGive(stateMutex);return v;}
 bool minicamTcpConnected(){return socketUp;}
-void minicamTcpClose(){socketUp=false;xEventGroupClearBits(events,CLOSED);if(command("AT+MIPCLOSE=0",2000))xEventGroupWaitBits(events,CLOSED,pdTRUE,pdFALSE,pdMS_TO_TICKS(1500));xSemaphoreTake(ringMutex,portMAX_DELAY);ringHead=ringTail=ringUsed=0;xSemaphoreGive(ringMutex);minicamTlsStatus(false);}
+void minicamTcpClose(){if(!resourcesStarted)return;socketUp=false;xEventGroupClearBits(events,CLOSED);if(command("AT+MIPCLOSE=0",2000))xEventGroupWaitBits(events,CLOSED,pdTRUE,pdFALSE,pdMS_TO_TICKS(1500));xSemaphoreTake(ringMutex,portMAX_DELAY);ringHead=ringTail=ringUsed=0;xSemaphoreGive(ringMutex);minicamTlsStatus(false);}
 bool minicamTcpConnect(const char* host,uint16_t port){
  if(!minicamModemReady())return false;minicamTcpClose();xEventGroupClearBits(events,OPENED|OPEN_FAILED);
  if(!command("AT+MIPCFG=\"ssl\",0,0,0")||!command("AT+MIPCFG=\"encoding\",0,1,1"))return false;
@@ -158,8 +165,8 @@ int minicamTcpSend(const uint8_t* bytes,size_t length){
 int minicamTcpRead(uint8_t* bytes,size_t capacity){xSemaphoreTake(ringMutex,portMAX_DELAY);size_t n=min(capacity,ringUsed);for(size_t i=0;i<n;i++){bytes[i]=ring[ringTail];ringTail=(ringTail+1)%RING_SIZE;}ringUsed-=n;xSemaphoreGive(ringMutex);return n;}
 void minicamTlsStatus(bool verified,int error){xSemaphoreTake(stateMutex,portMAX_DELAY);state.tlsVerified=verified;state.tlsError=error;xSemaphoreGive(stateMutex);}
 void minicamModemDiagnostics(JsonDocument& out){State s;xSemaphoreTake(stateMutex,portMAX_DELAY);s=state;xSemaphoreGive(stateMutex);
- out["cellularLastDropReason"]=s.dropReason;out["cellularLastDropAtMs"]=s.dropAt;out["cellularLargestPacket"]=s.largestPacket;out["cellularLargestLine"]=s.largestLine;out["cellularRingPeakBytes"]=s.ringPeak;out["cellularPollFailures"]=s.pollFailures;out["cellularUartDriver"]="UHCI DMA";out["cellularDetected"]=s.detected;out["cellularModel"]=s.model;out["cellularBaud"]=921600;out["cellularSimReady"]=s.simReady;out["cellularRegistered"]=s.registered;out["cellularSignal"]=s.signal;out["cellularStatus"]=s.status;out["cellularTransportEnabled"]=(bool)selected;out["cellularDataReady"]=(bool)ipUp;out["cellularTcpConnected"]=(bool)socketUp;out["cellularTlsVerified"]=s.tlsVerified;out["cellularTlsError"]=s.tlsError;out["cellularSocketError"]=s.socketError;out["cellularLastAt"]=s.lastAt;out["cellularRxBytes"]=s.rxBytes;out["cellularTxBytes"]=s.txBytes;out["cellularRxOverflows"]=s.overflows;
+ out["cellularLastDropReason"]=s.dropReason;out["cellularLastDropAtMs"]=s.dropAt;out["cellularLargestPacket"]=s.largestPacket;out["cellularLargestLine"]=s.largestLine;out["cellularRingPeakBytes"]=s.ringPeak;out["cellularPollFailures"]=s.pollFailures;out["cellularResourcesActive"]=resourcesStarted;out["cellularUartDriver"]=resourcesStarted?"UHCI DMA":"not started";out["cellularDetected"]=s.detected;out["cellularModel"]=s.model;out["cellularBaud"]=921600;out["cellularSimReady"]=s.simReady;out["cellularRegistered"]=s.registered;out["cellularSignal"]=s.signal;out["cellularStatus"]=s.status;out["cellularTransportEnabled"]=(bool)selected;out["cellularDataReady"]=(bool)ipUp;out["cellularTcpConnected"]=(bool)socketUp;out["cellularTlsVerified"]=s.tlsVerified;out["cellularTlsError"]=s.tlsError;out["cellularSocketError"]=s.socketError;out["cellularLastAt"]=s.lastAt;out["cellularRxBytes"]=s.rxBytes;out["cellularTxBytes"]=s.txBytes;out["cellularRxOverflows"]=s.overflows;
  xSemaphoreTake(ringMutex,portMAX_DELAY);out["cellularTcpBufferedBytes"]=ringUsed;xSemaphoreGive(ringMutex);
 }
-bool minicamModemStandby(){stopping=true;uint32_t began=millis();while(!stopped&&millis()-began<15000)delay(10);return stopped;}
+bool minicamModemStandby(){if(!resourcesStarted)return true;stopping=true;uint32_t began=millis();while(!stopped&&millis()-began<15000)delay(10);return stopped;}
 #endif

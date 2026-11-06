@@ -1,5 +1,6 @@
 #include "diagnostics.h"
 #include <esp_system.h>
+#include <esp_heap_caps.h>
 #include <time.h>
 RTC_DATA_ATTR static uint32_t magic=0,boots=0;
 static char stage[32]="starting",lastError[192]={},lastFault[192]={};
@@ -28,7 +29,7 @@ void diagnosticsJson(JsonDocument& d){
   portENTER_CRITICAL(&lock);lost=wifiLostAt;restored=wifiRestoredAt;losses=wifiLossCount;reason=wifiLossReason;epoch=wifiLostEpochMs;portEXIT_CRITICAL(&lock);
   d["wifiDisconnectedAtMs"]=lost;d["wifiConnectedAtMs"]=restored;d["wifiDisconnectCount"]=losses;d["wifiDisconnectReason"]=reason;d["wifiDisconnectedEpochMs"]=epoch;
   auto flowState=radioDebugRead();auto flowJson=d["radioDebug"].to<JsonObject>();flowJson["phase"]=flowState.phase;flowJson["micBytes"]=flowState.micBytes;flowJson["sentBytes"]=flowState.txBytes;flowJson["receivedBytes"]=flowState.rxBytes;flowJson["micPeak"]=flowState.peak;auto rows=flowJson["events"].to<JsonArray>();for(auto& row:flowState.logs)if(row[0])rows.add(row);
-  d["freeHeap"]=ESP.getFreeHeap();d["minFreeHeap"]=ESP.getMinFreeHeap();d["reconnects"]=n;
+  d["internalFreeHeap"]=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);d["internalLargestFreeBlock"]=heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);d["freeHeap"]=ESP.getFreeHeap();d["minFreeHeap"]=ESP.getMinFreeHeap();d["reconnects"]=n;
 }
 
 static RadioDebugSnapshot flow;
