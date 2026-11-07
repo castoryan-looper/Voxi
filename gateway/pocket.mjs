@@ -48,6 +48,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
       }
       const e=JSON.parse(data);
       if(e.type==='ready'){e.audioFormat=audioFormat;e.audioBitrate=OPUS_BITRATE;e.uplinkFormat=UPLINK_FORMAT;e.downlinkProbe=true;}
+      if(e.type==='ready'){device.voxiChannelName=e.name||null;device.voxiChannelMode=e.channelMode||null;}
       if(e.type==='audio_start'){batcher.clear();opus.reset();pacer.beginStream(e.flowId);}
       if(e.type==='audio_end'){for(const packet of opus.finish())batcher.add(packet);batcher.flush();}
       if(['flush','connecting','offline','error'].includes(e.type)){batcher.clear();opus.close();}
@@ -95,6 +96,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
       let e;try{e=JSON.parse(raw);}catch{return error('Pocket returned invalid control data');}
       if(!e||typeof e!=='object')return error('Pocket returned invalid event');
       if(e.type==='ready'){ready=true;lastReady={...e};}
+      if(e.type==='task_state'){deliver(JSON.stringify(e),false);return;}
       if(['connecting','offline','error'].includes(e.type)){ready=false;recording=false;}
       if(['audio_start','flush','connecting','offline','error'].includes(e.type))cancelProbe('upstream_interrupted');
       if(e.type==='flush')filter=new RadioFilter();

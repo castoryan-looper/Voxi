@@ -20,7 +20,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     const path=new URL(req.url,'http://gateway').pathname;
     const assets={'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8']};
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
-    if(['/admin','/admin/','/admin/devices','/admin/ai/prompts','/admin/ai/voice','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
+    if(['/admin','/admin/','/admin/devices','/admin/ai/prompts','/admin/ai/voice','/admin/agent','/admin/agent/tasks','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
       res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
     }
@@ -38,6 +38,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
     memoryConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
+    agentConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
@@ -70,7 +71,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.close(1008,'Opus firmware required');return;
     }
     device.authenticated=true;
-    connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
+    connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channelName:device.voxiChannelName||null,channelMode:device.voxiChannelMode||null,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{device.isAlive=true;pings++;lastPingAt=Date.now();});
     console.log(JSON.stringify({event:'device_opened',connection}));

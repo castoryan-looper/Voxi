@@ -6,6 +6,9 @@ void audioFlush();
 size_t audioRead(int16_t* mono,size_t samples);
 size_t audioWrite(const int16_t* mono,size_t samples);
 void displayChannel(int channel,bool online);
+const char* radioChannelMode();
+const char* radioChannelName();
+const char* radioTaskState();
 void displaySetup(const char* name,const char* key,bool hotspot);
 
 void displayConnection(int channel,const char* label,bool wifi,bool gateway,bool usb);

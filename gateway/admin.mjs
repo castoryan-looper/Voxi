@@ -2,7 +2,7 @@ import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 
-export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,memoryConfiguration,deviceRegistry,username,passwordHash,accountFile,secureCookies=true}={}) {
+export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,username,passwordHash,accountFile,secureCookies=true}={}) {
   const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const valid=n=>Number.isInteger(n)&&n>=1&&n<=capacity;
   if(!valid(initialLimit))throw Error(`MAX_CONNECTIONS must be an integer from 1 to ${capacity}`);
@@ -47,6 +47,10 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
       if(!aiConfiguration)return json(409,{error:'当前模式未启用 Pocket AI 配置'});
       try{return json(200,await aiConfiguration());}catch(error){return json(502,{error:error.message});}
     }
+    if(req.method==='GET'&&req.url==='/api/admin/agent'){
+      if(!agentConfiguration)return json(409,{error:'Voxi Agent 需要 Pocket Cloud 模式'});
+      try{return json(200,await agentConfiguration());}catch(error){return json(502,{error:error.message});}
+    }
     if(req.method!=='POST')return json(405,{error:'不支持此请求'});
     if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
     body='';
@@ -62,6 +66,10 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
       if(!aiConfiguration)return json(409,{error:'当前模式未启用 Pocket AI 配置'});
       try{const result=await aiConfiguration(body);record({event:'ai_config_changed'});return json(200,result);}
       catch(error){return json(502,{error:error.message});}
+    }
+    if(req.url==='/api/admin/agent'){
+      if(!agentConfiguration)return json(409,{error:'Voxi Agent 需要 Pocket Cloud 模式'});
+      try{return json(200,await agentConfiguration(body));}catch(error){return json(502,{error:error.message});}
     }
     if(req.url==='/api/admin/limit'){
       if(!valid(body.maxConnections))return json(400,{error:`设备数量必须为 1–${capacity} 的整数`});

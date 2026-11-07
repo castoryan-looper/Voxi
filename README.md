@@ -6,6 +6,8 @@
 
 ## 先看这里
 
+- [Voxi Agent 与管理员后台](docs/VOXI-AGENT.md)：沿用 Pocket Cloud 的后台任务、频道路由、批准、中断和密钥保管。
+
 - [换电脑接续／最新开发交接](docs/handoffs/LATEST.md)
 - [MiniCam 4G 缓存补充优化](docs/MINICAM-JITTER.md)：小智策略参考、有界播放额度、2/3/4 秒恢复及验证边界。
 - [MiniCam Wi-Fi TLS 内存修复](docs/MINICAM-WIFI-MEMORY.md)：按联网方式延迟启动 4G DMA 与任务，保留内部内存供 Wi-Fi TLS 使用。

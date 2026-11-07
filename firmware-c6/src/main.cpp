@@ -157,8 +157,13 @@ static String playbackFlowId;
 static uint32_t playbackCreditAt=0;
 #endif
 static size_t fadeRemaining=120;
+static char agentChannelMode[12]={},agentChannelName[100]={},agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
+const char* radioChannelMode(){return agentChannelMode;}
+const char* radioChannelName(){return agentChannelName;}
+const char* radioTaskState(){return agentTaskState;}
 void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 void opusDiagnostics(JsonDocument& out){
+ out["channelMode"]=agentChannelMode;out["channelName"]=agentChannelName;out["agentTaskState"]=agentTaskState;out["agentTaskId"]=agentTaskId;
 #ifdef VOXI_BOARD_MINICAM
  out["playbackCreditActive"]=playbackFlowId.length()>0;out["playbackResumeMs"]=playbackGate.threshold()/48;
 #endif
@@ -390,9 +395,15 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t!=WStype_TEXT)return;
   JsonDocument d;if(deserializeJson(d,data,len))return;
   String type=d["type"]|"";
+  if(type=="task_state"){
+    strlcpy(agentTaskState,d["state"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
+    return; // A background task must not replace recording/playback availability.
+  }
   if(type=="probe_rejected"&&downlinkProbeWaiting){downlinkProbeWaiting=false;replyPending=false;thinking=false;ready=gatewayLinked;diagnosticError(d["message"]|"Downlink probe rejected");radioDebug("READY","Network test rejected");return;}
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
+    strlcpy(agentChannelMode,d["channelMode"]|"",sizeof(agentChannelMode));strlcpy(agentChannelName,d["name"]|"",sizeof(agentChannelName));
+    strlcpy(agentTaskState,d["taskState"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
     downlinkProbeReady=d["downlinkProbe"]|false;
 #ifdef VOXI_OPUS_UPLINK
     uplinkOpusReady=String(d["uplinkFormat"]|"")=="opus-24000-uplink-v1";
@@ -440,6 +451,7 @@ static bool startCachedUpload(bool test){
   uploading=true;ready=false;thinking=false;uploadBlockUsed=0;uploadEof=false;submitQueued=false;submitSent=false;uploadAt=uploadProgressAt=millis();turnTiming.upload=uploadAt;uploadProgressBytes=0;
   probeStallUntil=test&&probeSimulateStall?millis()+3500:0;
   JsonDocument start;start["type"]="ptt_down";
+  if(!test&&captureRequestId[0])start["requestId"]=captureRequestId;
 #ifdef VOXI_OPUS_UPLINK
   if(uplinkOpusReady&&!test&&!probeActive&&!probeFinishing)start["audioFormat"]="opus-24000-uplink-v1";
 #endif
@@ -503,6 +515,7 @@ void button(){
   auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,boardPowerPressed());
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
+    snprintf(captureRequestId,sizeof(captureRequestId),"%08lx-%08lx-%08lx",(unsigned long)esp_random(),(unsigned long)millis(),(unsigned long)esp_random());
     uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
     flushAudio();
     // Never include audio from the initial 0.3s hold threshold.

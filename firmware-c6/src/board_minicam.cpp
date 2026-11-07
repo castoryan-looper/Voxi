@@ -54,7 +54,7 @@ bool boardTouchPttPressed(){return pttHeld;}
 bool boardTouchActive(){return false;}
 bool boardIdleInputActive(){return mainRaw==LOW||MiniCamControls::volumeKey(volumeKeyMv)!=0;}
 int boardTouchWakePin(){return -1;}
-struct View{int channel=0,battery=-1,charging=-1,wifiBars=0,cellularBars=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false,cellularUp=false,cloud=false;char name[32]={},key[16]={},phase[24]={};};
+struct View{int channel=0,battery=-1,charging=-1,wifiBars=0,cellularBars=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false,cellularUp=false,cloud=false;char name[32]={},key[16]={},phase[24]={},channelMode[12]={},taskState[24]={};};
 static View baseView;static QueueHandle_t views;
 static Arduino_ESP32SPI displayBus(39,40,46,41,GFX_NOT_DEFINED);
 static Arduino_ST7789 panel(&displayBus,GFX_NOT_DEFINED,0,true,240,320,0,0);
@@ -66,7 +66,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static void postView(){if(!views)return;View s=baseView;strlcpy(s.channelMode,radioChannelMode(),sizeof(s.channelMode));strlcpy(s.taskState,radioTaskState(),sizeof(s.taskState));auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -146,8 +146,9 @@ static void screenTask(void*){
   statusBadge(12,68,"WiFi",0,s.wifi,s.wifiBars);statusBadge(86,62,"4G",1,s.cellularUp,s.cellularBars);statusBadge(154,74,"USB",2,s.usb);
   canvas.fillRoundRect(12,105,216,113,12,UI_CARD);canvas.drawRoundRect(12,105,216,113,12,UI_EDGE);
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(25,116);canvas.print("CHANNEL");
-  canvas.fillCircle(185,119,3,s.cloud?UI_GREEN:UI_DIM);canvas.setCursor(194,116);canvas.print("AI");
-  canvas.setTextSize(4);canvas.setTextColor(UI_WHITE);canvas.setCursor(25,135);canvas.printf("CH %02d",s.channel+1);
+  canvas.fillCircle(185,119,3,s.cloud?UI_GREEN:UI_DIM);canvas.setCursor(194,116);canvas.print(s.taskState[0]?(!strcmp(s.taskState,"completed")?"OK":!strcmp(s.taskState,"awaiting_approval")||!strcmp(s.taskState,"needs_input")?"?":"*"):"AI");
+  canvas.setTextSize(4);canvas.setTextColor(UI_WHITE);canvas.setCursor(25,135);canvas.printf("CH %02d",s.channel+(s.channelMode[0]?0:1));
+  if(s.channelMode[0]){canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(151,158);canvas.print(!strcmp(s.channelMode,"agent")?"AGENT":!strcmp(s.channelMode,"fast")?"FAST":"OFF");}
   canvas.drawLine(25,174,215,174,UI_EDGE);centeredText(s.phase,188,2,phaseColor(s.phase));
   canvas.fillRect(16,236,5,8,UI_MUTED);canvas.fillTriangle(21,236,27,231,27,249,UI_MUTED);
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(37,237);canvas.printf("VOL %d%%",s.volume);
