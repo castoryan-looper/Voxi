@@ -32,6 +32,14 @@
 
 ## 完整性与版本
 
+### 固定时长下行测试
+
+Pocket 网关在 ready 中声明 `downlinkProbe:true`。支持该能力的新固件提供本机 USB RPC `downlink_test`，body 为 `{"seconds":180}`（1–180 秒整数），仅在空闲 READY 时接受；旧网关不支持时明确拒绝。测试通过已认证的设备连接发送 `downlink_probe`，不转发给 AI、不录音、不改变网络或音量配置。`downlink_cancel` 可停止测试并清空本机播放缓存。
+
+网关产生精确 seconds×48000 字节的 24kHz 单声道 PCM（每 5 秒一段低幅度提示音，其余静音；CBR 编码仍持续传输），以绝对单调时钟计算累计应产生的帧数，每次 tick 最多补 100ms，避免固定 interval 累积时间漂移或预分配三分钟 PCM。它使用原 RadioFilter、Opus 编码、三帧批量、PcmPacer、额度、TLS 和设备解码/I2S 通路；不是 AI 供音或真实通话质量验收。180s 源通常产生 180.02s 解码音频，额外 20ms 为编码器尾帧排空。
+
+测试 audio_start 标明 `source:transport_probe`、seconds 和正常 flowId；网关日志 `pocket_downlink.source=transport_probe`。设备 status 提供 `downlinkProbeSupported`、`downlinkProbeWaiting`、`downlinkProbeSeconds`、`replySource`。取消、断开、上游错误、PTT/换台会停止源并丢弃待发批次；设备等待启动超过 45 秒会报错重连。源码测试覆盖精确 180s PCM 数量、调度迟到边界、时长/空闲校验、序号/尾帧、取消和不转发 AI。
+
 ### MiniCam 可协商批量下行
 
 MiniCam 在 `X-Voxi-Downlink-Codecs` 中同时声明 `opus-24000-batch-v1,opus-24000-v1`；基础 `X-Voxi-Audio-Format` 仍为 `opus-24000-v1`，以兼容旧网关。Pocket 模式的新网关仅对声明支持批量格式的设备，在 ready 中选择 `audioFormat:opus-24000-batch-v1`。未声明的设备及非 Pocket 模式仍用原格式；新固件接受原格式回退。

@@ -134,6 +134,8 @@ static uint8_t playback[CAP];
 static void deviceIdentity(char* target,size_t size){uint8_t mac[6]={};if(esp_efuse_mac_get_default(mac)!=ESP_OK){if(size)target[0]=0;return;}formatDeviceIdentity(mac,target,size);}
 static constexpr size_t replyBytesPerSample=2;
 static bool replyCodecReady=false;
+static bool downlinkProbeReady=false,downlinkProbeWaiting=false,replyIsProbe=false,discardProbeAudio=false;
+static uint32_t downlinkProbeAt=0,downlinkProbeSeconds=0;
 static uint32_t replyWireBytes=0;
 static uint32_t replyWireMessages=0;
 static uint32_t replyAudioBitrate=16000;
@@ -169,6 +171,7 @@ void opusDiagnostics(JsonDocument& out){
 #endif
  out["replyTransportFormat"]=replyFormat();out["replyCodecConfirmed"]=replyCodecReady;out["replyWireBytesPerSecond"]=replyAudioBitrate/8+200+(replyBatched?117:0);
  out["replyWireMessages"]=replyWireMessages;
+ out["downlinkProbeSupported"]=downlinkProbeReady;out["downlinkProbeWaiting"]=downlinkProbeWaiting;out["downlinkProbeSeconds"]=downlinkProbeSeconds;out["replySource"]=replyIsProbe?"transport_probe":"voice";
  out["replyWireReceivedBytes"]=replyWireBytes;out["replyAudioBitrate"]=replyAudioBitrate;
  out["opusDecodedFrames"]=opusReplyFrames;out["opusDecodeErrors"]=opusReplyErrors;out["opusDecodeMaxUs"]=opusReplyMaxUs;
 }
@@ -343,6 +346,7 @@ bool radioSetWarmStandby(bool idle){
 }
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){
+ downlinkProbeWaiting=false;
 #ifdef VOXI_BOARD_MINICAM
  playbackFlowId="";
 #endif
@@ -356,6 +360,7 @@ static bool deferUploadRecovery(){
 }
 void fault(){if(retryableWriteFailure){retryableWriteFailure=false;if(deferUploadRecovery())return;}uploadRecovery.pending=false;replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
+  if(t==WStype_DISCONNECTED||t==WStype_CONNECTED){downlinkProbeReady=false;discardProbeAudio=false;}
 #ifdef VOXI_OPUS_UPLINK
   if(t==WStype_DISCONNECTED)uplinkOpusReady=false;
 #endif
@@ -364,6 +369,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_DISCONNECTED){gatewayLinked=false;if(deferUploadRecovery())return;if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){replyCodecReady=false;radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
   if(t==WStype_BIN){
+    if(discardProbeAudio)return;
     if(!turnTiming.firstPcm)turnTiming.firstPcm=millis();
     radioDebugRx(len);
     if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
@@ -384,8 +390,10 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t!=WStype_TEXT)return;
   JsonDocument d;if(deserializeJson(d,data,len))return;
   String type=d["type"]|"";
+  if(type=="probe_rejected"&&downlinkProbeWaiting){downlinkProbeWaiting=false;replyPending=false;thinking=false;ready=gatewayLinked;diagnosticError(d["message"]|"Downlink probe rejected");radioDebug("READY","Network test rejected");return;}
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
+    downlinkProbeReady=d["downlinkProbe"]|false;
 #ifdef VOXI_OPUS_UPLINK
     uplinkOpusReady=String(d["uplinkFormat"]|"")=="opus-24000-uplink-v1";
 #endif
@@ -414,9 +422,10 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="recording")radioDebug(tx?"RECORDING":"SENDING","Gateway recording ACK");
   if(type=="thinking")radioDebug("WAIT AI","Gateway submitted audio");
   if(type=="busy"){ready=false;thinking=true;}
-  if(type=="flush")flushAudio();
+  if(type=="flush"){discardProbeAudio=false;flushAudio();}
   if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
   if(type=="audio_start"){
+    downlinkProbeWaiting=false;discardProbeAudio=false;replyIsProbe=String(d["source"]|"")=="transport_probe";
     if(!replyCodecReady||!opusReplyReset()){diagnosticError("Opus not confirmed or decoder reset failed");fault();return;}
 #ifdef VOXI_BOARD_MINICAM
     playbackFlowId=d["flowId"]|"";playbackCreditAt=0;
@@ -457,6 +466,21 @@ static void cachedUploadTick(){
 }
 bool radioCanStartRecording(){return ready&&!tx&&!uploading&&!thinking&&!playing&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
 bool radioRecordingActive(){return tx;}
+bool requestDownlinkTest(uint32_t seconds){
+ if(!downlinkProbeReady||!radioCanStartRecording()||seconds<1||seconds>180)return false;
+ JsonDocument d;d["type"]="downlink_probe";d["seconds"]=seconds;String text;serializeJson(d,text);
+ if(!sendText(text))return false;
+ flushAudio();resetTurnTiming();downlinkProbeAt=millis();downlinkProbeSeconds=seconds;
+ turnTiming.released=turnTiming.upload=turnSubmittedAt=downlinkProbeAt;
+ downlinkProbeWaiting=true;ready=false;thinking=true;replyPending=true;
+ radioDebug("WAIT TEST","Fixed-length 4G playback test");return true;
+}
+bool cancelDownlinkTest(){
+ if(!downlinkProbeWaiting&&!(replyIsProbe&&playing))return false;
+ if(!sendText("{\"type\":\"downlink_probe_cancel\"}"))return false;
+ flushAudio();discardProbeAudio=true;replyPending=false;ready=gatewayLinked;thinking=false;
+ radioDebug("READY","Network test cancelled");return true;
+}
 static PttHold ptt;
 void button(){
   if(standbySuppressInput())return;
@@ -591,6 +615,7 @@ void setup(){
 
 }
 void loop(){
+  if(downlinkProbeWaiting&&millis()-downlinkProbeAt>45000){diagnosticTurnFailure("Downlink test start timed out");fault();}
   displayDebugTick();boardStatusTick();setupTick(tx||uploading||uploadRecovery.pending||playing||thinking||cueActive||audioCacheBusy(),ready,channel);
   if(speakerTestPending()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){

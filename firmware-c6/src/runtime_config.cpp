@@ -209,6 +209,15 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     if(ok){unsigned peak=0;for(auto value:pcm){unsigned magnitude=value<0?-int(value):int(value);if(magnitude>peak)peak=magnitude;}out["peak"]=peak;out["pcmCrc"]=esp_rom_crc32_le(0,reinterpret_cast<uint8_t*>(pcm),sizeof(pcm));}
     opusReplyClose();return ok?200:422;
   }
+  else if(method=="downlink_test"){
+    if(!body["seconds"].is<uint32_t>()||body["seconds"].as<uint32_t>()<1||body["seconds"].as<uint32_t>()>180)return fail(out,"测试时长需要 1–180 秒整数");
+    if(!requestDownlinkTest(body["seconds"].as<uint32_t>())){out["error"]="请等待支持下行测试的新网关 READY 且设备空闲";return 409;}
+    out["seconds"]=body["seconds"];out["message"]="开始固定时长低音量网络播放测试，不录音、不调用AI";
+  }
+  else if(method=="downlink_cancel"){
+    if(!cancelDownlinkTest()){out["error"]="没有正在执行的下行测试";return 409;}
+    out["message"]="已停止下行测试";
+  }
   else if(method=="upload_test"){if(busyNow||!cloudNow){out["error"]="请等待云端 READY 且空闲后重试";return 409;}bool stall=body["simulateStall"]|true;requestUploadTest(stall,body["allowRecovery"]|false);out["message"]=stall?"开始20秒合成音频缓存自检，模拟3.5秒网络停顿，不提交AI":"开始20秒正常网络合成上传自检，不提交AI";}
   else if(method=="uplink_probe"){
 #ifdef VOXI_OPUS_UPLINK

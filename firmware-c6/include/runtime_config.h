@@ -16,6 +16,8 @@ void playbackDiagnostics(JsonDocument& out);
 
 void requestUploadTest(bool simulateStall=true,bool allowRecovery=false);
 void requestRadioCueTest();
+bool requestDownlinkTest(uint32_t seconds);
+bool cancelDownlinkTest();
 void radioTransportDiagnostics(JsonDocument& out);
 
 void requestSetupScreen();

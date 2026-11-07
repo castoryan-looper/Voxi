@@ -16,6 +16,7 @@ FIELDS = (
     'connectionStage', 'turnFailure', 'turnFailureAtMs', 'replyReceivedBytes',
     'replyConsumedBytes', 'replyWireReceivedBytes', 'replyIntegrityComplete',
     'replyTransportFormat', 'replyWireMessages',
+    'replySource', 'downlinkProbeSupported', 'downlinkProbeSeconds', 'downlinkProbeWaiting',
     'replyIntegrityPassed', 'replyGapMaxMs', 'playbackBufferedMs',
     'playbackRebuffers', 'playbackTargetMs', 'playbackResumeMs',
     'playbackCreditActive', 'opusDecodeErrors', 'speakerWriteErrors',
