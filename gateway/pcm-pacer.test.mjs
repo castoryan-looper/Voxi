@@ -134,3 +134,52 @@ test('three-minute stream survives 26-second feedback blackout within capacity a
  assert.equal(f.pacer.sentPcm,180*48000);assert(maxOutstanding<=8*48000);
  assert.equal(f.sent.at(-1).data,'audio_end');assert.deepEqual(f.errors,[]);
 });
+
+test('larger lookahead always leaves a full second of physical capacity unused',()=>{
+ for(const capacity of [96000,144000,576000]){
+  const f=fixture({maxAheadMs:11000});f.pacer.beginStream('bounded');
+  f.pacer.feedback({flowId:'bounded',consumedBytes:0,capacityBytes:capacity});
+  f.pacer.audio(Buffer.alloc(12*48000));
+  for(let t=0;t<15000;t+=10){f.at(t);f.pacer.tick();}
+  assert.equal(f.pacer.sentPcm,capacity-48000);
+  assert.equal(f.pacer.metrics().creditLimitMs,capacity/48-1000);
+  assert(f.pacer.flow.peakOutstanding<=capacity-48000);assert.deepEqual(f.errors,[]);
+ }
+});
+
+test('credit stalls report duration and counter snapshots rather than treating polling count as time',()=>{
+ const stalls=[],f=fixture({onCreditStall:e=>stalls.push(e)});
+ f.pacer.beginStream('r');f.pacer.feedback({flowId:'r',consumedBytes:0,capacityBytes:96000});f.pacer.audio(Buffer.alloc(96000));
+ for(let t=0;t<=500;t+=10){f.at(t);f.pacer.tick();}
+ f.at(3000);assert.equal(f.pacer.metrics().creditWindowBlockedMaxMs,2500);
+ f.pacer.feedback({flowId:'r',consumedBytes:24000,capacityBytes:96000});f.pacer.tick();
+ assert.equal(stalls.length,1);assert.equal(stalls[0].durationMs,2500);
+ assert.equal(stalls[0].consumedAtStart,0);assert.equal(stalls[0].consumedAtEnd,24000);
+ assert.equal(stalls[0].feedbackUpdates,1);assert.equal(f.pacer.metrics().creditWindowBlockedMs,2500);
+});
+
+test('11s allowance can absorb a 7.26s feedback gap with stale reports without exceeding 12s capacity',()=>{
+ function simulate(maxAheadMs){
+  let clock=0,seen=0,buffer=0,delivered=0,consumed=0,underruns=0,peak=0,primed=false;
+  const wire=[],errors=[],history=[];
+  const pacer=new PcmPacer({maxBytes:60*48000,maxAheadMs,now:()=>clock,
+   send:(data,binary)=>{if(binary)wire.push({at:clock,data});},fail:e=>errors.push(e)});
+  pacer.beginStream('delayed-feedback');pacer.feedback({flowId:'delayed-feedback',consumedBytes:0,capacityBytes:576000});pacer.audio(Buffer.alloc(60*48000));
+  for(clock=0;clock<70000;clock+=10){
+   while(seen<wire.length&&wire[seen].at+200<=clock){const n=wire[seen++].data.length;buffer+=n;delivered+=n;}
+   peak=Math.max(peak,buffer);
+   if(buffer>=96000||(delivered===60*48000&&buffer>0))primed=true;
+   if(primed&&consumed<60*48000){if(buffer>=480){buffer-=480;consumed+=480;}else{underruns++;primed=false;}}
+   history.push(consumed);
+   // Normal periodic feedback contains a 1s-old snapshot. Then the uplink
+   // delivers no report for exactly 7260ms, as in the measured gateway gap.
+   if((clock>0&&clock<=20500&&clock%1500===1000)||clock===27760||(clock>27760&&(clock-27760)%1500===0))
+    assert(pacer.feedback({flowId:'delayed-feedback',consumedBytes:history[Math.max(0,(clock-1000)/10)]??0,capacityBytes:576000}));
+   pacer.tick();
+  }
+  assert.deepEqual(errors,[]);assert.equal(consumed,60*48000);assert(peak<=576000);
+  assert(pacer.flow.peakOutstanding<=maxAheadMs*48);
+  return underruns;
+ }
+ assert(simulate(8000)>0);assert.equal(simulate(11000),0);
+});

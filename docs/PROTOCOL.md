@@ -40,7 +40,9 @@ Pocket 网关在 ready 中声明 `downlinkProbe:true`。支持该能力的新固
 
 测试 audio_start 标明 `source:transport_probe`、seconds 和正常 flowId；网关日志 `pocket_downlink.source=transport_probe`。设备 status 提供 `downlinkProbeSupported`、`downlinkProbeWaiting`、`downlinkProbeSeconds`、`replySource`。取消、断开、上游错误、PTT/换台会停止源并丢弃待发批次；设备等待启动超过 45 秒会报错重连。源码测试覆盖精确 180s PCM 数量、调度迟到边界、时长/空闲校验、序号/尾帧、取消和不转发 AI。
 
-Pocket 待发队列对已启用播放额度反馈的设备保留最多 120s PCM（约 5.76MB/连接），其余客户端仍限 30s；实际已发送未消费额度仍最多 8s，设备 PCM 容量不变。队列控制事件独立限 64 条，保证长音频后的结束标记可以入队，也防止控制堆积。该保留机制帮助长断流恢复后继续播放，不保证连续无卡顿；反馈超时 60s、物理容量限制及超过待发上限的显式失败仍保留。
+Pocket 待发队列对已启用播放额度反馈的设备保留最多 120s PCM（约 5.76MB/连接），其余客户端仍限 30s。Pocket 当前已发送未消费额度最多 11s，并始终受报告容量减 1s 的限制；设备 PCM 容量不变，较小容量设备不随之扩大到 11s。队列控制事件独立限 64 条，保证长音频后的结束标记可以入队，也防止控制堆积。该保留机制帮助长断流恢复后继续播放，不保证连续无卡顿；反馈超时 60s、物理容量限制及超过待发上限的显式失败仍保留。
+
+`pocket_downlink` 的 `creditLimitMs` 给出实际额度，`creditWindowBlockedMs`/`creditWindowBlockedMaxMs` 是网关等待容量额度的累计/最长区段，并非听到的卡顿时长。超过 2s 的等待在退出时另输出 `pocket_credit_stall`，包含消费计数、期间反馈更新次数和当前待发量，便于区分没有新反馈与反馈到达但消费未推进。
 
 ### MiniCam 可协商批量下行
 
