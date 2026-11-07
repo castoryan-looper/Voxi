@@ -57,7 +57,7 @@ export function attachPocket(device,{url,token,ca,deviceId,connection,audioForma
       if(e.type==='audio_end')finishReply('complete');
     }catch{error('Downlink audio encoding failed');}
   };
-  const pacer=new PcmPacer({send:deliver,fail:error,
+  const pacer=new PcmPacer({send:deliver,fail:error,maxCreditBytes:120*48000,
     canSend:()=>{
       if(reply)reply.peakTcpBufferedBytes=Math.max(reply.peakTcpBufferedBytes,device.bufferedAmount);
       return device.readyState===1&&device.bufferedAmount<4800;

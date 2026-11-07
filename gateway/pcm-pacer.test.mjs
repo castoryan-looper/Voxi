@@ -27,6 +27,40 @@ test('queue overflow fails explicitly but total drained story length is unlimite
  assert.equal(g.errors.length,0);assert.equal(g.sent.length,3000);
 });
 
+test('credit-only larger pending bound preserves a 3-minute source through a 100s downlink stall',()=>{
+ const f=fixture({maxCreditBytes:120*48000});f.pacer.beginStream('probe');
+ assert(f.pacer.feedback({flowId:'probe',consumedBytes:0,capacityBytes:576000}));
+ let delivered=0,consumed=0,seen=0,buffer=0,peak=0,primed=false;
+ for(let t=0;t<310000;t+=5){
+  f.at(t);
+  if(t<180000&&t%20===0)f.pacer.audio(Buffer.alloc(960));
+  if(t===180000)f.pacer.control('audio_end');
+  f.pacer.tick();
+  if(t<20000||t>=120000){
+   while(seen<f.sent.length){const packet=f.sent[seen++];if(packet.binary){buffer+=packet.data.length;delivered+=packet.data.length;}}
+  }
+  if(buffer>=96000)primed=true;
+  if(primed&&t%20===0){if(buffer>=960){buffer-=960;consumed+=960;}else primed=false;}
+  if(t%1500===0)assert(f.pacer.feedback({flowId:'probe',consumedBytes:consumed,capacityBytes:576000}));
+  peak=Math.max(peak,f.pacer.bytes);assert(buffer<=576000);
+ }
+ assert.deepEqual(f.errors,[]);assert.equal(delivered,180*48000);
+ assert(peak>30*48000&&peak<=120*48000);assert.equal(f.pacer.bytes,0);
+ assert.equal(f.sent.at(-1).data,'audio_end');
+ assert(f.pacer.flow.peakOutstanding<=8*48000);
+ const legacy=fixture({maxCreditBytes:120*48000});legacy.pacer.audio(Buffer.alloc(30*48000+2));
+ assert.match(legacy.errors[0],/30 seconds/);
+ const tooLong=fixture({maxCreditBytes:120*48000});tooLong.pacer.beginStream('x');tooLong.pacer.feedback({flowId:'x',consumedBytes:0,capacityBytes:576000});tooLong.pacer.audio(Buffer.alloc(120*48000+2));
+ assert.match(tooLong.errors[0],/120 seconds/);
+});
+
+test('queued tail controls stay bounded independently of a long PCM backlog',()=>{
+ const f=fixture({maxBytes:120*48000});f.pacer.audio(Buffer.alloc(100*48000));
+ for(let i=0;i<64;i++)f.pacer.control('tail');
+ assert.equal(f.errors.length,0);f.pacer.control('overflow');assert.equal(f.errors.length,1);
+ assert.equal(f.pacer.controls,64);f.pacer.clear();assert.equal(f.pacer.controls,0);
+});
+
 test('credit refill is twice realtime but never exceeds unconsumed capacity',()=>{
  const f=fixture();f.pacer.beginStream('r1');
  assert(f.pacer.feedback({flowId:'r1',consumedBytes:0,capacityBytes:96000}));

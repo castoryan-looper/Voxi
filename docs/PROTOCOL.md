@@ -40,6 +40,8 @@ Pocket 网关在 ready 中声明 `downlinkProbe:true`。支持该能力的新固
 
 测试 audio_start 标明 `source:transport_probe`、seconds 和正常 flowId；网关日志 `pocket_downlink.source=transport_probe`。设备 status 提供 `downlinkProbeSupported`、`downlinkProbeWaiting`、`downlinkProbeSeconds`、`replySource`。取消、断开、上游错误、PTT/换台会停止源并丢弃待发批次；设备等待启动超过 45 秒会报错重连。源码测试覆盖精确 180s PCM 数量、调度迟到边界、时长/空闲校验、序号/尾帧、取消和不转发 AI。
 
+Pocket 待发队列对已启用播放额度反馈的设备保留最多 120s PCM（约 5.76MB/连接），其余客户端仍限 30s；实际已发送未消费额度仍最多 8s，设备 PCM 容量不变。队列控制事件独立限 64 条，保证长音频后的结束标记可以入队，也防止控制堆积。该保留机制帮助长断流恢复后继续播放，不保证连续无卡顿；反馈超时 60s、物理容量限制及超过待发上限的显式失败仍保留。
+
 ### MiniCam 可协商批量下行
 
 MiniCam 在 `X-Voxi-Downlink-Codecs` 中同时声明 `opus-24000-batch-v1,opus-24000-v1`；基础 `X-Voxi-Audio-Format` 仍为 `opus-24000-v1`，以兼容旧网关。Pocket 模式的新网关仅对声明支持批量格式的设备，在 ready 中选择 `audioFormat:opus-24000-batch-v1`。未声明的设备及非 Pocket 模式仍用原格式；新固件接受原格式回退。
