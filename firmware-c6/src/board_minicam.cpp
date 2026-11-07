@@ -9,6 +9,7 @@
 #include "standby.h"
 #include "minicam_modem.h"
 #include "minicam_controls.h"
+#include "minicam_status.h"
 #include <WiFi.h>
 #include <HWCDC.h>
 #include <Preferences.h>
@@ -25,6 +26,8 @@ static esp_codec_dev_handle_t codec;
 static const audio_codec_ctrl_if_t* codecControl;
 static esp_err_t codecWrite(uint8_t reg,uint8_t value){return codecControl->write_reg(codecControl,reg,1,&value,1);}
 static int volumePercent=45,batteryMv=-1,batteryLevel=-1;
+static MiniCamBatteryStatus batteryStatus;
+static int batteryReferenceRaw=-1,batteryReferenceMv=-1,batterySampleMv=-1;
 static bool displayReady=false;
 static bool mainHeld=false,pttHeld=false;
 #ifdef VOXI_MINICAM_GPIO11_PTT
@@ -51,7 +54,7 @@ bool boardTouchPttPressed(){return pttHeld;}
 bool boardTouchActive(){return false;}
 bool boardIdleInputActive(){return mainRaw==LOW||MiniCamControls::volumeKey(volumeKeyMv)!=0;}
 int boardTouchWakePin(){return -1;}
-struct View{int channel=0,battery=-1,rssi=-127,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false,cellularUp=false,cloud=false;char name[32]={},key[16]={},phase[24]={};};
+struct View{int channel=0,battery=-1,charging=-1,wifiBars=0,cellularBars=0,volume=0;bool setup=false,hotspot=false,wifi=false,usb=false,cellular=false,cellularUp=false,cloud=false;char name[32]={},key[16]={},phase[24]={};};
 static View baseView;static QueueHandle_t views;
 static Arduino_ESP32SPI displayBus(39,40,46,41,GFX_NOT_DEFINED);
 static Arduino_ST7789 panel(&displayBus,GFX_NOT_DEFINED,0,true,240,320,0,0);
@@ -63,7 +66,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();int csq=minicamSignal();s.rssi=s.cellular?(csq>=0&&csq<=31?-113+2*csq:-127):(s.wifi?WiFi.RSSI():-127);s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static void postView(){if(!views)return;View s=baseView;auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -79,12 +82,20 @@ void boardStatusTick(){
    standbyActivity();
   }
  }
- if(!batteryAt||now-batteryAt>10000){batteryAt=now;int mv=analogReadMilliVolts(3),ref=analogReadMilliVolts(4);batteryMv=ref>2300?mv*2:ref>500?mv*2540/ref:-1;batteryLevel=batteryMv>0?constrain((batteryMv-3400)*100/800,0,100):-1;}
+ if(!batteryAt||now-batteryAt>=1000){
+  batteryAt=now;int mv=0,ref=0,raw=0;
+  for(int i=0;i<8;i++){mv+=analogReadMilliVolts(3);ref+=analogReadMilliVolts(4);raw+=analogRead(4);}
+  batterySampleMv=mv/8;batteryReferenceMv=ref/8;batteryReferenceRaw=raw/8;
+  batteryStatus.sample(batterySampleMv,batteryReferenceMv,batteryReferenceRaw);
+  batteryMv=batteryStatus.millivolts;batteryLevel=batteryStatus.percent;
+ }
 }
 static constexpr uint16_t UI_BG=0x0000,UI_CARD=0x1082,UI_EDGE=0x2945,UI_WHITE=0xef7d,UI_MUTED=0x8c51,UI_DIM=0x4208,UI_GREEN=0x4f5b,UI_BLUE=0x45ff,UI_AMBER=0xfd20,UI_RED=0xf9e7;
-static void wifiIcon(int x,int y,uint16_t color){
- canvas.drawLine(x,y+4,x+4,y+1,color);canvas.drawLine(x+4,y+1,x+10,y+1,color);canvas.drawLine(x+10,y+1,x+14,y+4,color);
- canvas.drawLine(x+3,y+7,x+6,y+5,color);canvas.drawLine(x+6,y+5,x+8,y+5,color);canvas.drawLine(x+8,y+5,x+11,y+7,color);canvas.fillCircle(x+7,y+11,1,color);
+static void wifiIcon(int x,int y,int bars){
+ uint16_t outer=bars>=4?UI_GREEN:UI_DIM,middle=bars>=3?UI_GREEN:UI_DIM,inner=bars>=2?UI_GREEN:UI_DIM;
+ canvas.drawLine(x,y+3,x+4,y,outer);canvas.drawLine(x+4,y,x+12,y,outer);canvas.drawLine(x+12,y,x+16,y+3,outer);
+ canvas.drawLine(x+3,y+6,x+6,y+4,middle);canvas.drawLine(x+6,y+4,x+10,y+4,middle);canvas.drawLine(x+10,y+4,x+13,y+6,middle);
+ canvas.drawLine(x+5,y+9,x+8,y+7,inner);canvas.drawLine(x+8,y+7,x+11,y+9,inner);canvas.fillCircle(x+8,y+12,1,bars>=1?UI_GREEN:UI_DIM);
 }
 static void usbIcon(int x,int y,uint16_t color){
  canvas.drawLine(x+7,y+12,x+7,y,color);canvas.fillTriangle(x+4,y+3,x+10,y+3,x+7,y,color);
@@ -93,7 +104,7 @@ static void usbIcon(int x,int y,uint16_t color){
 }
 static void statusBadge(int x,int width,const char* text,int icon,bool connected,int bars=0){
  canvas.fillRoundRect(x,57,width,30,7,UI_CARD);uint16_t color=connected?UI_GREEN:UI_DIM;
- if(icon==0)wifiIcon(x+7,65,color);
+ if(icon==0)wifiIcon(x+7,65,connected?bars:0);
  else if(icon==1){for(int b=0;b<4;b++){int h=3+b*3;canvas.fillRect(x+7+b*4,78-h,3,h,b<bars&&connected?UI_GREEN:UI_DIM);}}
  else usbIcon(x+7,64,color);
  canvas.setTextSize(1);canvas.setTextColor(connected?UI_WHITE:UI_MUTED);canvas.setCursor(x+28,69);canvas.print(text);
@@ -124,11 +135,15 @@ static void screenTask(void*){
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
   canvas.fillScreen(UI_BG);canvas.setTextColor(UI_WHITE);canvas.setTextSize(3);canvas.setCursor(12,13);canvas.print("VOXI");
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(14,40);canvas.print("AI WALKIE-TALKIE");
+  if(s.charging==1){
+   canvas.setTextColor(UI_AMBER);canvas.setCursor(106,22);canvas.print("CHG");
+   canvas.fillTriangle(138,17,131,25,136,25,UI_AMBER);canvas.fillTriangle(134,23,139,23,132,32,UI_AMBER);
+  }else if(s.charging<0){canvas.setTextColor(UI_MUTED);canvas.setCursor(136,22);canvas.print("?");}
+  canvas.setTextColor(UI_MUTED);
   canvas.setCursor(151,22);if(s.battery>=0)canvas.printf("%d%%",s.battery);else canvas.print("--%");
   canvas.drawRoundRect(188,18,31,14,3,UI_MUTED);canvas.fillRect(219,22,3,6,UI_MUTED);
   if(s.battery>0)canvas.fillRect(191,21,25*constrain(s.battery,0,100)/100,8,s.battery<20?UI_AMBER:UI_GREEN);
-  int bars=s.rssi==-127?0:s.rssi>-75?4:s.rssi>-85?3:s.rssi>-95?2:1;
-  statusBadge(12,68,"WiFi",0,s.wifi);statusBadge(86,62,"4G",1,s.cellularUp,s.cellular?bars:0);statusBadge(154,74,"USB",2,s.usb);
+  statusBadge(12,68,"WiFi",0,s.wifi,s.wifiBars);statusBadge(86,62,"4G",1,s.cellularUp,s.cellularBars);statusBadge(154,74,"USB",2,s.usb);
   canvas.fillRoundRect(12,105,216,113,12,UI_CARD);canvas.drawRoundRect(12,105,216,113,12,UI_EDGE);
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(25,116);canvas.print("CHANNEL");
   canvas.fillCircle(185,119,3,s.cloud?UI_GREEN:UI_DIM);canvas.setCursor(194,116);canvas.print("AI");
@@ -223,7 +238,16 @@ size_t audioRead(int16_t* mono,size_t samples){
 static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;static volatile bool testPending=false;
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
-void speakerDiagnostics(JsonDocument& out){out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]=talkButtonName;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;}
+void speakerDiagnostics(JsonDocument& out){
+ out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]=talkButtonName;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;
+ bool wifi=WiFi.status()==WL_CONNECTED;
+ if(wifi)out["wifiRssi"]=WiFi.RSSI();else out["wifiRssi"]=nullptr;
+ out["wifiSignalBars"]=minicamWifiBars(wifi,wifi?WiFi.RSSI():0);
+ out["cellularSignalBars"]=minicamCellularBars(radioUsesCellular()&&minicamModemReady(),minicamSignal());
+ out["batteryChargeKnown"]=batteryStatus.charging>=0;
+ if(batteryStatus.charging>=0)out["batteryCharging"]=batteryStatus.charging==1;else out["batteryCharging"]=nullptr;
+ out["batteryChargeSource"]="gpio4_adc";out["batteryReferenceRaw"]=batteryReferenceRaw;out["batteryReferenceMv"]=batteryReferenceMv;out["batterySampleMv"]=batterySampleMv;
+}
 
 size_t audioWrite(const int16_t* mono,size_t samples){
   if(idleAudio)return 0;
