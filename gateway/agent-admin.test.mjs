@@ -42,7 +42,7 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,401);
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,200);
  assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.voice,'ember');
- for(const action of ['status','prepare']){
+ for(const action of ['status','prepare','probe']){
   assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({action})})).status,200);
   assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.action,action);
  }

@@ -35,6 +35,7 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  const last=forwarded.at(-1);assert.equal(last.path,'/voxi/portal');assert.equal(last.body.actorUserId,A);assert.equal(last.auth,'Bearer private-internal');
  assert.equal((await call('/api/user/voice-preview',{voice:'ember',actorUserId:B},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{action:'prepare'},alice)).status,403);
+ assert.equal((await call('/api/user/voice-preview',{action:'probe'},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{action:'describe',voice:'cove',style:'forged'},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{voice:'ember'},{cookie:alice.cookie})).status,401);
  assert.equal((await call('/api/user/voice-preview',{voice:'ember'},alice)).status,200);

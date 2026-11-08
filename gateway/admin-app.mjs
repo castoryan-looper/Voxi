@@ -173,8 +173,8 @@ function voiceOptionLabel(v,row){return v.name+' · '+v.style+' · '+voiceSample
 function fillVoiceCatalog(meta){
  voiceMetadata=meta;$('voiceChoice').replaceChildren();for(const v of meta?.options||[{id:'cove',name:'Cove',style:'风格待试听'}])$('voiceChoice').append(option(v.id,voiceOptionLabel(v,meta?.library?.voices?.find(r=>r.id===v.id))));
  $('voicePreviewText').textContent=meta?.previewText?'核对用文案（中文与英文分开生成）：'+meta.previewText:'请更新后端。';
- $('voiceLanguageNote').textContent=meta?.languageNote||'';$('previewVoice').disabled=!meta?.previewVersion;$('prepareVoiceLibrary').disabled=meta?.previewVersion!==3;
- if(meta?.previewVersion===3&&currentPage().key==='voice')refreshVoiceLibrary();
+ $('voiceLanguageNote').textContent=meta?.languageNote||'';$('previewVoice').disabled=!meta?.previewVersion;$('prepareVoiceLibrary').disabled=true;$('probeVoiceLibrary').disabled=meta?.previewVersion!==4;
+ if(meta?.previewVersion===4&&currentPage().key==='voice')refreshVoiceLibrary();
 }
 function updateVoiceDetails(edit=true){
  const v=voiceMetadata?.options?.find(v=>v.id===$('voiceChoice').value);if(!v)return;
@@ -186,19 +186,20 @@ function updateVoiceDetails(edit=true){
  if($('voicePreviewLanguage').selectedOptions?.[0]?.disabled)$('voicePreviewLanguage').value='';
  const selected=$('voicePreviewLanguage').value,languages=selected?[selected]:row?.languages?.length?row.languages:Object.keys(voiceMetadata.previewScripts||{});$('voicePreviewText').textContent=(row?.languages?.length?'核对用文案：':'准备脚本（尚未就绪）：')+languages.map(l=>voiceMetadata.previewScripts?.[l]||'').join(' ');
 }
-async function refreshVoiceLibrary(prepare=false){
+async function refreshVoiceLibrary(prepare=false,probe=false){
  clearTimeout(voiceLibraryTimer);const session=token;if(!session||currentPage().key!=='voice')return;
  try{
-  const library=await api('voice-preview',{action:prepare?'prepare':'status'});if(token!==session||currentPage().key!=='voice')return;
+  const library=await api('voice-preview',{action:probe?'probe':prepare?'prepare':'status'});if(token!==session||currentPage().key!=='voice')return;
   if(voiceMetadata)voiceMetadata.library=library;
   for(const row of library.voices||[]){const o=[...$('voiceChoice').options].find(o=>o.value===row.id),v=voiceMetadata?.options?.find(v=>v.id===row.id);if(o&&v)o.textContent=voiceOptionLabel(v,row);}
-  $('voiceLibraryStatus').textContent='样音核对：'+library.samplesReady+' / '+library.samplesTotal+' 段已通过；'+library.ready+' / '+library.total+' 款中英均就绪'+(library.failed?'；'+library.failed+' 款有失败项':'')+(library.running?(library.waitingForCapacity?'；等待空闲语音资源':'；正在准备 '+(library.current||'')+' '+voiceLanguageName(library.currentLanguage)):'；本轮准备已结束')+'。成功样音已持久保存。'+(library.blockedReason?'准备暂停：'+library.blockedReason+'，请处理后重试。':'');
+  $('voiceLibraryStatus').textContent='Cove 验证：'+(library.probe?.ready||0)+' / 2；样音核对：'+library.samplesReady+' / '+library.samplesTotal+' 段已通过；'+library.ready+' / '+library.total+' 款中英均就绪'+(library.failed?'；'+library.failed+' 款有失败项':'')+(library.running?(library.waitingForCapacity?'；等待空闲语音资源':'；正在准备 '+(library.current||'')+' '+voiceLanguageName(library.currentLanguage)):'；本轮准备已结束')+'。成功样音已持久保存。'+(library.blockedReason?'准备暂停：'+library.blockedReason+'，请处理后重试。':'');
   $('voiceLibraryFailures').replaceChildren();for(const row of library.voices||[])for(const sample of row.samples||[])if(sample.error){const li=document.createElement('li');li.textContent=row.id+' · '+voiceLanguageName(sample.language)+'：'+sample.error.message+'（'+sample.error.code+'）';$('voiceLibraryFailures').append(li);}
-  updateVoiceDetails(false);$('prepareVoiceLibrary').disabled=library.running;
+  updateVoiceDetails(false);$('prepareVoiceLibrary').disabled=library.running||!library.probe?.passed;$('probeVoiceLibrary').disabled=library.running;
   if(library.running)voiceLibraryTimer=setTimeout(()=>refreshVoiceLibrary(),5000);
- }catch(e){if(token===session&&currentPage().key==='voice'){$('voiceLibraryStatus').textContent='音频库状态未确认：'+e.message;$('prepareVoiceLibrary').disabled=false;}}
+ }catch(e){if(token===session&&currentPage().key==='voice'){$('voiceLibraryStatus').textContent='音频库状态未确认：'+e.message;$('prepareVoiceLibrary').disabled=true;$('probeVoiceLibrary').disabled=false;}}
 }
 $('prepareVoiceLibrary').onclick=()=>refreshVoiceLibrary(true);
+$('probeVoiceLibrary').onclick=()=>refreshVoiceLibrary(false,true);
 $('voiceChoice').onchange=()=>{if(voiceDescriptionDirty&&!confirm('音色说明尚未保存，切换会丢弃，继续吗？')){$('voiceChoice').value=voiceDescriptionVoice;return;}voiceDescriptionDirty=false;adminVoiceRequest++;adminVoicePlayer?.stop();updateVoiceDetails();aiDirty=true;};
 $('voicePreviewLanguage').onchange=()=>{adminVoiceRequest++;adminVoicePlayer?.stop();updateVoiceDetails(false);};
 $('saveVoiceDescription').onclick=async()=>{const voice=$('voiceChoice').value,session=token,style=$('voiceStyleDescription').value,useCase=$('voiceStyleUseCase').value;$('saveVoiceDescription').disabled=true;try{await api('voice-preview',{action:'describe',voice,style,useCase});if(session!==token)return;const latest=await api('ai');if(session!==token)return;voiceMetadata=latest.voices;for(const v of voiceMetadata.options){const o=[...$('voiceChoice').options].find(o=>o.value===v.id);if(o)o.textContent=voiceOptionLabel(v,voiceMetadata.library?.voices?.find(r=>r.id===v.id));}updateVoiceDetails(false);voiceDescriptionDirty=false;$('voiceDescriptionStatus').textContent='音色说明已保存。只更新展示说明，不会改变声音或设备当前音色。';}catch(e){$('voiceDescriptionStatus').textContent=e.message;}finally{$('saveVoiceDescription').disabled=false;}};
