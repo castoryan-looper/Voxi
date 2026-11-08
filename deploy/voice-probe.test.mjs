@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const shell=readFileSync(new URL('./probe-voice.sh',import.meta.url),'utf8').replaceAll('\r','');
 const source=shell.match(/<<'JS'[^\n]*\n([\s\S]*?)\nJS/)[1];
-async function fixture(t,{version=4,passed=true}={}){
+async function fixture(t,{version=5,passed=true}={}){
  const actions=[];
  const server=http.createServer(async(req,res)=>{
   let raw='';for await(const data of req)raw+=data;
@@ -29,11 +29,11 @@ async function fixture(t,{version=4,passed=true}={}){
  return {...result,actions};
 }
 test('voice diagnostic requests only the two-clip probe, never full preparation',async t=>{
- const result=await fixture(t);assert.equal(result.code,0);assert.deepEqual(result.actions,['probe']);assert.match(result.stdout,/passed automatic language and script checks/);
+ const result=await fixture(t);assert.equal(result.code,0);assert.deepEqual(result.actions,['probe']);assert.match(result.stdout,/passed automatic language and meaning checks/);
 });
 test('voice diagnostic reports common-path failure and exits unsuccessful',async t=>{
  const result=await fixture(t,{passed:false});assert.equal(result.code,1);assert.deepEqual(result.actions,['probe']);assert.match(result.stdout,/control-rejected/);assert.match(result.stdout,/Full-library generation remains gated/);
 });
 test('voice diagnostic refuses to run against an old backend',async t=>{
- const result=await fixture(t,{version:3});assert.equal(result.code,1);assert.deepEqual(result.actions,[]);assert.match(result.stderr,/version 4 is not deployed/);
+ const result=await fixture(t,{version:3});assert.equal(result.code,1);assert.deepEqual(result.actions,[]);assert.match(result.stderr,/version 5 is not deployed/);
 });
