@@ -7,3 +7,5 @@
 #agentTasksSection table{table-layout:fixed;white-space:normal;min-width:650px}#agentTasksSection th:first-child{width:36%}#agentTasksSection th:nth-child(2){width:18%}#agentTasksSection th:nth-child(3){width:13%}#agentTasksSection th:nth-child(4){width:22%}#agentTasksSection td{overflow-wrap:anywhere;vertical-align:top}.channel-grid input{width:100%}#agentTaskActions{margin:16px 0}#agentTaskDetail pre{max-height:480px;overflow:auto}#agentTaskMessage,#agentMessage,#credentialMessage{white-space:pre-wrap}#agentApproval form{padding:16px;background:#f2f7f3;border-radius:10px}
 
 .notice{margin:16px 0;padding:16px;border:1px solid #decfa9;border-radius:10px;background:#fffaf0}.notice p{margin:0 0 12px}#usersSection td{vertical-align:top}#userAccounts form{margin-top:12px}
+
+#voiceStyleDescription,#voiceStyleUseCase{display:block;width:100%;max-width:680px}#saveVoiceDescription{margin-top:12px}#voiceLibraryFailures{overflow-wrap:anywhere}#voicePreviewActualText{white-space:pre-wrap}

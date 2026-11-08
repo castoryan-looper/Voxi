@@ -76,9 +76,9 @@ export function createUserAccounts({file,administrator,agent,portal,voicePreview
   }
   if(path==='/api/user/voice-preview'&&req.method==='POST'){
    if(!voicePreview)return json(409,{error:'试听服务尚未启用，请联系管理员更新'});
-   if(Object.keys(body).some(k=>k!=='voice'))return json(403,{error:'试听不能指定身份或自定义文本'});
+   if(Object.keys(body).some(k=>!['voice','language'].includes(k)))return json(403,{error:'试听不能指定身份或自定义文本'});
    const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
-   try{const result=await voicePreview({voice:body.voice,actorUserId:current.account.userId},{signal:controller.signal});if(!session(req))return json(401,{error:'账户会话已失效'});return json(200,result);}catch(e){if(!res.destroyed)return json(502,{error:e.message});}finally{res.off('close',abort);}
+   try{const result=await voicePreview({voice:body.voice,...(body.language!==undefined?{language:body.language}:{}),actorUserId:current.account.userId},{signal:controller.signal});if(!session(req))return json(401,{error:'账户会话已失效'});return json(200,result);}catch(e){if(!res.destroyed)return json(502,{error:e.message});}finally{res.off('close',abort);}
   }
   if((path==='/api/user/state'&&req.method==='GET')||(path==='/api/user/action'&&req.method==='POST')){
    try{ready();const action=body||{action:'snapshot'};if('actorUserId' in action||'userId' in action||'role' in action)return json(403,{error:'不能指定其他身份'});

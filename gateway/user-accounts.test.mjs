@@ -35,9 +35,12 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  const last=forwarded.at(-1);assert.equal(last.path,'/voxi/portal');assert.equal(last.body.actorUserId,A);assert.equal(last.auth,'Bearer private-internal');
  assert.equal((await call('/api/user/voice-preview',{voice:'ember',actorUserId:B},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{action:'prepare'},alice)).status,403);
+ assert.equal((await call('/api/user/voice-preview',{action:'describe',voice:'cove',style:'forged'},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{voice:'ember'},{cookie:alice.cookie})).status,401);
  assert.equal((await call('/api/user/voice-preview',{voice:'ember'},alice)).status,200);
  assert.equal(forwarded.at(-1).path,'/voxi/voice-preview');assert.equal(forwarded.at(-1).body.actorUserId,A);
+ assert.equal((await call('/api/user/voice-preview',{voice:'ember',language:'en'},alice)).status,200);
+ assert.equal(forwarded.at(-1).body.language,'en');assert.equal(forwarded.at(-1).body.actorUserId,A);
  assert.equal((await call('/api/admin/voice-preview',{voice:'ember'},alice)).status,401);
  assert.equal((await call('/api/user/action',{action:'snapshot'},{cookie:alice.cookie})).status,401);
  assert.equal((await call('/api/user/password',{currentPassword:'alice-password-123',newPassword:'alice-changed-456'},alice)).status,200);
