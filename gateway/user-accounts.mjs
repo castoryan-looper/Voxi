@@ -6,7 +6,7 @@ const usernameValid=value=>typeof value==='string'&&/^[A-Za-z0-9_.@-]{3,64}$/.te
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 const dummy='scrypt:'+'0'.repeat(32)+':'+'0'.repeat(128);
 
-export function createUserAccounts({file,administrator,agent,portal,secure=true}={}){
+export function createUserAccounts({file,administrator,agent,portal,voicePreview,secure=true}={}){
  let accounts=[];const sessions=new Map();let editing=false,checking=false,failures=0,windowAt=0;
  if(file){try{const data=JSON.parse(readFileSync(file,'utf8'));if(data.version!==1||!Array.isArray(data.accounts))throw Error('Invalid user accounts file');accounts=data.accounts;}catch(e){if(e.code!=='ENOENT')throw e;}}
  const ids=new Set(),names=new Set(),owners=new Set();
@@ -73,6 +73,12 @@ export function createUserAccounts({file,administrator,agent,portal,secure=true}
    if(checking||editing)return json(429,{error:'请稍后重试'});
    if(typeof body.currentPassword!=='string'||body.currentPassword.length>256||typeof body.newPassword!=='string'||body.newPassword.length<8||body.newPassword.length>128)return json(400,{error:'新密码需要8–128字符'});
    checking=editing=true;try{if(!await verifyPassword(body.currentPassword,current.account.passwordHash))return json(401,{error:'当前密码不正确'});const hash=await passwordHash(body.newPassword);save(accounts.map(a=>a.id===current.account.id?{...a,passwordHash:hash}:a));revoke(current.account.id);res.setHeader('Set-Cookie',cookie('',0));return json(200,{ok:true});}catch{return json(500,{error:'密码保存失败'});}finally{checking=editing=false;}
+  }
+  if(path==='/api/user/voice-preview'&&req.method==='POST'){
+   if(!voicePreview)return json(409,{error:'试听服务尚未启用，请联系管理员更新'});
+   if(Object.keys(body).some(k=>k!=='voice'))return json(403,{error:'试听不能指定身份或自定义文本'});
+   const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
+   try{const result=await voicePreview({voice:body.voice,actorUserId:current.account.userId},{signal:controller.signal});if(!session(req))return json(401,{error:'账户会话已失效'});return json(200,result);}catch(e){if(!res.destroyed)return json(502,{error:e.message});}finally{res.off('close',abort);}
   }
   if((path==='/api/user/state'&&req.method==='GET')||(path==='/api/user/action'&&req.method==='POST')){
    try{ready();const action=body||{action:'snapshot'};if('actorUserId' in action||'userId' in action||'role' in action)return json(403,{error:'不能指定其他身份'});

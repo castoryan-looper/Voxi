@@ -2,7 +2,7 @@ import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 
-export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,userAccounts,username,passwordHash,accountFile,secureCookies=true}={}) {
+export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,userAccounts,voicePreview,username,passwordHash,accountFile,secureCookies=true}={}) {
   const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const valid=n=>Number.isInteger(n)&&n>=1&&n<=capacity;
   if(!valid(initialLimit))throw Error(`MAX_CONNECTIONS must be an integer from 1 to ${capacity}`);
@@ -63,6 +63,11 @@ export function createAdmin({token,stateFile,initialLimit=2,capacity=4,snapshot,
     }catch{return json(400,{error:'JSON 无效'});}
     if(req.url==='/api/admin/users'){
       try{const result=await userAccounts(body);record({event:'user_account_changed',action:body.action});return json(200,result);}catch(e){return json(400,{error:e.message});}
+    }
+    if(req.url==='/api/admin/voice-preview'){
+      if(!voicePreview)return json(409,{error:'试听需要 Pocket Cloud 模式'});
+      const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
+      try{return json(200,await voicePreview(body,{signal:controller.signal}));}catch(e){if(!res.destroyed)return json(502,{error:e.message});}finally{res.off('close',abort);}
     }
     if(req.url==='/api/admin/memory'){
       if(!memoryConfiguration)return json(409,{error:'当前模式未启用用户记忆'});

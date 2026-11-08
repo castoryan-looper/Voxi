@@ -39,6 +39,9 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  const response=await fetch(base+'/api/admin/agent',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify(body)});
  assert.equal(response.status,200);const result=await response.text();assert.ok(!result.includes(body.key));assert.ok(!result.includes('private-pocket'));
  assert.equal(requests[0].path,'/voxi/agent');assert.equal(requests[0].auth,'Bearer private-pocket');assert.equal(requests[0].body.provider,'openai');
+ assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,401);
+ assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,200);
+ assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.voice,'ember');
 });
 
 test('Pocket Agent validation errors reach the administrator without claiming success',async t=>{

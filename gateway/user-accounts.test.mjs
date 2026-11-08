@@ -13,6 +13,7 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=raw?JSON.parse(raw):null;forwarded.push({path:req.url,auth:req.headers.authorization,body});res.setHeader('Content-Type','application/json');
   if(req.url==='/voxi/agent')res.end(JSON.stringify({users:[{id:A,name:'Alice profile'},{id:B,name:'Bob profile'}],runtime:{userPortalVersion:1}}));
   else if(req.url==='/voxi/portal')res.end(JSON.stringify({role:'user',profile:{id:body.actorUserId},action:body.action}));
+  else if(req.url==='/voxi/voice-preview')res.end(JSON.stringify({voice:body.voice,audioFormat:'wav',audioBase64:'fixture-audio'}));
   else{res.statusCode=404;res.end('{}');}
  });await new Promise(r=>backend.listen(0,'127.0.0.1',r));t.after(()=>{backend.close();rmSync(dir,{recursive:true,force:true});});
  const hash=await passwordHash('admin-password-123');const apps=[];
@@ -32,6 +33,11 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  for(const body of [{action:'snapshot',userId:B},{action:'snapshot',actorUserId:B},{action:'snapshot',role:'admin'}])assert.equal((await call('/api/user/action',body,alice)).status,403);
  const state=await(await call('/api/user/state',null,alice)).json();assert.equal(state.profile.id,A);
  const last=forwarded.at(-1);assert.equal(last.path,'/voxi/portal');assert.equal(last.body.actorUserId,A);assert.equal(last.auth,'Bearer private-internal');
+ assert.equal((await call('/api/user/voice-preview',{voice:'ember',actorUserId:B},alice)).status,403);
+ assert.equal((await call('/api/user/voice-preview',{voice:'ember'},{cookie:alice.cookie})).status,401);
+ assert.equal((await call('/api/user/voice-preview',{voice:'ember'},alice)).status,200);
+ assert.equal(forwarded.at(-1).path,'/voxi/voice-preview');assert.equal(forwarded.at(-1).body.actorUserId,A);
+ assert.equal((await call('/api/admin/voice-preview',{voice:'ember'},alice)).status,401);
  assert.equal((await call('/api/user/action',{action:'snapshot'},{cookie:alice.cookie})).status,401);
  assert.equal((await call('/api/user/password',{currentPassword:'alice-password-123',newPassword:'alice-changed-456'},alice)).status,200);
  assert.equal((await call('/api/user/state',null,alice)).status,401);assert.equal((await call('/api/user/state',null,bob)).status,200);
