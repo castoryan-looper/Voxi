@@ -1,0 +1,23 @@
+// Connector credentials can reach only their fixed, scoped Pocket relay action.
+// The internal Pocket bearer never leaves this server.
+export function openClawRelay(call) {
+  let inFlight=0;
+  return async(req,res)=>{
+    const reply=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value));};
+    if(!call)return reply(503,{error:'Pocket 模式未启用'});
+    if(req.method!=='POST'||req.headers.origin)return reply(403,{error:'连接器请求被拒绝'});
+    const auth=req.headers.authorization||'';
+    if(!/^Bearer [A-Za-z0-9_-]{40,64}$/.test(auth))return reply(401,{error:'连接凭据无效'});
+    if(req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'需要 JSON'});
+    if(inFlight>=32)return reply(429,{error:'请稍后重试'});
+    inFlight++;
+    try{
+      let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>262144)return reply(413,{error:'请求过大'});}
+      const body=JSON.parse(raw);
+      if(!body||!['poll','result'].includes(body.op)||!/^([a-f0-9]{32})$/.test(body.connectionId||''))return reply(400,{error:'连接器请求无效'});
+      const result=await call({...body,action:'relay',relayToken:auth.slice(7)});
+      return reply(200,result);
+    }catch{return reply(400,{error:'连接器请求未确认，请检查配对和服务状态'});}
+    finally{inFlight--;}
+  };
+}

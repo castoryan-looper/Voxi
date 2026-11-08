@@ -21,6 +21,7 @@ jobs:
       - run: for script in deploy/*.sh .githooks/post-merge; do bash -n "$script"; done
       - run: node --test deploy/*.test.mjs
       - run: python3 -m unittest discover -s tools -p test_upgrade_pocket_agent.py -v
+      - run: python3 -m unittest discover -s tools -p test_openclaw_connector.py -v
       - run: docker build -t voxi-gateway:ci .
       - run: |
           mkdir -p /tmp/tls

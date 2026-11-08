@@ -1,14 +1,45 @@
 # Voxi Agent / Pocket Cloud 首版
 
-产品方向：频道由用户命名和绑定；提供默认 Voxi Agent，并规划自有 OpenClaw 的本地/云端接入。本次按当前部署优先完成 Pocket Cloud + Codex 的可用路径，不迁移至新的 Agent 框架。
+产品方向：频道由用户命名和绑定；提供现有 Pocket Cloud + Codex 的 Voxi Agent，以及自有 OpenClaw 的云端 HTTPS / 家中主动连接两种接入。不需要迁移已有 Codex 登录或填写模型 API Key。
 
 ## 管理入口
 
-- `/admin/agent`：启用任务路由、默认频道、每用户频道、模型覆盖、并发及时间上限、Agent 指令。
+- `/admin/agent`：统一的“频道与助手”。选择用户配置 CH0–CH3，接入、检测和绑定自己的 OpenClaw；服务参数和公共模板收进高级设置。
 - `/admin/agent/tasks`：派发文本任务、查看持久状态与完整结果、批准/拒绝、回答问题、停止和继续。
 - `/admin/agent/credentials`：供应商密钥加密保管和删除。当前仍用既有 Codex 登录，不会因填入密钥而切换执行器。
 
 沿用现有管理员用户名/密码、HttpOnly 会话及 CSRF 防护，不新增公网 Pocket 控制接口。设备 token 不能登录管理员页面。
+
+## 频道与提示词
+
+“提示词配置”只编辑 FAST 回答风格；旧四频道角色风格编辑项已移除。历史语音配置保留兼容，不在这次升级中清空用户数据。Voxi Agent 使用高级设置中的指令；自有 OpenClaw 沿用该实例的模型、角色、记忆和工具权限。
+
+“我的频道”显示当前用户最终生效的配置。勾选“沿用公共频道模板”时，卡片只读，后续模板变化会同步生效；取消勾选后可单独命名并绑定助手，保存后不会被模板覆盖。重新勾选并保存会删除该用户覆盖、恢复继承。公共模板位于高级设置，只支持 FAST、Voxi Agent、未启用，不能共享另一个用户的 OpenClaw。
+
+## 接入已有 OpenClaw
+
+选择上方用户，在“接入我的 OpenClaw”创建连接。Agent ID 默认 `main`；多个已有 Agent 可分别创建连接并绑定不同频道。无需将 Voxi Agent 的指令或模型覆盖复制到 OpenClaw。
+
+先在 OpenClaw 所在机器启用官方 Responses 接口：
+
+```bash
+openclaw config set gateway.http.endpoints.responses.enabled true
+openclaw gateway restart
+```
+
+**家中电脑／内网（推荐）**：创建“主动连接”，下载页面提供的 `voxi-openclaw.py`，在 OpenClaw 电脑按页面生成的命令运行。需要 Python 3.10+，无需安装第三方 Python 包；按提示粘贴一次性显示的 Voxi 连接密钥与本机 Gateway Token／密码。连接器只向 Voxi HTTPS 主动发请求，不开入站端口、不改路由器；OpenClaw Gateway Token 始终留在本机。电脑和连接器需保持在线；退出或休眠后显示离线。`--local` 可设置本机回环地址端口，默认 `http://127.0.0.1:18789`。
+
+Voxi 若使用自签 CA，从管理员已有的可信来源取得 CA 文件，将启动参数增加 `--ca /path/to/ca.crt`；不支持跳过 TLS 验证。可为后台进程使用 `VOXI_CONNECTOR_TOKEN`、`OPENCLAW_GATEWAY_TOKEN` 环境变量替代交互输入；不将密钥放进命令行参数、截图、日志或仓库。连接密钥丢失时，解除绑定并删除该连接后重新创建。当前连接器是手动运行程序，没有自动安装系统服务；进程退出时尚未送达的内存结果可能丢失，云端不自动重派不确定任务。
+
+**云服务器 HTTPS**：填写 Voxi 云端可访问、证书有效的 Gateway HTTPS 根地址和 Token／密码，创建后检测。直连拒绝 URL 中的凭据、重定向和内网/保留 IP，DNS 实际解析结果也检查；内网地址、同机 Docker 私网或自签 OpenClaw 实例使用主动连接器即可。Token 使用现有 AES-GCM 主密钥加密，响应只给配置标志，不回显。
+
+检测使用认证的 `GET /v1/models`，不启动模型任务；显示“接口与认证正常”不等于已完成某个 Agent 的任务验收。正常后取消“沿用公共模板”，在所需频道选择该 OpenClaw 连接并保存，再到“后台任务”提交一个只读小任务。设备继续使用既有 AGENT 协议，不需要为了本次接入另刷固件。
+
+当前 API 接入通过 `POST /v1/responses` SSE 终态确认完成；不以“已经做完”等正文判断。每个新任务有独立会话键，明确“继续”时复用原会话和原实例，频道后来改绑不会把继续操作转给另一个助手。中断或断线导致执行结果不明时不自动重试。已认领的家中任务不会因轮询/结果回传重试而重复派发；结果重复回传可确认同一终态。
+
+OpenClaw 工具批准仍在其自身界面处理，当前不把它的批准窗口映射为 Voxi 的 Codex 批准按钮。直连停止等待会断开 HTTP 请求；家中连接器仍可能继续运行。界面明确显示“停止等待／核对远端”，不会把这一步标成远端已停止，必要时请在 OpenClaw 取消任务。OpenClaw 自己的运行时超时及工具权限仍由它管理。
+
+协议依据：[Responses API](https://docs.openclaw.ai/gateway/openresponses-http-api)、[远程访问](https://docs.openclaw.ai/gateway/remote)。API 凭据具有该实例的操作权限，只接入可信的 Voxi 服务；不需要把 Gateway 18789 端口直接开放公网。
 
 ## 升级
 
@@ -38,6 +69,6 @@ MiniCam 配套固件在新路由下使用 CH0–CH3 编号，显示 FAST/AGENT�
 
 ## 验证与实际边界
 
-代码验证覆盖真实 HTTP 管理代理到 SQLite、模拟 Codex 状态事件、任务幂等、所有者校验、重启/不确定提交、批准、取消、继续、凭据加密/不回显、浏览器桌面与手机操作。MiniCam 和 C6 固件编译检查通过。模拟执行和编译不能替代云端部署及真实录音验证。
+代码验证覆盖真实 HTTP 管理代理到 SQLite、模拟 Codex / OpenClaw 事件、真实 Python 家中连接器经受信 HTTPS 的任务往返、请求去重、所有者校验、模板继承/恢复、断连/不确定状态、凭据加密/不回显、浏览器桌面与 390px 手机操作。外部 OpenClaw 服务为模拟，不能替代用户真实实例和真实录音验证。
 
-当前是个人/试用部署；用户工作目录并不等于商业多租户隔离。自有 OpenClaw 插件连接、商业 API 执行、计费与独立托管工作器暂未实现；后台明确区分已保存凭据和正在使用的执行器。详见 Pocket Cloud 仓库 `VOXI_AGENT.md`。
+当前是个人/试用部署；用户工作目录并不等于商业多租户隔离。自有 OpenClaw 的 HTTP/主动连接已实现，原生频道插件、配对安装包/自动启动、商业 API 执行、计费与独立托管工作器仍未实现。详见 Pocket Cloud 仓库 `VOXI_AGENT.md`。

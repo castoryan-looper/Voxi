@@ -6,6 +6,20 @@ import {passwordHash} from './admin-auth.mjs';
 import WebSocket,{WebSocketServer} from 'ws';
 import {once} from 'node:events';
 
+test('home connector has a fixed scoped relay path without admin or device credentials',async t=>{
+ const {openClawRelay}=await import('./openclaw-relay.mjs');let forwarded;
+ const handler=openClawRelay(async body=>{forwarded=body;return {job:null};});
+ const server=http.createServer(handler);await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const body={action:'settings',connectionId:'a'.repeat(32),op:'poll',status:'ready'};
+ const headers={'Content-Type':'application/json',Authorization:'Bearer '+'x'.repeat(43)};
+ assert.equal((await fetch(base,{method:'POST',headers:{...headers,Origin:base},body:JSON.stringify(body)})).status,403);
+ assert.equal(forwarded,undefined);
+ assert.equal((await fetch(base,{method:'POST',headers,body:JSON.stringify(body)})).status,200);
+ assert.equal(forwarded.action,'relay');assert.equal(forwarded.relayToken,'x'.repeat(43));
+ assert.equal((await fetch(base,{method:'POST',headers,body:JSON.stringify({...body,op:'settings'})})).status,400);
+});
+
 test('Agent control plane inherits admin login, CSRF and fixed Pocket destination',async t=>{
  const requests=[];
  const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;requests.push({path:req.url,auth:req.headers.authorization,body:raw&&JSON.parse(raw)});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({settings:{enabled:false},tasks:[],credentials:{openai:{configured:Boolean(raw),active:false}},runtime:{engine:'codex-pocket-cloud'}}));});
@@ -14,6 +28,7 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{wss.close();server.close();backend.close();});
  const base=`http://127.0.0.1:${server.address().port}`;
  for(const path of ['/admin/agent','/admin/agent/tasks','/admin/agent/credentials'])assert.equal((await fetch(base+path)).status,200);
+ const download=await fetch(base+'/downloads/voxi-openclaw.py');assert.equal(download.status,200);assert.match(await download.text(),/def execute/);
  assert.equal((await fetch(base+'/api/admin/agent',{headers:{Authorization:'Bearer device-only'}})).status,401);
  assert.equal(requests.length,0);
  const login=await fetch(base+'/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password:'fixture-password-123'})});
