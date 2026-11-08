@@ -7,6 +7,7 @@
 - `/admin/agent`：统一的“频道与助手”。选择用户配置 CH0–CH3，接入、检测和绑定自己的 OpenClaw；服务参数和公共模板收进高级设置。
 - `/admin/agent/tasks`：派发文本任务、查看持久状态与完整结果、批准/拒绝、回答问题、停止和继续。
 - `/admin/agent/credentials`：供应商密钥加密保管和删除。当前仍用既有 Codex 登录，不会因填入密钥而切换执行器。
+- `/admin/users`：管理员开通、停用普通账户及重置密码；`/app` 为用户个人空间，见 [账户说明](USER-ACCOUNTS.md)。
 
 沿用现有管理员用户名/密码、HttpOnly 会话及 CSRF 防护，不新增公网 Pocket 控制接口。设备 token 不能登录管理员页面。
 

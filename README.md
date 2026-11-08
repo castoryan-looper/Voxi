@@ -7,6 +7,7 @@
 ## 先看这里
 
 - [Voxi Agent 与管理员后台](docs/VOXI-AGENT.md)：沿用 Pocket Cloud 的后台任务、频道路由、批准、中断和密钥保管。
+- [用户空间与账户](docs/USER-ACCOUNTS.md)：普通用户配置自己的资料、频道和助手，管理员开通账户并维护全局设置。
 
 - [换电脑接续／最新开发交接](docs/handoffs/LATEST.md)
 - [MiniCam 4G 缓存补充优化](docs/MINICAM-JITTER.md)：小智策略参考、有界播放额度、2/3/4 秒恢复及验证边界。

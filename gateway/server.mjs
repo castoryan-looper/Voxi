@@ -10,6 +10,7 @@ import {attachPocket} from './pocket.mjs';
 import {createAdmin} from './admin.mjs';
 import {pocketSettings} from './pocket-settings.mjs';
 import {openClawRelay} from './openclaw-relay.mjs';
+import {createUserAccounts} from './user-accounts.mjs';
 
 export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
@@ -17,13 +18,20 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
   if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const relay=openClawRelay(mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined);
+  const users=createUserAccounts({file:adminStateFile?adminStateFile+'.users':undefined,administrator:adminUsername,
+    agent:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
+    portal:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined});
   const server=http.createServer((req,res)=>{
+    if(req.url?.startsWith('/api/user/')){users.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     if(req.url==='/api/openclaw/relay'){relay(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     const path=new URL(req.url,'http://gateway').pathname;
-    const assets={'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
+    const assets={'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
-    if(['/admin','/admin/','/admin/devices','/admin/ai/prompts','/admin/ai/voice','/admin/agent','/admin/agent/tasks','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
+    if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/tasks','/app/account'].includes(path)){
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
+    }
+    if(['/admin','/admin/','/admin/devices','/admin/users','/admin/ai/prompts','/admin/ai/voice','/admin/agent','/admin/agent/tasks','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
       res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
     }
@@ -38,6 +46,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   let connectionSequence=0;
   const connected=new Map();
   const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,stateFile:adminStateFile,initialLimit:maxConnections,
+    userAccounts:users.admin,
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
     memoryConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,

@@ -4,7 +4,8 @@ import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 const scrypt=promisify(derive);
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 export async function passwordHash(password){const salt=randomBytes(16).toString('hex');return `scrypt:${salt}:${(await scrypt(password,salt,64)).toString('hex')}`;}
-async function verify(password,encoded){const [,salt,hash]=encoded.split(':');return equal((await scrypt(password,salt,64)).toString('hex'),hash);}
+export async function verifyPassword(password,encoded){const [,salt,hash]=encoded.split(':');return equal((await scrypt(password,salt,64)).toString('hex'),hash);}
+const verify=verifyPassword;
 export function createAdminAuth({username,passwordHash:initialHash,file,secure=true}={}){
  let account=username&&initialHash?{username,passwordHash:initialHash}:null;
  if(file){try{account=JSON.parse(readFileSync(file,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}}
@@ -18,7 +19,7 @@ export function createAdminAuth({username,passwordHash:initialHash,file,secure=t
   authorize(req){const s=session(req);return s&&(req.method==='GET'||equal(req.headers['x-csrf-token'],s.csrf));},
   async handle(req,res,json,body){
    const path=req.url;
-   if(path==='/api/admin/session'&&req.method==='GET'){const s=session(req);return json(s?200:401,s?{username:account.username,csrf:s.csrf}:{error:'请登录管理员账户'});}
+   if(path==='/api/admin/session'&&req.method==='GET'){const s=session(req);return json(s?200:401,s?{username:account.username,role:'admin',csrf:s.csrf}:{error:'请登录管理员账户'});}
    if(path==='/api/admin/login'&&req.method==='POST'){
     if(!account)return json(503,{error:'请先部署管理员账户配置'});
     const now=Date.now();if(now-windowAt>60000){windowAt=now;failures=0;}
@@ -29,7 +30,7 @@ export function createAdminAuth({username,passwordHash:initialHash,file,secure=t
     if(!ok)return json(401,{error:'用户名或密码不正确'});
     failures=0;prune();if(sessions.size>=20)sessions.delete(sessions.keys().next().value);
     const id=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');sessions.set(id,{csrf,until:now+8*3600000});
-    res.setHeader('Set-Cookie',cookie(id,8*3600));return json(200,{username:account.username,csrf});
+    res.setHeader('Set-Cookie',cookie(id,8*3600));return json(200,{username:account.username,role:'admin',csrf});
    }
    const current=session(req);
    if(!current||!equal(req.headers['x-csrf-token'],current.csrf))return json(401,{error:'登录已过期，请重新登录'});
