@@ -12,17 +12,21 @@
 
 ## 升级
 
-先更新服务器上 **codex-pocket-cloud** 的工作目录，执行 `git pull --ff-only` 和 `bash deploy/docker.sh up`。现有 `.env.docker`、命名卷、Whisper 模型和 Codex 登录均保留，不运行 `down -v`。
-
-然后在 Voxi 仓库执行：
+在 Voxi 仓库运行下面命令。升级助手优先识别 `/etc/codex-pocket-autodeploy.json`，调用现有快照发布器；没有自动发布配置时，才核对容器对应的真实 Git 仓库并快进更新。不会把运行中的发布快照当作 Git 仓库，也不会删除命名卷或改账号配置。
 
 ```bash
-git pull --ff-only
-sudo bash deploy/deploy.sh
+set +e
+cd ~/Voxi &&
+git fetch origin &&
+git merge --ff-only origin/main &&
+sudo python3 deploy/upgrade-pocket-agent.py &&
+sudo bash deploy/deploy.sh &&
 sudo bash deploy/check-agent.sh
 ```
 
 打开 `/admin/agent` 手动启用，默认 CH0 快问、CH1 Agent、CH2/CH3 未启用。先从后台提交一个小任务，再实测设备 PTT。旧 Pocket 不支持 `/voxi/agent` 时页面明确提示升级；原有语音路径仍可运行。
+
+不要在交互式主机终端直接执行 `set -e`。它会让后续失败的检查退出整个终端会话；上面的 `set +e` 和 `&&` 链会停止失败后的升级步骤，同时保留终端。自动发布器使用 `git archive` 生成不含 `.git` 的运行快照，Docker 的 Compose working_dir 因而不能用来推定源码仓库。
 
 ## 设备
 
