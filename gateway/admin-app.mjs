@@ -166,7 +166,25 @@ $('reloadUserAccounts').onclick=loadUserAccounts;
 $('createUserAccount').onsubmit=async e=>{e.preventDefault();$('saveUserAccount').disabled=true;try{await api('users',{action:'create',username:$('newUserUsername').value.trim(),password:$('newUserPassword').value,userId:$('newUserProfile').value,name:$('newUserName').value,role:'user'});$('newUserPassword').value='';userAccountsDirty=false;await loadUserAccounts();$('userAccountsMessage').textContent='普通账户已创建。用户可通过 /app 登录，请让用户首次登录后修改密码。';}catch(e){$('userAccountsMessage').textContent=e.message;}finally{$('saveUserAccount').disabled=false;}};
 
 let adminVoicePlayer=null,adminVoiceRequest=0;
-function fillVoiceCatalog(meta){$('voiceChoice').replaceChildren();for(const voice of meta?.options||[{id:'cove',name:'Cove'}])$('voiceChoice').append(option(voice.id,voice.name));$('voicePreviewText').textContent=meta?.previewText?'试听句子：'+meta.previewText:'请升级 Pocket 后端以启用音色试听。';$('previewVoice').disabled=!meta?.previewVersion;}
+let voiceLibraryTimer=null;
+function fillVoiceCatalog(meta){
+ $('voiceChoice').replaceChildren();for(const voice of meta?.options||[{id:'cove',name:'Cove'}]){const o=option(voice.id,voice.name+' · 中文 + English');o.dataset.voiceName=voice.name;$('voiceChoice').append(o);}
+ $('voicePreviewText').textContent=meta?.previewText?'双语试听内容：'+meta.previewText:'请升级 Pocket 后端以启用音色试听。';
+ $('voiceLanguageNote').textContent=meta?.languageNote||'';$('previewVoice').disabled=!meta?.previewVersion;$('prepareVoiceLibrary').disabled=meta?.previewVersion!==2;
+ if(meta?.previewVersion===2&&currentPage().key==='voice')refreshVoiceLibrary();
+}
+async function refreshVoiceLibrary(prepare=false){
+ clearTimeout(voiceLibraryTimer);const session=token;if(!session||currentPage().key!=='voice')return;
+ try{
+  const library=await api('voice-preview',{action:prepare?'prepare':'status'});if(token!==session||currentPage().key!=='voice')return;
+  const labels={ready:'可试听',pending:'待准备',generating:'生成中',failed:'生成失败'};
+  for(const voice of library.voices||[]){const o=[...$('voiceChoice').options].find(o=>o.value===voice.id);if(o)o.textContent=o.dataset.voiceName+' · 中文 + English · '+(labels[voice.state]||'待准备');}
+  $('voiceLibraryStatus').textContent='双语样音库：'+library.ready+' / '+library.total+' 已就绪'+(library.failed?' · '+library.failed+' 个生成失败':'')+(library.running?(library.waitingForCapacity?' · 等待空闲语音资源':' · 正在准备 '+(library.current||'')):' · 本轮准备结束')+'。'+(library.persistent?'已保存的音频在服务重启后仍可使用。':'当前存储未启用持久保存。');
+  $('prepareVoiceLibrary').disabled=library.running;
+  if(library.running)voiceLibraryTimer=setTimeout(()=>refreshVoiceLibrary(),5000);
+ }catch(e){if(token===session&&currentPage().key==='voice'){$('voiceLibraryStatus').textContent='音频库状态未确认：'+e.message;$('prepareVoiceLibrary').disabled=false;}}
+}
+$('prepareVoiceLibrary').onclick=()=>refreshVoiceLibrary(true);
 $('voiceChoice').onchange=()=>{adminVoiceRequest++;adminVoicePlayer?.stop();aiDirty=true;};
 $('previewVoice').onclick=async()=>{const request=++adminVoiceRequest,session=token;try{const {createVoicePreview}=await import('/shared/voice-preview.js');if(request!==adminVoiceRequest||session!==token||currentPage().key!=='voice')return;adminVoicePlayer??=createVoicePreview({audio:$('voicePreviewAudio'),status:$('voicePreviewStatus'),request:(body,options)=>api('voice-preview',body,options)});await adminVoicePlayer.play($('voiceChoice').value);}catch(e){if(session===token)$('voicePreviewStatus').textContent=e.message;}};
 $('stopVoicePreview').onclick=()=>{adminVoiceRequest++;adminVoicePlayer?.stop();};

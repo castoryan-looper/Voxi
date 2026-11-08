@@ -8,7 +8,7 @@ export function pocketSettings({url,token,ca},endpoint='config') {
     const target=new URL(url);target.protocol=target.protocol==='wss:'?'https:':'http:';target.pathname='/voxi/'+endpoint;target.search='';target.hash='';
     const body=value===undefined?undefined:JSON.stringify(value);
     const request=(target.protocol==='https:'?https:http).request(target,{method:body?'POST':'GET',headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body)}:{})},...(ca?{ca}:{})},response=>{
-      let raw='';response.setEncoding('utf8');response.on('data',part=>{raw+=part;if(Buffer.byteLength(raw)>(endpoint==='memory'?16777216:1048576))request.destroy(Error('Configuration response too large'));});
+      let raw='';response.setEncoding('utf8');response.on('data',part=>{raw+=part;if(Buffer.byteLength(raw)>(endpoint==='memory'?16777216:endpoint==='voice-preview'?2097152:1048576))request.destroy(Error('Configuration response too large'));});
       response.on('end',()=>{
         if(endpoint==='voice-preview'&&response.statusCode!==200){try{return reject(Error(JSON.parse(raw).error||'试听未完成'));}catch{return reject(Error('试听服务暂不可用'));}}
         if(['agent','portal'].includes(endpoint)&&response.statusCode===400){try{return reject(Error(JSON.parse(raw).error||'请求无效'));}catch{return reject(Error('请求无效'));}}

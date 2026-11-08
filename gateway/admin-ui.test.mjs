@@ -7,7 +7,7 @@ function page(){
   const nodes=new Map();
   const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;}});return nodes.get(id);};
   const location={pathname:'/admin/devices',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;}};
-  const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
+  const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},dataset:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
   vm.runInContext(source,context);return {context,get};
 }
 const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_rejected',reason:'device_limit',connection:13,maxConnections:2}],maxConnections:2,capacity:4,persistent:true,mode:'pocket'};

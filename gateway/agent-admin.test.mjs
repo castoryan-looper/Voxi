@@ -42,6 +42,10 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,401);
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,200);
  assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.voice,'ember');
+ for(const action of ['status','prepare']){
+  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({action})})).status,200);
+  assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.action,action);
+ }
 });
 
 test('Pocket Agent validation errors reach the administrator without claiming success',async t=>{
@@ -50,6 +54,14 @@ test('Pocket Agent validation errors reach the administrator without claiming su
  await new Promise(r=>backend.listen(0,'127.0.0.1',r));t.after(()=>backend.close());
  const call=pocketSettings({url:`ws://127.0.0.1:${backend.address().port}/voxi`,token:'internal'},'agent');
  await assert.rejects(call({action:'submit'}),/当前频道未配置 Agent/);
+});
+
+test('persisted bilingual WAV payload crosses the old 1MB preview bound without regeneration',async t=>{
+ const {pocketSettings}=await import('./pocket-settings.mjs');let requests=0;
+ const backend=http.createServer((req,res)=>{requests++;res.setHeader('Content-Type','application/json');res.end(JSON.stringify({voice:'cove',cached:true,audioFormat:'wav',audioBase64:'A'.repeat(1280060)}));});
+ await new Promise(r=>backend.listen(0,'127.0.0.1',r));t.after(()=>backend.close());
+ const preview=pocketSettings({url:`ws://127.0.0.1:${backend.address().port}/voxi`,token:'fixture'},'voice-preview');
+ const result=await preview({voice:'cove'});assert.equal(result.cached,true);assert.equal(result.audioBase64.length,1280060);assert.equal(requests,1);
 });
 
 test('background task notice bypasses queued PCM without interrupting audio state',async t=>{
