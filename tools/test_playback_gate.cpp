@@ -66,4 +66,11 @@ int main(){
    assert(adaptive.canWrite(threshold,false));
  }
  adaptive.reset();assert(adaptive.canWrite(480,true));assert(adaptive.rebuffers==0);
+ PlaybackGate shortGap(960,1920,480);
+ assert(shortGap.canWrite(960,false));
+ assert(!shortGap.canWrite(0,false,true));
+ assert(shortGap.primed&&shortGap.rebuffers==0);
+ assert(shortGap.canWrite(480,false,true)); // nearby packet, no re-prime
+ assert(!shortGap.canWrite(0,false));
+ assert(!shortGap.primed&&shortGap.rebuffers==1);
 }

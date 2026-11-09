@@ -170,7 +170,8 @@ static PlaybackGate playbackGate;
 static String playbackFlowId;
 static uint32_t playbackCreditAt=0;
 #endif
-static size_t fadeRemaining=120;
+static size_t fadeRemaining=playbackFadeSamples;
+static uint32_t lastPlaybackWriteAt=0;
 static char agentChannelMode[12]={},agentChannelName[100]={},agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
 const char* radioChannelMode(){return agentChannelMode;}
 const char* radioChannelName(){return agentChannelName;}
@@ -221,7 +222,7 @@ static bool probeRequested=false,probePassed=false;
 static volatile bool probeActive=false,probeFinishing=false;
 static uint32_t probeAt=0;static const char* probeState="idle";
 static uint32_t probeRandom=0x564f5849;
-static bool cueActive=false,replyCuePending=false,micCueGuard=false,cueRequested=false;
+static bool cueActive=false,replyCuePlayed=false,micCueGuard=false,cueRequested=false;
 void requestRadioCueTest(){cueRequested=true;}
 static size_t cuePosition=0;static uint32_t cueSeed=0x564f5849,micResumeAt=0;
 static void startRadioCue(){cuePosition=0;cueSeed+=0x9e3779b9u;cueActive=true;}
@@ -389,7 +390,7 @@ void flushAudio(){
 #ifdef VOXI_BOARD_MINICAM
  playbackFlowId="";
 #endif
- cueActive=replyCuePending=micCueGuard=false;playbackGate.reset();fadeRemaining=120;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
+ cueActive=replyCuePlayed=micCueGuard=false;playbackGate.reset();fadeRemaining=playbackFadeSamples;lastPlaybackWriteAt=0;head=tail=used=0;ending=playing=thinking=false;played=0;audioFlush();}
 static bool deferUploadRecovery(){
   if(uploadRecovery.pending){ready=false;return true;}
   if(!uploadRecovery.request(millis(),uploading,submissionAttempted,(probeActive||probeFinishing)&&!probeAllowRecovery))return false;
@@ -480,7 +481,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
 #ifdef VOXI_BOARD_MINICAM
     playbackFlowId=d["flowId"]|"";playbackCreditAt=0;
 #endif
-    replyWireBytes=replyWireMessages=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;replyCuePending=true;playbackGate.reset();fadeRemaining=120;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
+    replyWireBytes=replyWireMessages=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;lastPlaybackWriteAt=playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;playbackGate.reset();fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
   }
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
@@ -620,23 +621,31 @@ void audioTick(){
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
   bool waitingForBuffer=!playbackGate.primed;
-  for(int budget=0;budget<6&&!tx&&playing&&!cueActive&&playbackGate.canWrite(used,ending);budget++){
-    if(replyCuePending){replyCuePending=false;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
+  for(int budget=0;budget<6&&!tx&&playing&&!cueActive;budget++){
+    uint32_t now=millis();
+    // DMA can still be playing after the software ring runs out. Give a
+    // nearby batch a chance to arrive before starting a multi-second refill.
+    if(!playbackGate.canWrite(used,ending,lastPlaybackWriteAt&&now-lastPlaybackWriteAt<25))break;
+    if(!replyCuePlayed){replyCuePlayed=true;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
     if(waitingForBuffer){radioDebug("PLAYING","Audio buffer ready: resumed");waitingForBuffer=false;}
     size_t count=min(used/replyBytesPerSample,(size_t)240);int16_t mono[240];
-    for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];int16_t sample=(int16_t)(lo|(hi<<8));mono[i]=playbackEnvelope(sample,i,fadeRemaining,used/replyBytesPerSample);}
+    // Consecutive packets carry one waveform. Shape the tail only at the
+    // explicit stream end or once inbound audio has actually stalled.
+    const bool fadeTail=ending||(lastReplyPacketAt&&now-lastReplyPacketAt>=80);
+    for(size_t i=0;i<count;i++){uint8_t lo=playback[(tail+2*i)%CAP],hi=playback[(tail+2*i+1)%CAP];int16_t sample=(int16_t)(lo|(hi<<8));mono[i]=playbackEnvelope(sample,i,fadeRemaining,used/replyBytesPerSample,fadeTail);}
     size_t written=count?audioWrite(mono,count):0;
     if(!written)break; // DMA full: retry next loop without consuming any PCM.
+    lastPlaybackWriteAt=millis();
     if(written&&!turnTiming.voice)turnTiming.voice=millis();
     fadeRemaining=written>=fadeRemaining?0:fadeRemaining-written;
     size_t consumed=written*replyBytesPerSample;
     size_t first=min(consumed,CAP-tail);replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback+tail,first);
     if(first<consumed)replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback,consumed-first);
     replyConsumedBytes+=consumed;
-    tail=(tail+consumed)%CAP;used-=consumed;played+=written;if(used==0)fadeRemaining=120;
+    tail=(tail+consumed)%CAP;used-=consumed;played+=written;
     if(ending&&used==0){replyIntegrityComplete=true;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
-  if(playbackGate.rebuffers!=previousRefills){fadeRemaining=120;radioDebug("BUFFERING","Audio jitter: refilling");}
+  if(playbackGate.rebuffers!=previousRefills){fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Audio jitter: refilling");}
   if(!tx&&playing&&ending&&used==0){replyIntegrityComplete=true;playing=ending=thinking=false;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
 #ifdef VOXI_BOARD_MINICAM
   // Best-effort nonblocking enqueue; network task owns all TLS writes.
@@ -693,6 +702,9 @@ void loop(){
   }
   Packet p;
   for(int i=0;i<8&&xQueuePeek(incoming,&p,0)==pdTRUE;i++){
+    // audio_end is ordered after its PCM. Drain that tail before the next
+    // control event can reset playback for a following segment.
+    if(playing&&ending&&p.type==WStype_TEXT)break;
     // Leave a valid PCM frame queued until playback frees room. This pauses
     // socket reads via the bounded incoming queue, instead of discarding audio.
     if(p.type==WStype_BIN&&(replyBatched?3u:1u)*960>CAP-used)break;
