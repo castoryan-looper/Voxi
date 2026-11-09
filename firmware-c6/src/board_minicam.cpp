@@ -14,6 +14,7 @@
 #include <HWCDC.h>
 #include <Preferences.h>
 #include <math.h>
+#include <atomic>
 #include <driver/i2s_std.h>
 #include <driver/i2c_master.h>
 #include <esp_codec_dev.h>
@@ -42,7 +43,7 @@ static constexpr const char* talkHint="Hold +: talk / release: send";
 static int mainRaw=1,volumeKeyMv=0;
 static uint32_t mainClicks=0;
 static volatile bool standbyRequested=false,standbyDisplayReady=false;
-static volatile bool idleDisplay=false,idleDisplayApplied=false;
+static std::atomic<bool> idleDisplay{false};
 static bool idleAudio=false;
 static volatile uint32_t displayFrames=0;
 int speakerVolume(){return volumePercent;}
@@ -66,7 +67,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;strlcpy(s.channelMode,radioChannelMode(),sizeof(s.channelMode));strlcpy(s.taskState,radioTaskState(),sizeof(s.taskState));auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static void postView(bool force=false){if(!views||(idleDisplay&&!force))return;View s=baseView;strlcpy(s.channelMode,radioChannelMode(),sizeof(s.channelMode));strlcpy(s.taskState,radioTaskState(),sizeof(s.taskState));auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -82,7 +83,7 @@ void boardStatusTick(){
    standbyActivity();
   }
  }
- if(!batteryAt||now-batteryAt>=1000){
+ if(!batteryAt||now-batteryAt>=(idleAudio?5000u:1000u)){
   batteryAt=now;int mv=0,ref=0,raw=0;
   for(int i=0;i<8;i++){mv+=analogReadMilliVolts(3);ref+=analogReadMilliVolts(4);raw+=analogRead(4);}
   batterySampleMv=mv/8;batteryReferenceMv=ref/8;batteryReferenceRaw=raw/8;
@@ -121,17 +122,17 @@ static void centeredText(const char* text,int y,int size,uint16_t color){canvas.
 static void screenTask(void*){
  if(!canvas.begin(40000000)){diagnosticError("ST7789 initialization failed");vTaskDelete(nullptr);return;}
  panel.invertDisplay(false);digitalWrite(42,LOW);displayReady=true;canvas.setTextWrap(false);
- View s,previous;bool drawn=false;
+ View s,previous;bool drawn=false,screenOff=false;
  for(;;){
+  if(xQueueReceive(views,&s,portMAX_DELAY)!=pdTRUE)continue;
   if(standbyRequested){digitalWrite(42,HIGH);panel.displayOff();standbyDisplayReady=true;vTaskSuspend(nullptr);}
-  if(idleDisplay!=idleDisplayApplied){
-   if(idleDisplay){digitalWrite(42,HIGH);panel.displayOff();}
+  const bool off=idleDisplay.load();
+  if(off!=screenOff){
+   if(off){digitalWrite(42,HIGH);panel.displayOff();}
    else{panel.displayOn();drawn=false;}
-   idleDisplayApplied=idleDisplay;
+   screenOff=off;
   }
-  if(idleDisplay){vTaskDelay(pdMS_TO_TICKS(25));continue;}
-  if(xQueueReceive(views,&s,pdMS_TO_TICKS(25))!=pdTRUE)continue;
-  View next;while(xQueueReceive(views,&next,0)==pdTRUE)s=next;
+  if(off)continue;
   if(drawn&&!memcmp(&s,&previous,sizeof(s)))continue;previous=s;drawn=true;
   canvas.fillScreen(UI_BG);canvas.setTextColor(UI_WHITE);canvas.setTextSize(3);canvas.setCursor(12,13);canvas.print("VOXI");
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(14,40);canvas.print("AI WALKIE-TALKIE");
@@ -161,7 +162,7 @@ static void screenTask(void*){
    const char* hint=!strcmp(s.phase,"RECORDING")?"RELEASE TO SEND":!strcmp(s.phase,"READY")?(mainKeyPtt?"HOLD MAIN TO TALK":"HOLD + TO TALK"):!strcmp(s.phase,"PLAYING")?"LISTENING":!strcmp(s.phase,"BUFFERING")?"BUFFERING AUDIO":!strcmp(s.phase,"RETRY LINK")?"RESTORING LINK":s.cloud?"PLEASE WAIT":"CONNECTING";
    centeredText(hint,270,2,phaseColor(s.phase));centeredText("Tap +/-: volume | Hold -: CH",301,1,UI_MUTED);
   }
-  canvas.flush();digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
+  canvas.flush();if(!idleDisplay)digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
 }
 void displayChannel(int channel,bool online){baseView.channel=channel;baseView.cloud=online;postView();}
@@ -202,7 +203,7 @@ void boardInit(){
 
  views=xQueueCreate(1,sizeof(View));assert(views);xTaskCreatePinnedToCore(screenTask,"st7789",6144,nullptr,1,nullptr,0);boardStatusTick();
 }
-bool boardPrepareStandby(){if(!minicamModemStandby())return false;standbyRequested=true;uint32_t began=millis();while(!standbyDisplayReady&&millis()-began<5000)delay(10);if(!standbyDisplayReady)return false;esp_codec_dev_set_out_mute(codec,true);esp_codec_dev_close(codec);i2s_channel_disable(output);i2s_channel_disable(input);return true;}
+bool boardPrepareStandby(){if(!minicamModemStandby())return false;standbyRequested=true;postView(true);uint32_t began=millis();while(!standbyDisplayReady&&millis()-began<5000)delay(10);if(!standbyDisplayReady)return false;esp_codec_dev_set_out_mute(codec,true);esp_codec_dev_close(codec);i2s_channel_disable(output);i2s_channel_disable(input);return true;}
 bool boardSetIdle(bool idle){
  if(idle==idleAudio){idleDisplay=idle;return true;}
  if(idle){
@@ -214,7 +215,7 @@ bool boardSetIdle(bool idle){
   for(int reg=46;reg<=49;reg++)if(codecWrite(reg,30)!=ESP_OK){esp_codec_dev_close(codec);return false;}
   if(esp_codec_dev_set_out_mute(codec,false)!=ESP_OK){esp_codec_dev_close(codec);return false;}
  }
- idleAudio=idle;idleDisplay=idle;
+ idleAudio=idle;idleDisplay=idle;postView(true);
  if(!idle)audioFlush();
  return true;
 }

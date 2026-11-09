@@ -63,3 +63,7 @@ struct CellularHeartbeat {
   return None;
  }
 };
+
+inline uint32_t cellularStatusPollMs(bool screenOff,bool dataReady,bool socketConnected){
+ return screenOff&&dataReady&&socketConnected?30000u:10000u;
+}

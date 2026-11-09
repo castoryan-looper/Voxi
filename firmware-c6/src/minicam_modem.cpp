@@ -20,6 +20,10 @@ static constexpr EventBits_t DONE=1,FAILED=2,OPENED=4,OPEN_FAILED=8,SENT=16,CLOS
 static std::atomic<int> sentCount{-1};
 static std::atomic<bool> configured{false},selected{false},stopping{false},stopped{false},socketUp{false},ipUp{false};
 static std::atomic<bool> waiting{false};
+static std::atomic<bool> screenOff{false};
+static std::atomic<TaskHandle_t> managerTask{nullptr};
+static void notifyManager(){if(auto task=managerTask.load())xTaskNotifyGive(task);}
+void minicamModemSetScreenOff(bool off){if(screenOff.exchange(off)!=off)notifyManager();}
 static char apn[64]={},response[2048]={};static size_t responseLength=0;
 static constexpr size_t RING_SIZE=128*1024,LINE_SIZE=128*1024+256;
 static uint8_t* ring;static size_t ringHead=0,ringTail=0,ringUsed=0;
@@ -56,15 +60,28 @@ static void parseLine(std::string_view line){
  auto name=line.substr(0,colon);
  if(name=="+MIPURC"&&count>=2){
   if(args[1]=="0"&&args[0]=="rtcp"&&count==4){int bytes=cellularInteger(args[2]);if(bytes>=0)receiveHex(args[3],bytes);else tcpFailed("invalid MIPURC byte count");}
-  else if(args[1]=="0"&&args[0]=="disconn"){int code=count>2?cellularInteger(args[2]):-1;char reason[64];snprintf(reason,sizeof(reason),"modem MIPURC disconnect: %d",code);tcpFailed(reason);}
+  else if(args[1]=="0"&&args[0]=="disconn"){int code=count>2?cellularInteger(args[2]):-1;char reason[64];snprintf(reason,sizeof(reason),"modem MIPURC disconnect: %d",code);tcpFailed(reason);notifyManager();}
   return;
  }
  if(name=="+MIPOPEN"&&count==2&&args[0]=="0"){
   int code=cellularInteger(args[1]);socketUp=code==0;xSemaphoreTake(stateMutex,portMAX_DELAY);state.socketError=code;xSemaphoreGive(stateMutex);xEventGroupSetBits(events,code==0?OPENED:OPEN_FAILED);
  }else if(name=="+MIPCLOSE"&&count&&args[0]=="0"){socketUp=false;xEventGroupSetBits(events,CLOSED);}
  else if(name=="+MIPSEND"&&count>=2&&args[0]=="0"){sentCount=cellularInteger(args[1]);xEventGroupSetBits(events,SENT);}
- else if(name=="+MIPCALL"&&count>=2&&args[0]=="1"){ipUp=args[1]=="1";if(!ipUp&&socketUp)tcpFailed("4G data context lost");}
- else if(name=="+CEREG"&&count){int v=cellularInteger(args[count>1&&!quoted[1]?1:0]);xSemaphoreTake(stateMutex,portMAX_DELAY);state.registered=v==1||v==5;xSemaphoreGive(stateMutex);if(v!=1&&v!=5){ipUp=false;char reason[48];snprintf(reason,sizeof(reason),"LTE registration lost: %d",v);tcpFailed(reason);}}
+ else if(name=="+MIPCALL"&&count>=2&&args[0]=="1"){
+  const bool dataReady=args[1]=="1";
+  const bool changed=ipUp.exchange(dataReady)!=dataReady;
+  if(!dataReady&&socketUp)tcpFailed("4G data context lost");
+  if(changed)notifyManager();
+ }
+ else if(name=="+CEREG"&&count){
+  int v=cellularInteger(args[count>1&&!quoted[1]?1:0]);
+  const bool registered=v==1||v==5;
+  xSemaphoreTake(stateMutex,portMAX_DELAY);
+  const bool changed=state.registered!=registered;state.registered=registered;
+  xSemaphoreGive(stateMutex);
+  if(!registered){ipUp=false;char reason[48];snprintf(reason,sizeof(reason),"LTE registration lost: %d",v);tcpFailed(reason);}
+  if(changed)notifyManager();
+ }
  else if(name=="+CSQ"&&count){xSemaphoreTake(stateMutex,portMAX_DELAY);state.signal=cellularInteger(args[0]);xSemaphoreGive(stateMutex);}
  else if(name=="+CPIN"&&count){xSemaphoreTake(stateMutex,portMAX_DELAY);state.simReady=args[0]=="READY";xSemaphoreGive(stateMutex);}
  if(waiting&&responseLength+line.size()+2<sizeof(response)){memcpy(response+responseLength,line.data(),line.size());responseLength+=line.size();response[responseLength++]='\n';response[responseLength]=0;}
@@ -86,6 +103,7 @@ static void receiver(void*){
 
 }
 static void manager(void*){
+ managerTask=xTaskGetCurrentTaskHandle();
  while(!configured)vTaskDelay(pdMS_TO_TICKS(20));delay(200);
  bool detected=false;while(!detected&&!stopping){detected=command("AT",800);if(!detected){status("waiting for modem");delay(500);}}
  xSemaphoreTake(stateMutex,portMAX_DELAY);state.detected=detected;xSemaphoreGive(stateMutex);
@@ -110,11 +128,8 @@ static void manager(void*){
    }
   }
   status(!sim?"SIM not ready":!reg?"registering":selected?(ipUp?"4G data ready":"activating data"):"registered; Wi-Fi selected");
-  for(int i=0;i<100&&!stopping;i++){
-   vTaskDelay(pdMS_TO_TICKS(100));
-   // Registration URCs can arrive between polls: start data immediately then.
-   if(selected&&!reg){xSemaphoreTake(stateMutex,portMAX_DELAY);bool nowRegistered=state.registered;xSemaphoreGive(stateMutex);if(nowRegistered)break;}
-  }
+  // URCs and screen transitions wake the manager immediately between polls.
+  ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(cellularStatusPollMs(screenOff,ipUp,socketUp)));
  }
 }
 void minicamModemBegin(){
@@ -168,5 +183,5 @@ void minicamModemDiagnostics(JsonDocument& out){State s;xSemaphoreTake(stateMute
  out["cellularLastDropReason"]=s.dropReason;out["cellularLastDropAtMs"]=s.dropAt;out["cellularLargestPacket"]=s.largestPacket;out["cellularLargestLine"]=s.largestLine;out["cellularRingPeakBytes"]=s.ringPeak;out["cellularPollFailures"]=s.pollFailures;out["cellularResourcesActive"]=resourcesStarted;out["cellularUartDriver"]=resourcesStarted?"UHCI DMA":"not started";out["cellularDetected"]=s.detected;out["cellularModel"]=s.model;out["cellularBaud"]=921600;out["cellularSimReady"]=s.simReady;out["cellularRegistered"]=s.registered;out["cellularSignal"]=s.signal;out["cellularStatus"]=s.status;out["cellularTransportEnabled"]=(bool)selected;out["cellularDataReady"]=(bool)ipUp;out["cellularTcpConnected"]=(bool)socketUp;out["cellularTlsVerified"]=s.tlsVerified;out["cellularTlsError"]=s.tlsError;out["cellularSocketError"]=s.socketError;out["cellularLastAt"]=s.lastAt;out["cellularRxBytes"]=s.rxBytes;out["cellularTxBytes"]=s.txBytes;out["cellularRxOverflows"]=s.overflows;
  xSemaphoreTake(ringMutex,portMAX_DELAY);out["cellularTcpBufferedBytes"]=ringUsed;xSemaphoreGive(ringMutex);
 }
-bool minicamModemStandby(){if(!resourcesStarted)return true;stopping=true;uint32_t began=millis();while(!stopped&&millis()-began<15000)delay(10);return stopped;}
+bool minicamModemStandby(){if(!resourcesStarted)return true;stopping=true;notifyManager();uint32_t began=millis();while(!stopped&&millis()-began<15000)delay(10);return stopped;}
 #endif

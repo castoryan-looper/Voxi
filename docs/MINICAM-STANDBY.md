@@ -10,6 +10,8 @@
 
 诊断：standbyStage=0/1、standbyMode=connected、standbySleepEnabled=false、standbyDisconnectEnabled=false、standbyWakeRestoreMs、standbyRestoreErrors；status 的 body.keepAwake=false 只观察不唤醒。音频恢复失败会清理未完成codec初始化并限速重试，保留网络任务，不直接整机重启。
 
+关屏时显示任务阻塞等待更新，停止构建显示帧，电池采样从每 1 秒改为每 5 秒。4G 数据和 TCP 均正常时，模组状态轮询从 10 秒放宽到 30 秒，网络状态 URC 和亮屏会立即唤醒轮询，WebSocket 心跳和重连任务持续运行。待机进入、控制循环和音频恢复期间使用芯片任务看门狗，正常亮屏后解除订阅。诊断字段 `standbyWatchdogArmed` 表示当前订阅状态，发生重启后可通过 `resetReason` 区分看门狗复位。音频恢复成功前暂停录音和本地播放，避免在 codec 关闭时启动。
+
 USB link_reconnect 为闲时诊断操作：仅请求重建云端连接，用于验证保留模组注册的后台恢复，忙于录音/播放时拒绝。
 
 实际整机电流、续航、长时间弱网及自然断网恢复需要测量。此实现提供联网待机，不宣称达到模组手册的休眠电流。OTA保持撤回，当前独立分支不包含OTA实现；已迁移设备只刷应用，保留现有分区/NVS。

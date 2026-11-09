@@ -653,7 +653,7 @@ void setup(){
 void loop(){
   if(downlinkProbeWaiting&&millis()-downlinkProbeAt>45000){diagnosticTurnFailure("Downlink test start timed out");fault();}
   displayDebugTick();boardStatusTick();setupTick(tx||uploading||uploadRecovery.pending||playing||thinking||cueActive||audioCacheBusy(),ready,channel);
-  if(speakerTestPending()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
+  if(speakerTestPending()&&!standbyScreenOff()&&!tx&&!uploading&&!playing&&!thinking)speakerTestRun();
   if(!radioConfig.valid){
     button();
     static uint32_t screenAt=0;if(millis()-screenAt>1000&&!setupScreenActive()){screenAt=millis();displayConnection(channel,"SETUP NEEDED",radioNetworkConnected(),false,HWCDC::isPlugged());}
@@ -682,7 +682,7 @@ void loop(){
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=radioNetworkConnected();if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":(radioUsesCellular()?"NO 4G":"NO WIFI"),wifiNow?(radioUsesCellular()?"4G connected":"WiFi connected"):(radioUsesCellular()?"4G disconnected":"WiFi disconnected"));}
   if(!radioNetworkConnected()){if(uploading)deferUploadRecovery();if(!uploadRecovery.pending){if(ready||tx||playing||used)flushAudio();tx=false;}ready=false;diagnosticStage(radioUsesCellular()?"cellular_connecting":"wifi_connecting");}
-  button();encoder();audioTick();
+  if(!standbyScreenOff()){button();encoder();audioTick();}
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();
     bool wifi=radioNetworkConnected();
@@ -692,5 +692,5 @@ void loop(){
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
   standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));
-  delay(1);
+  delay(standbyScreenOff()?5:1);
 }

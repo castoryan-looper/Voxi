@@ -4,6 +4,7 @@ void minicamModemBegin();
 void minicamModemConfigure(bool enabled,const char* apn);
 void minicamModemDiagnostics(JsonDocument& out);
 bool minicamModemStandby();
+void minicamModemSetScreenOff(bool off);
 bool minicamModemReady();
 int minicamSignal();
 bool minicamTcpConnect(const char* host,uint16_t port);

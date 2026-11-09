@@ -26,5 +26,9 @@ int main(){
   assert(h.tick(179999)==CellularHeartbeat::None);assert(h.tick(180000)==CellularHeartbeat::Ping);
   assert(h.tick(225000)==CellularHeartbeat::None);assert(h.tick(240000)==CellularHeartbeat::Ping);assert(h.tick(285000)==CellularHeartbeat::Dead);
   h.configure(0,3000,2,0);assert(h.tick(100000)==CellularHeartbeat::None);
+  assert(cellularStatusPollMs(true,true,true)==30000);
+  assert(cellularStatusPollMs(false,true,true)==10000);
+  assert(cellularStatusPollMs(true,false,true)==10000);
+  assert(cellularStatusPollMs(true,true,false)==10000);
 }
 

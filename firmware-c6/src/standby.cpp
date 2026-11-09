@@ -3,6 +3,10 @@
 #include "board_audio.h"
 #include "board_profile.h"
 #include "diagnostics.h"
+#ifdef VOXI_BOARD_MINICAM
+#include "minicam_modem.h"
+#include <esp_task_wdt.h>
+#endif
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
@@ -40,15 +44,19 @@ void standbyActivity(){
   uint32_t now=millis();if(restoreAt&&uint32_t(now-restoreAt)<1000)return;restoreAt=now;
   if(!boardSetIdle(false)){restoreErrors++;diagnosticError("Idle audio restore failed; retrying without radio reset");return;}
   wakeRestoreMs=millis()-now;idleStage=0;wakeAt=millis();restoreAt=0;
+  minicamModemSetScreenOff(false);
+  disableLoopWDT();
  }
 
 #endif
  policy.activity(millis());
 }
+bool standbyScreenOff(){return idleStage!=0;}
 bool standbySuppressInput(){if(!wakeGuard)return false;if((int32_t)(millis()-wakeGuardUntil)<0)return true;if(!inputDown())wakeGuard=false;return true;}
 void standbyDiagnostics(JsonDocument& out){out["standbyIdleMs"]=uint32_t(millis()-policy.lastActivity);out["standbyTimeoutMs"]=60000;out["standbyMode"]="light_sleep";out["standbyCount"]=retained.count;out["standbyWakeCause"]=retained.wake;out["standbyLastError"]=retained.error;out["standbyWakeInputGuard"]=wakeGuard;
 #ifdef VOXI_BOARD_MINICAM
  out["standbyMode"]="connected";out["standbyStage"]=idleStage;out["standbyScreenMinutes"]=connected.screenMinutes;out["standbyLinkMinutes"]=0;out["standbySleepMinutes"]=0;out["standbyTimeoutMs"]=connected.screenMinutes*60000u;out["standbyLastWakeAtMs"]=wakeAt;out["standbyWakeRestoreMs"]=wakeRestoreMs;out["standbyRestoreErrors"]=restoreErrors;out["standbyDisconnectEnabled"]=false;out["standbySleepEnabled"]=false;
+ out["standbyWatchdogArmed"]=idleStage&&esp_task_wdt_status(nullptr)==ESP_OK;
 #endif
 }
 bool standbySaveSettings(JsonVariantConst body,JsonDocument& out){
@@ -72,7 +80,13 @@ void standbyTick(bool busy,bool provisioning){
 #ifdef VOXI_BOARD_MINICAM
  if(busy||input||provisioning||(idleStage&&restoreAt)){standbyActivity();return;}
  int wanted=connected.stage(uint32_t(millis()-policy.lastActivity));
- if(wanted>=1&&idleStage==0){if(!boardSetIdle(true)){diagnosticError("Idle audio shutdown failed");standbyActivity();return;}idleStage=1;}
+ if(wanted>=1&&idleStage==0){
+  // Supervise the input/control loop through both shutdown and restoration.
+  enableLoopWDT();
+  if(!boardSetIdle(true)){disableLoopWDT();diagnosticError("Idle audio shutdown failed");standbyActivity();return;}
+  idleStage=1;
+  minicamModemSetScreenOff(true);
+ }
  // Preserve TCP/TLS and registration at every idle duration.
  return;
 #else
