@@ -199,6 +199,9 @@ bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=fal
 uint32_t played=0,lastReport=0,pressAt=0;
 int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
+static int requestedChannel=-1;
+static bool channelProtocolReady=false;
+static uint32_t channelSwitchAt=0,channelReadyMs=0;
 
 struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
 struct TxPacket{WStype_t type;size_t len;uint8_t data[2048];};
@@ -239,6 +242,8 @@ static int cloudReleaseToAudioMs=-1,cloudRtpEmittedMs=-1,cloudRtpQueuedMs=-1;
 static void resetTurnTiming(){turnTiming={};bytesSentAtRelease=0;turnSubmittedAt=0;cloudReleaseToAudioMs=cloudRtpEmittedMs=cloudRtpQueuedMs=-1;}
 static void intervalJson(JsonObject o,const char* name,uint32_t from,uint32_t to){if(from&&to)o[name]=(uint32_t)(to-from);else o[name]=nullptr;}
 static void turnTimingJson(JsonDocument& out){
+  out["channelSwitchPending"]=channelSwitchAt!=0;
+  out["channelReadyMs"]=channelReadyMs;
   auto o=out["latency"].to<JsonObject>();
   o["recordedMs"]=radioDebugRead().micBytes/48;
   intervalJson(o,"cueAndGuardMs",turnTiming.confirmed,turnTiming.recording);
@@ -261,6 +266,12 @@ turnTimingJson(out);out["uploadRetries"]=uploadRecovery.attempts;out["uploadRetr
 static void networkFault(const char* reason){if(!queueFault){diagnosticError(reason);queueFault=true;}}
 static void socketWriteFault(bool binary,size_t bytes,uint32_t elapsed){if(!queueFault){retryableWriteFailure=true;ws.writeFailure(binary,bytes,elapsed);queueFault=true;}}
 static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
+static void requestCloudChannel(){
+  if(!gatewayLinked||!channelProtocolReady||requestedChannel>=0)return;
+  JsonDocument request;request["type"]="channel";request["channel"]=channel;
+  String text;serializeJson(request,text);
+  if(sendText(text))requestedChannel=channel;
+}
 static bool sendAudio(uint8_t* bytes,size_t n){TxPacket p{};p.type=WStype_BIN;p.len=n;if(n>sizeof(p.data))return false;memcpy(p.data,bytes,n);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(10))!=pdTRUE){networkFault("TX audio queue full");return false;}return true;}
 static bool flushMicBatch(){
   if(!micBatchUsed)return true;
@@ -388,7 +399,7 @@ static bool deferUploadRecovery(){
 }
 void fault(){if(retryableWriteFailure){retryableWriteFailure=false;if(deferUploadRecovery())return;}uploadRecovery.pending=false;replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED||t==WStype_CONNECTED){downlinkProbeReady=false;discardProbeAudio=false;}
+  if(t==WStype_DISCONNECTED||t==WStype_CONNECTED){requestedChannel=-1;channelProtocolReady=false;downlinkProbeReady=false;discardProbeAudio=false;}
 #ifdef VOXI_OPUS_UPLINK
   if(t==WStype_DISCONNECTED)uplinkOpusReady=false;
 #endif
@@ -425,6 +436,11 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="probe_rejected"&&downlinkProbeWaiting){downlinkProbeWaiting=false;replyPending=false;thinking=false;ready=gatewayLinked;diagnosticError(d["message"]|"Downlink probe rejected");radioDebug("READY","Network test rejected");return;}
   if(type=="timing"){cloudReleaseToAudioMs=d["releaseToAudioStartMs"]|-1;cloudRtpEmittedMs=d["rtpEmittedMs"]|-1;cloudRtpQueuedMs=d["rtpQueuedMs"]|-1;}
   if(type=="ready"){
+    int actual=d["channel"]|0;
+    channelProtocolReady=true;
+    if(requestedChannel>=0&&requestedChannel!=actual)return;
+    requestedChannel=-1;
+    if(actual!=channel){requestCloudChannel();return;}
     strlcpy(agentChannelMode,d["channelMode"]|"",sizeof(agentChannelMode));strlcpy(agentChannelName,d["name"]|"",sizeof(agentChannelName));
     strlcpy(agentTaskState,d["taskState"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
     downlinkProbeReady=d["downlinkProbe"]|false;
@@ -445,9 +461,9 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     playbackGate.resumeBytes=2*48000;playbackGate.recoveryStepBytes=48000;playbackGate.recoveryMaxBytes=4*48000;
 #endif
     if(uploading||replyPending)return;
-    int actual=d["channel"]|0;
-    if(actual!=channel){JsonDocument c;c["type"]="channel";c["channel"]=channel;String s;serializeJson(c,s);sendText(s);}
-    else{if(uploadRecovery.pending&&tx){ready=true;backendError=false;diagnosticError("");radioDebug("RECORDING","Link restored: keep recording");return;}radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);}
+    if(channelSwitchAt){channelReadyMs=millis()-channelSwitchAt;channelSwitchAt=0;}
+    if(uploadRecovery.pending&&tx){ready=true;backendError=false;diagnosticError("");radioDebug("RECORDING","Channel ready: keep recording");return;}
+    radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);
   }
   if(uploadRecovery.pending&&(type=="connecting"||type=="offline"||type=="error")){
     ready=false;if(type!="connecting"){diagnosticError(d["message"]|"Upload reconnect unavailable");resetLink=true;}return;
@@ -499,12 +515,14 @@ static void cachedUploadTick(){
     }
   }
 }
-bool radioCanStartRecording(){return ready&&!tx&&!uploading&&!thinking&&!playing&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
+static bool canRecordDuringSwitch(){return channelSwitchAt&&millis()-channelSwitchAt<=90000;}
+bool radioCanStartRecording(){return (ready||canRecordDuringSwitch())&&!tx&&!uploading&&!thinking&&!playing&&!replyPending&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
 #ifdef VOXI_BOARD_MINICAM
 const char* radioIdleDisplayPhase(){
   if(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||
      audioCacheBusy()||speakerTestPending()||probeActive||probeFinishing)return nullptr;
   if(!radioConfig.valid)return "SETUP NEEDED";
+  if(!ready&&canRecordDuringSwitch())return "PTT READY";
   if(!radioNetworkConnected())return radioUsesCellular()?"4G CONNECT":"WIFI CONNECT";
   if(radioConfig.tls&&time(nullptr)<=1700000000)return "SYNC TIME";
   if(ready)return "READY";
@@ -514,7 +532,7 @@ const char* radioIdleDisplayPhase(){
 #endif
 bool radioRecordingActive(){return tx;}
 bool requestDownlinkTest(uint32_t seconds){
- if(!downlinkProbeReady||!radioCanStartRecording()||seconds<1||seconds>180)return false;
+ if(!ready||!downlinkProbeReady||!radioCanStartRecording()||seconds<1||seconds>180)return false;
  JsonDocument d;d["type"]="downlink_probe";d["seconds"]=seconds;String text;serializeJson(d,text);
  if(!sendText(text))return false;
  flushAudio();resetTurnTiming();downlinkProbeAt=millis();downlinkProbeSeconds=seconds;
@@ -547,11 +565,12 @@ void button(){
     else if(!down&&!busy&&ptt.held)radioDebug(ready?"READY":(gatewayLinked?"WAIT AI":"OFFLINE"),"Short press: no recording");
   }
   if(candidate!=stable&&millis()-changedAt>=15)stable=candidate;
-  auto action=ptt.update(millis(),stable,(tx||(ready&&!audioCacheBusy()))&&!thinking&&!playing,boardPowerPressed());
+  auto action=ptt.update(millis(),stable,(tx||radioCanStartRecording())&&!thinking&&!playing,boardPowerPressed());
   if(action==PttHold::Start){
     if(!audioCacheStart()){radioDebug("CACHE ERROR","Cannot start local recording");diagnosticError("Audio cache start failed");return;}
     snprintf(captureRequestId,sizeof(captureRequestId),"%08lx-%08lx-%08lx",(unsigned long)esp_random(),(unsigned long)millis(),(unsigned long)esp_random());
     uploadRecovery.reset();captureSealed=false;submissionAttempted=retryableWriteFailure=false;resetTurnTiming();turnTiming.confirmed=millis();micBatchUsed=0;captureCrc=0;sentCrc=0;radioDebugReset();radioDebug("RECORDING","REC started: release to send");
+    if(!ready)uploadRecovery.waitForChannel(millis());
     flushAudio();
     // Never include audio from the initial 0.3s hold threshold.
     int16_t discard[240];for(int i=0;i<5;i++)audioRead(discard,240);
@@ -561,9 +580,9 @@ void button(){
   }else if(action==PttHold::Stop&&tx){
     micCueGuard=false;
     turnTiming.released=millis();bytesSentAtRelease=radioDebugRead().txBytes;tx=false;
-    if(!radioDebugRead().micBytes&&!uploading){audioCacheRemove();flushAudio();radioDebug("READY","Released during TX cue");return;}
+    if(!radioDebugRead().micBytes&&!uploading){uploadRecovery.reset();audioCacheRemove();flushAudio();radioDebug(ready?"READY":"WAIT AI","Released during TX cue");return;}
     if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
-    captureSealed=true;if(uploadRecovery.pending){radioDebug("RETRY LINK","Recording saved: reconnect");return;}
+    captureSealed=true;if(uploadRecovery.pending){if(uploadRecovery.initialChannelWait)radioDebug("WAIT CHANNEL","Recording saved: waiting for channel");else radioDebug("RETRY LINK","Recording saved: reconnect");return;}
     if(uploading){if(!audioCacheOpenUpload(liveQueuedBytes))fault();}else startCachedUpload(false);
   }
 }
@@ -576,22 +595,23 @@ void encoder(){
   if(now!=encPrev){encSteps+=table[(encPrev<<2)|now];encPrev=now;
     if(abs(encSteps)>=4){pendingChannel=(pendingChannel+(encSteps>0?1:3))%4;encSteps=0;encAt=millis();}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
-  if(!stable&&!uploading&&!uploadRecovery.pending&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>180){
+  constexpr uint32_t settleMs=BOARD_ENCODER_A>=0?180:0;
+  if(!stable&&!uploading&&!uploadRecovery.pending&&!replyPending&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>=settleMs){
     tx=false;ready=false;flushAudio();channel=pendingChannel;if(!setupScreenActive())displayChannel(channel,false);
-    JsonDocument d;d["type"]="channel";d["channel"]=channel;String s;serializeJson(d,s);sendText(s);
+    channelSwitchAt=millis();channelReadyMs=0;requestCloudChannel();
   }
 }
 void audioTick(){
   int16_t mic[240];size_t samples=audioRead(mic,240);
   radioCueTick();
   if(micCueGuard&&!cueActive&&(int32_t)(millis()-micResumeAt)>=0){
-    micCueGuard=false;ptt.started=millis();turnTiming.recording=millis();if(!uploading&&!startCachedUpload(false))return;radioDebug("RECORDING","REC started: release to send");
+    micCueGuard=false;ptt.started=millis();turnTiming.recording=millis();if(!uploading&&!uploadRecovery.pending&&!startCachedUpload(false))return;radioDebug("RECORDING","REC started: release to send");
   }
   if(tx&&!micCueGuard&&samples){samples=min(samples,(size_t)((RECORDING_MAX_BYTES-radioDebugRead().micBytes)/2));if(probeActive)for(size_t i=0;i<samples;i++){probeRandom=probeRandom*1664525u+1013904223u;mic[i]=(int16_t)((probeRandom>>20)&1023)-512;}unsigned peak=0;for(size_t i=0;i<samples;i++)peak=max(peak,(unsigned)abs((int)mic[i]));captureCrc=esp_rom_crc32_le(captureCrc,(const uint8_t*)mic,samples*2);radioDebugMic(samples*2,peak);batchAudio((uint8_t*)mic,samples*2);
     if(tx&&radioDebugRead().micBytes>=RECORDING_MAX_BYTES){
       turnTiming.released=millis();bytesSentAtRelease=radioDebugRead().txBytes;tx=false;if(!flushMicBatch()||!audioCacheFinish()){fault();return;}
       if(probeActive){probeActive=false;probeFinishing=true;probeState="uploading";}
-      captureSealed=true;if(uploadRecovery.pending){radioDebug("RETRY LINK","20s saved: reconnect");return;}
+      captureSealed=true;if(uploadRecovery.pending){radioDebug(uploadRecovery.initialChannelWait?"WAIT CHANNEL":"RETRY LINK","20s recording saved");return;}
       radioDebug("SENDING","20s limit: recording stopped");if(uploading){if(!audioCacheOpenUpload(liveQueuedBytes))fault();}else startCachedUpload(probeFinishing);
     }
   }

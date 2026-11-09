@@ -12,4 +12,10 @@ int main(){
  assert(!r.request(30,true,false,false)); // One recovery per physical hold.
  r.reset();assert(r.request(0xffffff00u,true,false,false));
  assert(!r.expired(44));assert(r.expired(100000));
+ r.reset();r.waitForChannel(100);
+ assert(r.pending&&r.initialChannelWait&&!r.expired(90100));
+ assert(r.request(150,false,false,false)&&r.started==100);
+ r.begin();assert(!r.pending&&!r.initialChannelWait&&r.attempts==0);
+ assert(r.request(200,true,false,false));
+ r.begin();assert(r.attempts==1);
 }

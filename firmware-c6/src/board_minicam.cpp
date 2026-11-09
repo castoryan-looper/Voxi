@@ -118,7 +118,7 @@ static void statusBadge(int x,int width,const char* text,int icon,bool connected
  if(!connected)canvas.drawLine(x+5,80,x+23,63,UI_MUTED);
 }
 static uint16_t phaseColor(const char* phase){
- if(!strcmp(phase,"READY"))return UI_GREEN;
+ if(!strcmp(phase,"READY")||!strcmp(phase,"PTT READY"))return UI_GREEN;
  if(!strcmp(phase,"RECORDING"))return UI_RED;
  if(!strcmp(phase,"PLAYING")||!strcmp(phase,"DRAINING"))return UI_BLUE;
  if(!strcmp(phase,"OFFLINE")||!strcmp(phase,"ERROR"))return UI_RED;
@@ -166,7 +166,7 @@ static void screenTask(void*){
    if(s.hotspot){centeredText(s.name,280,1,UI_WHITE);char hint[40];snprintf(hint,sizeof(hint),"KEY %s / 192.168.4.1",s.key);centeredText(hint,296,1,UI_MUTED);}
    else{centeredText("127.0.0.1:8788",283,1,UI_WHITE);centeredText(talkHint,301,1,UI_MUTED);}
   }else{
-   const char* hint=!strcmp(s.phase,"RECORDING")?"RELEASE TO SEND":!strcmp(s.phase,"READY")?(mainKeyPtt?"HOLD MAIN TO TALK":"HOLD + TO TALK"):!strcmp(s.phase,"PLAYING")?"LISTENING":!strcmp(s.phase,"BUFFERING")?"BUFFERING AUDIO":!strcmp(s.phase,"RETRY LINK")?"RESTORING LINK":s.cloud?"PLEASE WAIT":"CONNECTING";
+   const char* hint=!strcmp(s.phase,"RECORDING")?"RELEASE TO SEND":!strcmp(s.phase,"READY")||!strcmp(s.phase,"PTT READY")?(mainKeyPtt?"HOLD MAIN TO TALK":"HOLD + TO TALK"):!strcmp(s.phase,"PLAYING")?"LISTENING":!strcmp(s.phase,"BUFFERING")?"BUFFERING AUDIO":!strcmp(s.phase,"RETRY LINK")?"RESTORING LINK":!strcmp(s.phase,"WAIT CHANNEL")?"RECORDING SAVED":s.cloud?"PLEASE WAIT":"CONNECTING";
    centeredText(hint,270,2,phaseColor(s.phase));centeredText("Tap +/-: volume | Hold -: CH",301,1,UI_MUTED);
   }
   canvas.flush();displayedChannel=channelNumber;if(!idleDisplay)digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
