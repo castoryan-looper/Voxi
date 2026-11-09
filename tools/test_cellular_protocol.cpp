@@ -21,6 +21,10 @@ int main(){
   // even when a Pong is delayed behind TCP retransmissions for over 3 seconds.
   for(uint32_t now=0;now<=120000;now+=1000){if(now%9000==0)h.received(now);assert(h.tick(now)!=CellularHeartbeat::Dead);}
   h.reset(0);assert(h.tick(15000)==CellularHeartbeat::Ping);assert(h.tick(30000)==CellularHeartbeat::Ping);assert(h.tick(45000)==CellularHeartbeat::Dead);
+  h.configure(60000,45000,2,0,true);
+  for(uint32_t now=0;now<=120000;now+=1000){if(now%30000==0)h.received(now);assert(h.tick(now)==CellularHeartbeat::None);}
+  assert(h.tick(179999)==CellularHeartbeat::None);assert(h.tick(180000)==CellularHeartbeat::Ping);
+  assert(h.tick(225000)==CellularHeartbeat::None);assert(h.tick(240000)==CellularHeartbeat::Ping);assert(h.tick(285000)==CellularHeartbeat::Dead);
   h.configure(0,3000,2,0);assert(h.tick(100000)==CellularHeartbeat::None);
 }
 

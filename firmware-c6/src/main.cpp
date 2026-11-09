@@ -64,7 +64,12 @@ public:
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular()){cell.enableHeartbeat(i,t,n);return;}
 #endif
-    WebSocketsClient::disableHeartbeat();wifiHeartbeat.configure(i,t,n,millis());
+    WebSocketsClient::disableHeartbeat();
+#ifdef VOXI_BOARD_MINICAM
+    wifiHeartbeat.configure(i,t,n,millis(),true);
+#else
+    wifiHeartbeat.configure(i,t,n,millis());
+#endif
   }
   void disableHeartbeat(){
 #ifdef VOXI_BOARD_MINICAM

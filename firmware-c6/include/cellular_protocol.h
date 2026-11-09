@@ -49,13 +49,14 @@ inline int cellularFrameHeader(const uint8_t* p,size_t n,CellularFrame& f){
 
 struct CellularHeartbeat {
  enum Action{None,Ping,Dead};
- uint32_t interval=15000,timeout=15000,lastRx=0,lastPing=0;uint8_t missed=0,limit=2;bool waiting=false;
+ uint32_t interval=15000,timeout=15000,lastRx=0,lastPing=0;uint8_t missed=0,limit=2;bool waiting=false,trafficResetsPing=false;
  void reset(uint32_t now){lastRx=lastPing=now;waiting=false;missed=0;}
- void configure(uint32_t i,uint32_t t,uint8_t n,uint32_t now){interval=i;timeout=t<15000?15000:t;limit=n?n:1;reset(now);}
- void received(uint32_t now){lastRx=now;waiting=false;missed=0;}
+ void configure(uint32_t i,uint32_t t,uint8_t n,uint32_t now,bool traffic=false){trafficResetsPing=traffic;interval=i;timeout=t<15000?15000:t;limit=n?n:1;reset(now);}
+ void received(uint32_t now){lastRx=now;if(trafficResetsPing)lastPing=now;waiting=false;missed=0;}
  Action tick(uint32_t now){
   if(!interval)return None;
   if(waiting&&uint32_t(now-lastPing)>=timeout){if(++missed>=limit)return Dead;waiting=false;}
+  // Legacy clients keep periodic probes; connected standby uses incoming Ping/Pong/traffic.
   // Keep a bidirectional probe cadence during continuous downlink too. Only
   // probing on RX silence can leave the server without any timely peer traffic.
   if(!waiting&&uint32_t(now-lastPing)>=interval){waiting=true;lastPing=now;return Ping;}

@@ -29,7 +29,7 @@ public:
  void onEvent(WebSocketsClient::WebSocketClientEvent f){callback=f;}
  void setExtraHeaders(const char* h){headers=h;}
  void setReconnectInterval(uint32_t ms){retryMs=ms;}
- void enableHeartbeat(uint32_t interval,uint32_t timeout,uint8_t count){heartbeat.configure(interval,timeout,count,millis());}
+ void enableHeartbeat(uint32_t interval,uint32_t timeout,uint8_t count){heartbeat.configure(interval,timeout,count,millis(),true);}
  void disableHeartbeat(){heartbeat.configure(0,15000,2,millis());}
  void resumeHeartbeat(){enableHeartbeat(60000,45000,2);}
  bool isConnected()const{return connected&&minicamConnected();}
