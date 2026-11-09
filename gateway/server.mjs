@@ -24,20 +24,47 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   const webMemory=pocketMemory&&adminStateFile?createWebMemory(adminStateFile+'.web-memory.sqlite',
     userId=>pocketMemory({action:'user_detail',userId,section:'tasks'})):null;
   const pocketAgent=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined;
+  const pocketPortal=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined;
   const users=createUserAccounts({file:adminStateFile?adminStateFile+'.users':undefined,administrator:adminUsername,
     memory:pocketMemory,webMemory,
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     agent:pocketAgent,
-    portal:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined});
+    portal:pocketPortal});
+  let syncing=0;
+  async function contextSync(req,res){
+    const reply=(status,body)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(body));};
+    if(!pocketPortal)return reply(404,{error:'同步服务未启用'});
+    if(req.method!=='POST'||req.headers.origin||!/^Bearer [A-Za-z0-9_-]{43}$/.test(req.headers.authorization||''))
+      return reply(403,{error:'同步授权无效'});
+    if(req.headers['content-type']?.split(';')[0]!=='application/json')return reply(415,{error:'需要 JSON 请求'});
+    if(syncing>=8)return reply(429,{error:'同步服务繁忙'});
+    syncing++;
+    try{
+      const chunks=[];
+      let bytes=0;
+      req.setTimeout(10000,()=>req.destroy());
+      for await(const part of req){bytes+=part.length;if(bytes>115000)return reply(413,{error:'请求过大'});chunks.push(part);}
+      const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if(!data||Array.isArray(data)||typeof data!=='object'||Object.keys(data).some(key=>key!=='chat'))
+        return reply(400,{error:'同步数据格式无效'});
+      const result=await pocketPortal({action:'context_ingest',token:req.headers.authorization.slice(7),
+        enabledUsers:users.enabledProfiles(),chat:data.chat});
+      return reply(200,result);
+    }catch(error){if(!res.destroyed)return reply(400,{error:error.message});}
+    finally{syncing--;}
+  }
   const server=http.createServer((req,res)=>{
     if(req.url?.startsWith('/api/user/')){users.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
+    if(req.url==='/api/context-sync'){void contextSync(req,res);return;}
     if(req.url==='/api/openclaw/relay'){relay(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     const path=new URL(req.url,'http://gateway').pathname;
     const assets={'/shared/voice-preview.js':['voice-preview.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
     assets['/shared/web-memory.js']=['web-memory-ui.mjs','text/javascript; charset=utf-8'];
+    assets['/app/assets/context.js']=['user-context.mjs','text/javascript; charset=utf-8'];
+    assets['/downloads/voxi-context-sync.py']=['voxi-context-sync.py','text/x-python; charset=utf-8'];
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
-    if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/tasks','/app/account'].includes(path)){
+    if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/context','/app/tasks','/app/account'].includes(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
     }
     if(path==='/admin/ai/prompts'){

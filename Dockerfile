@@ -5,7 +5,7 @@ COPY gateway/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY gateway/*.mjs ./
 COPY gateway/*.html gateway/*.css ./
-COPY gateway/voxi-openclaw.py ./
+COPY gateway/voxi-openclaw.py gateway/voxi-context-sync.py ./
 RUN mkdir /state && chown node:node /state
 RUN node --test
 ARG REVISION=dev

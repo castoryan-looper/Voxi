@@ -196,7 +196,7 @@ function resetUserDetail(){
  userDetailData=null;userDetailRead++;agentTaskRead++;agentDetail=null;agentSubmitId=null;
  $('userProfilePanel').hidden=$('userDevicesPanel').hidden=$('memoryPanel').hidden=true;
  $('agentTaskDetail').hidden=$('agentSubmitForm').hidden=true;
- $('userDetailIdentity').hidden=true;
+ $('userDetailIdentity').hidden=true;$('userTokenUsage').hidden=true;
  for(const id of ['webTaskMemory','memoryFacts','memoryTurns','userDevices','agentTasks','agentTaskChannel','agentApproval','agentTaskActions','agentTaskEvents'])$(id).replaceChildren();
  for(const id of ['userDetailName','userDetailSummary','userDetailId','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
@@ -273,6 +273,10 @@ async function loadUserDetail(){
   $('userDetailName').textContent=profileDisplayName(data.profile,data.devices);
   $('userDetailId').textContent=data.profile.id;$('userDetailIdentity').hidden=false;
   $('userDetailSummary').textContent=(data.account?'登录名 '+data.account.username:'未开通网页登录')+' · '+data.devices.length+' 台绑定设备';
+  const usage=data.usage;
+  $('userTokenUsage').hidden=!usage;
+  if(usage)$('userTokenUsage').textContent=(usage.totalTokens===null?'暂无可计量 Token':usage.totalTokens.toLocaleString()+' Token')+
+   ' · 已计量 '+usage.measuredTasks+' / '+usage.tasks+' 个后台任务 · '+(usage.voice||[]).reduce((sum,row)=>sum+row.responses,0)+' 条已计量语音回复';
   if(page.userTab==='profile'){renderUserProfile(data);$('userProfilePanel').hidden=false;}
   if(page.userTab==='devices'){
    renderUserDevices();$('userDevicesPanel').hidden=false;fillRebindDevices([]);
@@ -415,6 +419,13 @@ function fillAgentChannels(channels){
   }
   if(![...mode.children].some(o=>o.value===target))mode.append(option(target,'连接已失效，请重新选择'));
   mode.value=target;box.append(title,nameLabel,name,modeLabel,mode);
+  if(agentData.channelVoices){
+   const voice=document.createElement('select'),label=document.createElement('label');
+   voice.id='agentChannelsVoice'+slot;label.htmlFor=voice.id;label.textContent='播报音色';label.className='field';
+   voice.append(option('','跟随个人／系统音色'));
+   for(const id of agentData.channelVoices)voice.append(option(id,id));
+   voice.value=channel.voice||'';box.append(label,voice);
+  }
   if(limit){
    const remove=document.createElement('button');
    remove.type='button';remove.className='danger';remove.textContent='移除 CH'+slot;
@@ -430,7 +441,8 @@ function readAgentChannels(){
  return [...$('agentChannels').children].map((card,index)=>{
   const slot=Number(card.dataset.slot??index);
   const [mode,connectionId]=$('agentChannelsMode'+slot).value.split(':');
-  return {...(agentData.channelLimit?{slot}:{}),name:$('agentChannelsName'+slot).value.trim(),mode,...(connectionId?{connectionId}:{})};
+  const voice=agentData.channelVoices&&$('agentChannelsVoice'+slot).value;
+  return {...(agentData.channelLimit?{slot}:{}),name:$('agentChannelsName'+slot).value.trim(),mode,...(connectionId?{connectionId}:{}),...(voice?{voice}:{})};
  });
 }
 $('addAgentChannel').onclick=()=>{

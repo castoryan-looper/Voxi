@@ -40,6 +40,12 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  for(const body of [{action:'snapshot',userId:B},{action:'snapshot',actorUserId:B},{action:'snapshot',role:'admin'}])assert.equal((await call('/api/user/action',body,alice)).status,403);
  const state=await(await call('/api/user/state',null,alice)).json();assert.equal(state.profile.id,A);
  const last=forwarded.at(-1);assert.equal(last.path,'/voxi/portal');assert.equal(last.body.actorUserId,A);assert.equal(last.auth,'Bearer private-internal');
+ const sync=(body,headers={})=>fetch(base+'/api/context-sync',{method:'POST',
+  headers:{'Content-Type':'application/json',Authorization:'Bearer '+'a'.repeat(43),...headers},body:JSON.stringify(body)});
+ assert.equal((await sync({}, {Origin:'https://example.test'})).status,403);
+ assert.equal((await sync({enabledUsers:[B]})).status,400);
+ assert.equal((await sync({chat:{id:'dev',title:'中文会话'}})).status,200);
+ assert.deepEqual(forwarded.at(-1).body,{action:'context_ingest',token:'a'.repeat(43),enabledUsers:[A,B],chat:{id:'dev',title:'中文会话'}});
  const note={action:'save',category:'project',title:'4G 排查',text:'临时 MTU 900 下仍有重传。',keywords:'MiniCam,4G,重传'};
  const memoryPath='/api/admin/users/'+A+'/web-memory';
  assert.equal((await call(memoryPath,note,{cookie:admin.cookie})).status,401);
@@ -73,6 +79,8 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  assert.equal((await call('/api/user/state',null,alice)).status,401);assert.equal((await call('/api/user/state',null,bob)).status,200);
  alice=await login('user','alice','alice-changed-456');const aid=list.accounts.find(a=>a.username==='alice').id;
  assert.equal((await call('/api/admin/users',{action:'enabled',accountId:aid,enabled:false},admin)).status,200);
+ assert.equal((await sync({})).status,200);
+ assert.deepEqual(forwarded.at(-1).body.enabledUsers,[B]);
  assert.equal((await call('/api/user/state',null,alice)).status,401);
  assert.equal((await call('/api/user/login',{username:'alice',password:'alice-changed-456'})).status,401);
  assert.equal((await call('/api/admin/users',{action:'enabled',accountId:aid,enabled:true},admin)).status,200);

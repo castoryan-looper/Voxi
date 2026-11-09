@@ -62,7 +62,7 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   let body;
   if(req.method==='POST'){
    if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
-   let raw='';try{for await(const part of req){raw+=part;if(Buffer.byteLength(raw)>131072)return json(413,{error:'请求过大'});}body=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{return json(400,{error:'JSON 无效'});}
+   const chunks=[];let bytes=0;try{for await(const part of req){bytes+=part.length;if(bytes>131072)return json(413,{error:'请求过大'});chunks.push(part);}body=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{return json(400,{error:'JSON 无效'});}
   }
   const path=req.url;
   if(path==='/api/user/login'&&req.method==='POST'){
@@ -108,5 +108,6 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   }
   return json(404,{error:'接口不存在'});
  }
- return {admin,detail,handle,accountCount:()=>accounts.length};
+ return {admin,detail,handle,accountCount:()=>accounts.length,
+  enabledProfiles:()=>accounts.filter(account=>account.enabled).map(account=>account.userId)};
 }
