@@ -55,6 +55,7 @@
 <a href="/admin/users" class="back-link">← 返回用户账户</a>
 <div class="row settings-heading"><h2 id="userDetailName">用户详情</h2><button type="button" id="reloadUserDetail" class="secondary">刷新</button></div>
 <p class="muted" id="userDetailSummary"></p>
+<p class="muted identity-line" id="userDetailIdentity" hidden>用户 ID <code id="userDetailId"></code></p>
 <div class="user-tabs" id="userDetailTabs" role="navigation" aria-label="用户详情导航">
 <a id="userTabProfile">资料与账户</a><a id="userTabDevices">绑定设备</a><a id="userTabMemory">长期记忆</a><a id="userTabTasks">后台任务</a>
 </div>
@@ -133,10 +134,10 @@ openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证
 </section>
 <section class="card" id="usersSection" hidden>
 <div class="row settings-heading"><h2>用户目录</h2><button type="button" class="secondary" id="reloadUserAccounts">刷新</button></div>
-<p class="muted">包含设备建立的用户档案和已开通网页登录的用户。打开用户可统一管理资料、账户、设备、记忆和任务。</p>
-<label class="field" for="userSearch">搜索用户</label><input id="userSearch" type="search" placeholder="输入用户称呼或登录名">
+<p class="muted">称呼可以相同。用唯一用户 ID 或绑定设备 ID 区分档案。打开用户可管理资料、账户、设备、记忆和任务。</p>
+<label class="field" for="userSearch">搜索用户</label><input id="userSearch" type="search" placeholder="称呼、登录名、用户或设备 ID、设备名">
 <p id="userAccountsMessage" role="status" aria-live="polite"></p>
-<div class="scroll"><table><thead><tr><th>用户称呼</th><th>登录名</th><th>绑定设备</th><th>账户状态</th><th>操作</th></tr></thead><tbody id="userAccounts"></tbody></table></div>
+<div class="scroll"><table class="user-directory"><thead><tr><th>用户称呼与 ID</th><th>登录名</th><th>绑定设备</th><th>账户状态</th><th>操作</th></tr></thead><tbody id="userAccounts"></tbody></table></div>
 <details class="settings-panel" id="newUserAccountPanel"><summary>创建普通账户</summary>
 <form id="createUserAccount"><div class="row"><label class="field">登录名<input id="newUserUsername" required minlength="3" maxlength="64" autocomplete="off" pattern="[A-Za-z0-9_.@-]+"></label><label class="field">初始密码<input id="newUserPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label></div><label class="field">绑定用户档案<select id="newUserProfile"></select></label><label class="field" id="newUserNameField" hidden>新档案称呼<input id="newUserName" maxlength="80"></label><p class="muted">可选已有档案或新建档案。设备归属可在用户详情内管理。</p><button id="saveUserAccount">创建普通账户</button></form>
 </details></section>

@@ -287,7 +287,10 @@ summary { cursor: pointer; }
   background: linear-gradient(100deg, #274760, #1c2c40);
   box-shadow: inset 0 -2px #86d5ff;
 }
-#userSearch { width: min(340px, 100%); }
+#userSearch { width: min(400px, 100%); }
+.identity-line code, .user-directory small code { font-family: var(--mono); overflow-wrap: anywhere; }
+.user-directory small { display: block; margin-top: 3px; }
+.user-directory td:first-child { white-space: normal; min-width: 195px; }
 #memoryDevice { width: min(400px, 100%); }
 #memoryFacts { margin-top: 16px; }
 #webTaskMemory .web-memory-item { border-top: 1px solid var(--line); padding: 13px 0; overflow-wrap: anywhere; }

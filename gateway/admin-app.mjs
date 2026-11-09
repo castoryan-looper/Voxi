@@ -141,6 +141,18 @@ const userPath=(id,tab='profile')=>'/admin/users/'+encodeURIComponent(id)+'/'+ta
 function userLink(id,text,tab='profile'){
  const link=document.createElement('a');link.href=userPath(id,tab);link.textContent=text;return link;
 }
+function devicesByOwner(devices=[]){
+ const grouped=new Map();
+ for(const device of devices){
+  if(!grouped.has(device.user_id))grouped.set(device.user_id,[]);
+  grouped.get(device.user_id).push(device);
+ }
+ return grouped;
+}
+function profileDisplayName(profile,devices=[]){
+ const matching=devices.filter(({id})=>/^esp32-[a-f0-9]{12}$/.test(id)&&profile.name==='用户 '+id.slice(-6));
+ return matching.length===1?'用户 · '+matching[0].id:profile.name;
+}
 function renderDevices(){
  $('devices').replaceChildren();
  const registered=new Map(deviceRegistryData.map(d=>[d.id,d]));
@@ -184,8 +196,9 @@ function resetUserDetail(){
  userDetailData=null;userDetailRead++;agentTaskRead++;agentDetail=null;agentSubmitId=null;
  $('userProfilePanel').hidden=$('userDevicesPanel').hidden=$('memoryPanel').hidden=true;
  $('agentTaskDetail').hidden=$('agentSubmitForm').hidden=true;
+ $('userDetailIdentity').hidden=true;
  for(const id of ['webTaskMemory','memoryFacts','memoryTurns','userDevices','agentTasks','agentTaskChannel','agentApproval','agentTaskActions','agentTaskEvents'])$(id).replaceChildren();
- for(const id of ['userDetailName','userDetailSummary','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
+ for(const id of ['userDetailName','userDetailSummary','userDetailId','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
  $('userResetPanel').open=false;
 }
@@ -205,7 +218,7 @@ function fillRebindDevices(devices){
  const select=$('memoryDevice'),previous=select.value,uid=userDetailData.profile.id;
  const choices=devices.filter(device=>device.user_id!==uid);
  select.replaceChildren(option('',choices.length?'请选择设备':'暂无其他用户的设备'));
- for(const d of choices)select.append(option(d.id,(d.name||d.id)+' · 当前用户 '+(d.user_name||'—')));
+ for(const d of choices)select.append(option(d.id,(d.name?d.name+' · ':'')+d.id+' · 当前用户 '+(d.user_name||'—')));
  if(choices.some(d=>d.id===previous))select.value=previous;
  select.disabled=!choices.length;$('rebindDevice').disabled=!select.value;
 }
@@ -257,7 +270,8 @@ async function loadUserDetail(){
   if(!current())return;
   if(data.profile?.id!==page.userId)throw Error('用户档案读取结果不匹配');
   userDetailData=data;
-  $('userDetailName').textContent=data.profile.name;
+  $('userDetailName').textContent=profileDisplayName(data.profile,data.devices);
+  $('userDetailId').textContent=data.profile.id;$('userDetailIdentity').hidden=false;
   $('userDetailSummary').textContent=(data.account?'登录名 '+data.account.username:'未开通网页登录')+' · '+data.devices.length+' 台绑定设备';
   if(page.userTab==='profile'){renderUserProfile(data);$('userProfilePanel').hidden=false;}
   if(page.userTab==='devices'){
@@ -401,10 +415,16 @@ function readAgentChannels(){
   return {name:$('agentChannelsName'+index).value.trim(),mode:openclaw?'openclaw':value,...(openclaw?{connectionId:value.slice(9)}:{})};
  });
 }
+function userChoiceLabels(profiles,devices){
+ const names=profiles.map(profile=>[profile.id,profileDisplayName(profile,devices.get(profile.id))]);
+ const counts=new Map();
+ for(const [,name] of names)counts.set(name,(counts.get(name)||0)+1);
+ return names.map(([id,name])=>[id,counts.get(name)>1?name+' · 用户 ID '+id:name]);
+}
 function fillAgentUsers(id){
  const select=$(id),selected=select.value;select.replaceChildren();
  if(id==='agentChannelUser')select.append(option('','默认频道（未自定义的用户）'));
- for(const user of agentData.users)select.append(option(user.id,user.name));
+ for(const [id,label] of userChoiceLabels(agentData.users,devicesByOwner(agentData.devices)))select.append(option(id,label));
  if(agentData.users.some(user=>user.id===selected)||id==='agentChannelUser')select.value=agentData.users.some(user=>user.id===selected)?selected:'';
 }
 let channelDirty=false,serviceDirty=false,behaviorDirty=false,connectionDirty=false,selectedChannelUser='',channelSaving=false;
@@ -619,10 +639,20 @@ function renderUserDirectory(){
  if(!userDirectory)return;
  const query=$('userSearch').value.trim().toLocaleLowerCase();
  const accounts=new Map(userDirectory.accounts.map(a=>[a.userId,a]));
- const profiles=userDirectory.profiles.filter(profile=>[profile.name,accounts.get(profile.id)?.username].some(value=>value?.toLocaleLowerCase().includes(query)));
+ const devicesByUser=devicesByOwner(userDirectory.devices);
+ const profiles=userDirectory.profiles.filter(profile=>[profile.name,profile.id,accounts.get(profile.id)?.username,
+  ...(devicesByUser.get(profile.id)||[]).flatMap(device=>[device.id,device.name])].some(value=>value?.toLocaleLowerCase().includes(query)));
  for(const profile of profiles){
   const account=accounts.get(profile.id),row=document.createElement('tr');
-  cell(row,profile.name);cell(row,account?.username||'—');cell(row,profile.deviceCount??'—');
+  const devices=devicesByUser.get(profile.id)||[];
+  const name=cell(row,profileDisplayName(profile,devices)),identity=document.createElement('small'),code=document.createElement('code');
+  code.textContent=profile.id;identity.append(code);name.append(identity);
+  cell(row,account?.username||'—');
+  const binding=cell(row,userDirectory.devices?devices.length:profile.deviceCount??'—');
+  for(const {id,name:deviceName} of devices){
+   const line=document.createElement('small'),device=document.createElement('code');
+   device.textContent=id;line.append(deviceName?deviceName+' · ':'',device);binding.append(line);
+  }
   cell(row,account?(account.enabled?'可登录':'已停用'):'未开通');
   const action=cell(row,'');action.append(userLink(profile.id,'管理用户'));
   table.append(row);
@@ -632,12 +662,14 @@ function renderUserDirectory(){
 async function loadUserAccounts(){
  const session=token,route=routeGeneration,current=()=>session===token&&route===routeGeneration;
  try{
-  const data=await api('users');if(!current())return false;
+  const [data,registry]=await Promise.all([api('users'),api('devices').catch(()=>null)]);
+  if(!current())return false;
   if(!data.directoryAvailable)throw Error('用户目录暂不可用，请检查 Pocket Cloud。');
-  userDirectory=data;
+  userDirectory={...data,devices:registry?.devices};
   const selected=$('newUserProfile').value;
   $('newUserProfile').replaceChildren(option('','新建用户档案'));
-  for(const u of data.profiles)if(!data.accounts.some(a=>a.userId===u.id))$('newUserProfile').append(option(u.id,u.name));
+  const bound=new Set(data.accounts.map(a=>a.userId));
+  for(const [id,label] of userChoiceLabels(data.profiles,devicesByOwner(userDirectory.devices)))if(!bound.has(id))$('newUserProfile').append(option(id,label));
   if([...$('newUserProfile').options].some(o=>o.value===selected))$('newUserProfile').value=selected;
   userProfileChoice();renderUserDirectory();$('userAccountsMessage').textContent='';
   return true;

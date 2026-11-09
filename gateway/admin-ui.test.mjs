@@ -128,3 +128,27 @@ test('the channel editor saves defaults and personal overrides to separate scope
  test('page navigation keeps voice separate from assistant settings and guards unsaved changes',async()=>{
  const {context,get}=page();context.fetch=async()=>({ok:false,status:502,json:async()=>({error:'fixture backend offline'})});vm.runInContext("token='session'",context);vm.runInContext("navigate('/admin/ai/voice')",context);assert.equal(context.location.pathname,'/admin/ai/voice');assert.equal(get('aiSection').hidden,false);assert.equal(get('agentSection').hidden,true);assert.equal(get('devicesSection').hidden,true);vm.runInContext('voiceDirty=true',context);context.confirm=()=>false;assert.equal(vm.runInContext("navigate('/admin/devices')",context),false);assert.equal(context.location.pathname,'/admin/ai/voice');context.confirm=()=>true;assert.equal(vm.runInContext("navigate('/admin/devices')",context),true);assert.equal(get('devicesSection').hidden,false);assert.equal(get('aiSection').hidden,true);
  });
+
+test('matching device suffixes stay distinguishable and searchable by the full IDs',async()=>{
+ const {context,get}=page(),first='a'.repeat(32),second='b'.repeat(32);
+ const deviceA='esp32-d453097e9ec4',deviceB='esp32-d459097e9ec4';
+ const profiles=[{id:first,name:'用户 7e9ec4',deviceCount:1},{id:second,name:'用户 7e9ec4',deviceCount:1}];
+ const devices=[{id:deviceA,user_id:first,name:'esp32-s3-4G-final'},{id:deviceB,user_id:second,name:''}];
+ context.fetch=async path=>({ok:true,json:async()=>path.endsWith('/devices')?{devices}:{profiles,accounts:[],directoryAvailable:true}});
+ context.location.pathname='/admin/users';
+ vm.runInContext("token='session'",context);
+ await get('reloadUserAccounts').onclick();
+ const rows=get('userAccounts').children;
+ assert.equal(rows.length,2);
+ for(const [index,id,device] of [[0,first,deviceA],[1,second,deviceB]]){
+  assert.equal(rows[index].children[0].textContent,'用户 · '+device);
+  assert.equal(rows[index].children[0].children[0].children[0].textContent,id);
+  assert.equal(rows[index].children[4].children[0].href,'/admin/users/'+id+'/profile');
+ }
+ assert.notEqual(get('newUserProfile').children[1].textContent,get('newUserProfile').children[2].textContent);
+ for(const [query,id] of [['esp32-s3-4G-final',first],[second,second],[deviceB,second]]){
+  get('userSearch').value=query;get('userSearch').oninput();
+  assert.equal(get('userAccounts').children.length,1);
+  assert.equal(get('userAccounts').children[0].children[4].children[0].href,'/admin/users/'+id+'/profile');
+ }
+});
