@@ -701,7 +701,11 @@ void loop(){
     const char* label=!wifi?(radioUsesCellular()?"4G CONNECT":"WIFI CONNECT"):radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":uploading?"SENDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
     if(tx)diagnosticStage("recording");else if(uploading)diagnosticStage("sending");else if(thinking)diagnosticStage("thinking");else if(playing)diagnosticStage("receiving");else if(ready)diagnosticStage("ready");
     else diagnosticStage(!wifi?(radioUsesCellular()?"cellular_connecting":"wifi_connecting"):radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
-    if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
+    // MiniCam keeps the live channel card visible above the setup footer.
+#ifndef VOXI_BOARD_MINICAM
+    if(!setupScreenActive())
+#endif
+      displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
   standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));
   delay(standbyScreenOff()?5:1);

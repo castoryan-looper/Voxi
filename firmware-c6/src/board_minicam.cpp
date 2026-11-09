@@ -44,6 +44,7 @@ static int mainRaw=1,volumeKeyMv=0;
 static uint32_t mainClicks=0;
 static volatile bool standbyRequested=false,standbyDisplayReady=false;
 static std::atomic<bool> idleDisplay{false};
+static std::atomic<int> displayedChannel{-1};
 static bool idleAudio=false;
 static volatile uint32_t displayFrames=0;
 int speakerVolume(){return volumePercent;}
@@ -153,7 +154,8 @@ static void screenTask(void*){
   canvas.fillRoundRect(12,105,216,113,12,UI_CARD);canvas.drawRoundRect(12,105,216,113,12,UI_EDGE);
   canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(25,116);canvas.print("CHANNEL");
   canvas.fillCircle(185,119,3,s.cloud?UI_GREEN:UI_DIM);canvas.setCursor(194,116);canvas.print(s.taskState[0]?(!strcmp(s.taskState,"completed")?"OK":!strcmp(s.taskState,"awaiting_approval")||!strcmp(s.taskState,"needs_input")?"?":"*"):"AI");
-  canvas.setTextSize(4);canvas.setTextColor(UI_WHITE);canvas.setCursor(25,135);canvas.printf("CH %02d",s.channel+(s.channelMode[0]?0:1));
+  const int channelNumber=s.channel+(s.channelMode[0]?0:1);
+  canvas.setTextSize(4);canvas.setTextColor(UI_WHITE);canvas.setCursor(25,135);canvas.printf("CH %02d",channelNumber);
   if(s.channelMode[0]){canvas.setTextSize(1);canvas.setTextColor(UI_MUTED);canvas.setCursor(151,158);canvas.print(!strcmp(s.channelMode,"agent")?"AGENT":!strcmp(s.channelMode,"fast")?"FAST":"OFF");}
   canvas.drawLine(25,174,215,174,UI_EDGE);centeredText(s.phase,188,2,phaseColor(s.phase));
   canvas.fillRect(16,236,5,8,UI_MUTED);canvas.fillTriangle(21,236,27,231,27,249,UI_MUTED);
@@ -167,7 +169,7 @@ static void screenTask(void*){
    const char* hint=!strcmp(s.phase,"RECORDING")?"RELEASE TO SEND":!strcmp(s.phase,"READY")?(mainKeyPtt?"HOLD MAIN TO TALK":"HOLD + TO TALK"):!strcmp(s.phase,"PLAYING")?"LISTENING":!strcmp(s.phase,"BUFFERING")?"BUFFERING AUDIO":!strcmp(s.phase,"RETRY LINK")?"RESTORING LINK":s.cloud?"PLEASE WAIT":"CONNECTING";
    centeredText(hint,270,2,phaseColor(s.phase));centeredText("Tap +/-: volume | Hold -: CH",301,1,UI_MUTED);
   }
-  canvas.flush();if(!idleDisplay)digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
+  canvas.flush();displayedChannel=channelNumber;if(!idleDisplay)digitalWrite(42,LOW);displayFrames++;vTaskDelay(pdMS_TO_TICKS(100));
  }
 }
 void displayChannel(int channel,bool online){baseView.channel=channel;baseView.cloud=online;postView();}
@@ -248,6 +250,7 @@ bool speakerTestPending(){return testPending;}
 void speakerDiagnostics(JsonDocument& out){
  auto debug=radioDebugRead();
  out["displayPhase"]=String(viewPhase(debug));
+ out["displayedChannel"]=displayedChannel.load();
  out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]=talkButtonName;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;
  bool wifi=WiFi.status()==WL_CONNECTED;
  if(wifi)out["wifiRssi"]=WiFi.RSSI();else out["wifiRssi"]=nullptr;
