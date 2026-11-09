@@ -12,6 +12,8 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  const dir=mkdtempSync(join(tmpdir(),'voxi-users-'));const forwarded=[];
  const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=raw?JSON.parse(raw):null;forwarded.push({path:req.url,auth:req.headers.authorization,body});res.setHeader('Content-Type','application/json');
   if(req.url==='/voxi/agent')res.end(JSON.stringify({users:[{id:A,name:'Alice profile'},{id:B,name:'Bob profile'}],runtime:{userPortalVersion:1}}));
+  else if(req.url==='/voxi/memory'&&body?.action==='directory')res.end(JSON.stringify({profiles:[{id:A,name:'Alice profile',deviceCount:1},{id:B,name:'Bob profile',deviceCount:0}]}));
+  else if(req.url==='/voxi/memory'&&body?.action==='user_detail')res.end(JSON.stringify({profile:{id:body.userId},devices:[],agent:{tasks:[]}}));
   else if(req.url==='/voxi/portal')res.end(JSON.stringify({role:'user',profile:{id:body.actorUserId},action:body.action}));
   else if(req.url==='/voxi/voice-preview')res.end(JSON.stringify({voice:body.voice,audioFormat:'wav',audioBase64:'fixture-audio'}));
   else{res.statusCode=404;res.end('{}');}
@@ -26,9 +28,14 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  assert.equal((await call('/api/admin/users',{action:'create',username:'alice',password:'alice-password-123',userId:A,role:'admin'},admin)).status,400);
  for(const [username,password,userId] of [['alice','alice-password-123',A],['bob','bob-password-123',B]])assert.equal((await call('/api/admin/users',{action:'create',username,password,userId,role:'user'},admin)).status,200);
  let list=await(await call('/api/admin/users',null,admin)).json();assert.equal(list.accounts.length,2);assert.ok(!JSON.stringify(list).includes('scrypt:'));
+ assert.equal(list.profiles[0].deviceCount,1);
+ const detailPath='/api/admin/users/'+A+'/tasks';
+ const detail=await(await call(detailPath,null,admin)).json();assert.equal(detail.account.username,'alice');assert.equal(detail.profile.id,A);
+ assert.equal('passwordHash' in detail.account,false);
+ assert.deepEqual(forwarded.at(-1).body,{action:'user_detail',userId:A,section:'tasks'});
  const saved=readFileSync(join(dir,'admin.json.users'),'utf8');assert.match(saved,/scrypt:/);assert.ok(!saved.includes('alice-password'));
  let alice=await login('user','alice','alice-password-123');const bob=await login('user','bob','bob-password-123');
- for(const path of ['/api/admin/users','/api/admin/agent','/api/admin/memory','/api/admin/status'])assert.equal((await call(path,null,alice)).status,401);
+ for(const path of ['/api/admin/users','/api/admin/agent','/api/admin/memory','/api/admin/status',detailPath])assert.equal((await call(path,null,alice)).status,401);
  assert.equal((await call('/api/user/state',null,admin)).status,401);
  for(const body of [{action:'snapshot',userId:B},{action:'snapshot',actorUserId:B},{action:'snapshot',role:'admin'}])assert.equal((await call('/api/user/action',body,alice)).status,403);
  const state=await(await call('/api/user/state',null,alice)).json();assert.equal(state.profile.id,A);

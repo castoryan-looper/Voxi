@@ -19,7 +19,9 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
   if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const relay=openClawRelay(mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined);
+  const pocketMemory=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined;
   const users=createUserAccounts({file:adminStateFile?adminStateFile+'.users':undefined,administrator:adminUsername,
+    memory:pocketMemory,
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     agent:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
     portal:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined});
@@ -36,7 +38,10 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(path==='/admin/ai/prompts'){
       res.writeHead(302,{'Location':'/admin/agent#assistant-behavior','Cache-Control':'no-store'});res.end();return;
     }
-    if(['/admin','/admin/','/admin/overview','/admin/devices','/admin/users','/admin/ai/voice','/admin/agent','/admin/agent/tasks','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)){
+    if(path==='/admin/agent/tasks'){
+      res.writeHead(302,{'Location':'/admin/users','Cache-Control':'no-store'});res.end();return;
+    }
+    if(['/admin','/admin/','/admin/overview','/admin/devices','/admin/users','/admin/ai/voice','/admin/agent','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)||/^\/admin\/users\/[a-f0-9]{32}(?:\/(?:profile|devices|memory|tasks))?\/?$/.test(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
       res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
     }
@@ -54,8 +59,9 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     userAccounts:users.admin,
+    userDetail:users.detail,
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
-    memoryConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined,
+    memoryConfiguration:pocketMemory,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     agentConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),

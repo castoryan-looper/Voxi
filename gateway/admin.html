@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Voxi · 运营总览</title>
+<meta name="theme-color" content="#0b1018">
 <link rel="stylesheet" href="/admin/assets/admin.css">
 <header><div><div class="tag">VOXI CLOUD</div><h1 id="pageTitle">运营总览</h1></div><button class="secondary" id="logout" hidden>退出管理</button></header>
-<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview">VOXI<span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与任务</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><a href="/admin/agent/tasks" data-nav="agentTasks">后台任务</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
+<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview">VOXI<span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与语音</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
 <div id="breadcrumb" class="breadcrumb" hidden></div><section class="card" id="login"><h2>管理员登录</h2><p class="muted">使用管理员用户名和密码登录网关。普通用户请使用 <a href="/app">我的 Voxi 用户入口</a>。</p><form id="loginForm" class="row"><input id="username" required autocomplete="username" placeholder="用户名" aria-label="用户名"><input id="secret" type="password" required autocomplete="current-password" placeholder="密码" aria-label="密码"><button id="loginButton">登录</button></form></section>
 <main id="dashboard" hidden>
 <section class="card" id="overviewSection" hidden>
@@ -35,7 +36,7 @@
 </div>
 <p class="muted">实时语音、未上报的任务和外部 OpenClaw 用量暂未计入。</p>
 </section>
-<section class="card" id="devicesSection"><div class="row"><h2>设备列表</h2><button class="secondary" id="refresh">刷新</button><small id="updated"></small></div><p class="muted">设备名称可自行修改，唯一 ID 固定不变；记忆通过 ID 对应的用户绑定。离线设备也可管理长期记忆。</p><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>绑定用户</th><th>频道</th><th>状态</th><th>操作</th></tr></thead><tbody id="devices"></tbody></table></div></section>
+<section class="card" id="devicesSection"><div class="row"><h2>设备列表</h2><button class="secondary" id="refresh">刷新</button><small id="updated"></small></div><p class="muted">查看在线状态、频道与连接。点击绑定用户可进入其账户、记忆与任务。</p><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>绑定用户</th><th>频道</th><th>状态</th><th>操作</th></tr></thead><tbody id="devices"></tbody></table></div></section>
 <section class="card" id="aiSection" hidden>
 <div class="row"><h2>默认音色</h2><button class="secondary" type="button" id="reloadAi">重新读取</button></div>
 <p class="muted">用于未设置个人音色的用户。设备重连或切换频道后使用新音色。</p>
@@ -49,12 +50,34 @@
 
 <button type="submit" id="saveVoiceRuntime">保存语音运行参数</button>
 </form></details></section>
-<section class="card" id="memorySection" hidden><a href="/admin/devices" class="back-link">← 返回设备列表</a><h2 id="memoryTitle">用户与长期记忆</h2><p id="memoryDeviceIdentity" class="muted"></p><p class="muted">一台设备绑定一个用户。新版固件首次连接后自动建立独立档案；旧设备无编号时不启用记忆。后台转写用户语音，不保存录音。</p><button type="button" class="secondary" id="loadMemory">读取用户记忆</button><p id="memoryMessage" role="status" aria-live="polite"></p><div id="memoryPanel" hidden>
-<label class="field">用户档案<select id="memoryUser"></select></label><form id="profileForm"><label class="field">称呼<input id="memoryName" required maxlength="80"></label><label class="field">个人背景与长期需求<textarea id="memoryProfile" maxlength="4000"></textarea></label><label><input id="memoryEnabled" type="checkbox"> 启用此用户的记忆记录和加载</label><p><button>保存用户档案</button></p></form>
-<p id="boundDevices" class="muted"></p><details><summary>变更设备绑定</summary><p class="muted">将设备绑定给上方选择的用户。旧用户记忆不会迁移。变更会断开该设备当前对话。</p><select id="memoryDevice"></select><button type="button" id="rebindDevice" class="secondary">绑定到当前用户</button></details>
-<h3>长期记忆</h3><p class="muted">自动记录来自明确表达的喜好，可能有转写错误，可随时纠正。修改或删除记忆会断开该用户连接以清除旧上下文。</p><form id="factForm"><textarea id="factText" maxlength="1000" required placeholder="添加一条希望助手长期记住的信息"></textarea><button>添加记忆</button></form><div id="memoryFacts"></div>
-<h3>最近说过的话</h3><p class="muted">这里只保存用户语音转写，尚不保存助手回复；转写在后台完成，可能稍后出现。</p><div id="memoryTurns" style="max-height:360px;overflow:auto"></div><button type="button" id="clearMemory" class="danger">清空此用户的背景、记忆与历史</button></div></section>
-<section class="card" id="accountSection" hidden><h2>管理员账户</h2><form id="passwordForm" class="row"><input type="password" id="currentPassword" required autocomplete="current-password" placeholder="当前密码"><input type="password" id="newPassword" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="新密码（至少8字符）"><button id="changePassword">修改密码</button></form><p class="muted">修改后所有管理会话退出，请使用新密码登录。</p></section><section class="card" id="eventsSection" hidden><h2>近期连接事件</h2><p class="muted">包括数量限制、鉴权失败和断线原因；网关重启后清空。</p><ol id="events"></ol></section>
+<section class="card" id="legacyUserLink" hidden><a href="/admin/users" class="back-link">← 返回用户账户</a><h2>定位设备所属用户</h2><p id="legacyUserMessage" role="status"></p></section>
+<section class="card" id="userDetailSection" hidden>
+<a href="/admin/users" class="back-link">← 返回用户账户</a>
+<div class="row settings-heading"><h2 id="userDetailName">用户详情</h2><button type="button" id="reloadUserDetail" class="secondary">刷新</button></div>
+<p class="muted" id="userDetailSummary"></p>
+<div class="user-tabs" id="userDetailTabs" role="navigation" aria-label="用户详情导航">
+<a id="userTabProfile">资料与账户</a><a id="userTabDevices">绑定设备</a><a id="userTabMemory">长期记忆</a><a id="userTabTasks">后台任务</a>
+</div>
+<p id="userDetailMessage" role="status" aria-live="polite"></p>
+<div id="userProfilePanel" hidden>
+<div class="assistant-grid"><div>
+<h3>用户资料</h3><form id="profileForm"><label class="field">用户称呼<input id="memoryName" required maxlength="80"></label>
+<label class="field">个人背景与长期需求<textarea id="memoryProfile" maxlength="4000"></textarea></label>
+<label><input id="memoryEnabled" type="checkbox"> 启用记忆记录和加载</label><p><button>保存用户资料</button></p></form>
+</div><div><h3>网页登录账户</h3><p id="userLoginStatus"></p>
+<div id="userAccountActions" hidden><button type="button" id="toggleUserLogin" class="secondary"></button>
+<details class="settings-panel" id="userResetPanel"><summary>重置密码</summary>
+<form id="resetUserPassword"><label class="field">新密码<input id="userResetPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button>保存新密码</button></form></details>
+<p class="muted">停用或重置密码会撤销此账户的网页登录会话。</p></div>
+<form id="bindUserAccount" hidden><label class="field">登录名<input id="bindUsername" required minlength="3" maxlength="64" pattern="[A-Za-z0-9_.@-]+" autocomplete="off"></label><label class="field">初始密码<input id="bindPassword" required type="password" minlength="8" maxlength="128" autocomplete="new-password"></label><button>创建登录账户</button></form>
+</div></div></div>
+<div id="userDevicesPanel" hidden><h3>绑定设备</h3><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>状态</th><th>操作</th></tr></thead><tbody id="userDevices"></tbody></table></div>
+<details class="settings-panel"><summary>将已有设备绑定到此用户</summary><p class="muted">变更会断开该设备的当前对话。原用户的记忆和任务仍归原用户。</p><div class="row"><select id="memoryDevice" aria-label="选择要绑定的设备"></select><button type="button" id="rebindDevice" class="secondary">确认绑定</button></div></details></div>
+<div id="memoryPanel" hidden><h3>长期记忆</h3><p class="muted">自动记录来自明确表达的喜好。可编辑或删除，变更后设备重新连接以加载更新。</p>
+<form id="factForm"><label class="field" for="factText">添加一条记忆</label><textarea id="factText" maxlength="1000" required placeholder="希望助手长期记住的信息"></textarea><button>添加记忆</button></form><div id="memoryFacts"></div>
+<h3>最近语音转写</h3><p class="muted">最多保留最近 200 条用户转写。转写在后台完成，不保存录音。</p><div id="memoryTurns"></div><button type="button" id="clearMemory" class="danger">清空此用户的背景、记忆与历史</button></div>
+</section>
+<section class="card" id="accountSection" hidden><h2>管理员账户</h2><form id="passwordForm" class="row"><input type="password" id="currentPassword" required autocomplete="current-password" placeholder="当前密码"><input type="password" id="newPassword" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="新密码（至少8字符）"><button id="changePassword">修改密码</button></form><p class="muted">修改后所有管理会话退出，请使用新密码登录。</p></section><section class="card" id="eventsSection" hidden><h2>近期连接事件</h2><p class="muted">包括鉴权失败和断线原因；网关重启后清空。</p><ol id="events"></ol></section>
 <section class="card" id="agentSection" hidden>
 <div class="row settings-heading"><h2>设备频道</h2><button type="button" class="secondary" id="reloadAgent">重新读取</button></div>
 <div class="row"><strong id="channelServiceStatus">正在读取频道服务…</strong><button type="button" class="secondary" id="toggleChannelService" hidden></button></div>
@@ -74,7 +97,7 @@
 <button id="createOpenclaw">创建连接</button></form><p id="openclawMessage" role="status" aria-live="polite"></p><div id="openclawPairing" hidden><h4>在 OpenClaw 所在电脑上连接</h4><p>1. <a href="/downloads/voxi-openclaw.py" download="voxi-openclaw.py">下载连接器</a>（Python 3.10+，无需安装额外依赖）。</p><p>2. 在下载目录运行以下命令，按提示输入连接密钥和本机 Gateway Token。</p><pre id="openclawCommand"></pre><label class="field">连接密钥 · 仅此次显示<input id="openclawPairToken" readonly type="password" autocomplete="off"></label><button type="button" class="secondary" id="copyOpenclawPair">复制连接密钥</button><p class="muted">关闭此页后无法读取连接密钥；丢失时删除未绑定的连接并重新创建。Voxi 使用自签证书时，启动命令另加 --ca 可信 CA 文件路径；请使用管理员已有的 CA，保持证书验证开启。</p></div>
 <div id="openclawConnections"></div>
 <details><summary>首次启用与常见问题</summary><p>在 OpenClaw 机器上启用 Responses HTTP 接口，再重启 Gateway：</p><pre>openclaw config set gateway.http.endpoints.responses.enabled true
-openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证和接口，不会启动模型任务。显示正常后，绑定频道，再到“后台任务”提交一个只读小任务验证完整流程。工具权限、批准请求请在 OpenClaw 自身界面处理。当前 HTTP 接入没有把 OpenClaw 的批准窗口同步到 Voxi；停止等待后仍需核对远端任务。</p><p><a href="https://docs.openclaw.ai/gateway/openresponses-http-api" target="_blank" rel="noopener noreferrer">OpenClaw 官方接口说明</a> · <a href="https://docs.openclaw.ai/gateway/remote" target="_blank" rel="noopener noreferrer">远程接入说明</a></p></details></details>
+openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证和接口，不会启动模型任务。显示正常后，绑定频道，再到该用户详情的“后台任务”提交一个只读小任务验证完整流程。工具权限、批准请求请在 OpenClaw 自身界面处理。当前 HTTP 接入没有把 OpenClaw 的批准窗口同步到 Voxi；停止等待后仍需核对远端任务。</p><p><a href="https://docs.openclaw.ai/gateway/openresponses-http-api" target="_blank" rel="noopener noreferrer">OpenClaw 官方接口说明</a> · <a href="https://docs.openclaw.ai/gateway/remote" target="_blank" rel="noopener noreferrer">远程接入说明</a></p></details></details>
 <section class="settings-panel" id="assistant-behavior">
 <h2>助手怎么工作</h2><p class="muted">这里设置全局默认行为。用户可自定义快问的回答偏好，OpenClaw 的角色和模型在自己的实例里管理。</p>
 <div class="assistant-grid">
@@ -96,10 +119,10 @@ openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证
 </details>
 </section>
 <section class="card" id="agentTasksSection" hidden>
-<div class="row"><h2>后台任务</h2><button type="button" class="secondary" id="refreshAgentTasks">刷新</button></div><p id="agentTaskMessage" role="status" aria-live="polite"></p>
-<form id="agentSubmitForm"><label class="field">用户<select id="agentTaskUser" required></select></label><label class="field">Agent 频道<select id="agentTaskChannel"></select></label><label class="field">任务<textarea id="agentTaskText" rows="3" maxlength="8000" required placeholder="例如：在云端工作区生成一份项目检查清单"></textarea></label><button id="submitAgentTask">提交任务</button></form>
-<p class="muted">语音可说“查看进度”“读结果”“取消任务”“继续任务，……”；批准操作请查看具体请求。重启后的未确认任务不会自动重放。</p>
-<div class="scroll"><table><thead><tr><th>任务</th><th>用户／频道</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="agentTasks"></tbody></table></div>
+<h2>后台任务</h2><p id="agentTaskAvailability" class="muted"></p><p id="agentTaskMessage" role="status" aria-live="polite"></p>
+<form id="agentSubmitForm" hidden><label class="field">Agent 频道<select id="agentTaskChannel"></select></label><label class="field">任务<textarea id="agentTaskText" rows="3" maxlength="8000" required placeholder="例如：在云端工作区生成一份项目检查清单"></textarea></label><button id="submitAgentTask">提交任务</button></form>
+<p class="muted">显示此用户最近 100 条任务。语音可说“查看进度”“读结果”“取消任务”“继续任务，……”；批准操作请查看具体请求。重启后的未确认任务不会自动重放。</p>
+<div class="scroll"><table><thead><tr><th>任务</th><th>频道</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="agentTasks"></tbody></table></div>
 <article id="agentTaskDetail" hidden><h3 id="agentDetailTitle"></h3><p id="agentDetailState"></p><h4>原始任务</h4><pre id="agentDetailPrompt"></pre><h4>结果</h4><pre id="agentDetailResult"></pre><p id="agentUsage"></p><div id="agentApproval"></div><div class="row" id="agentTaskActions"></div><details><summary>状态记录</summary><ol id="agentTaskEvents"></ol></details></article>
 </section>
 <section class="card" id="agentCredentialsSection" hidden>
@@ -107,8 +130,14 @@ openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证
 <p id="credentialMessage" role="status" aria-live="polite"></p>
 <form id="agentCredentialForm"><label class="field">供应商<select id="credentialProvider"><option value="openai">OpenAI API</option><option value="anthropic">Anthropic API</option></select></label><p id="credentialState"></p><label class="field">新密钥<input id="credentialKey" type="password" autocomplete="new-password" minlength="12" maxlength="512" placeholder="留空不修改；清除请使用下方按钮"></label><div class="row"><button id="saveCredential">加密保存</button><button type="button" class="danger" id="deleteCredential">清除已保存密钥</button></div></form>
 </section>
-<section class="card" id="usersSection" hidden><div class="row"><h2>用户账户</h2><button type="button" class="secondary" id="reloadUserAccounts">刷新</button><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></div><p class="muted">你当前是管理员，可以查看全部档案。普通账户只管理其绑定档案的资料、频道、OpenClaw、设备名称和任务。创建账户不会迁移已有设备与任务。</p><p id="userAccountsMessage" role="status" aria-live="polite"></p>
-<form id="createUserAccount"><h3>创建普通账户</h3><div class="row"><label class="field">登录名<input id="newUserUsername" required minlength="3" maxlength="64" autocomplete="off" pattern="[A-Za-z0-9_.@-]+"></label><label class="field">初始密码<input id="newUserPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label></div><label class="field">绑定用户档案<select id="newUserProfile"></select></label><label class="field" id="newUserNameField" hidden>新档案称呼<input id="newUserName" maxlength="80"></label><p class="muted">一个档案对应一个登录账户；用户不能自行认领或改绑设备。新档案的设备归属由管理员在“设备管理 → 长期记忆”中绑定。</p><button id="saveUserAccount">创建普通账户</button></form>
-<div class="scroll"><table><thead><tr><th>登录名／类型</th><th>用户档案</th><th>状态</th><th>操作</th></tr></thead><tbody id="userAccounts"></tbody></table></div><p class="muted">停用或重置密码会撤销网页会话；不会删除资料、设备或任务，也不会代替取消正在运行的任务。</p></section>
+<section class="card" id="usersSection" hidden>
+<div class="row settings-heading"><h2>用户目录</h2><button type="button" class="secondary" id="reloadUserAccounts">刷新</button></div>
+<p class="muted">包含设备建立的用户档案和已开通网页登录的用户。打开用户可统一管理资料、账户、设备、记忆和任务。</p>
+<label class="field" for="userSearch">搜索用户</label><input id="userSearch" type="search" placeholder="输入用户称呼或登录名">
+<p id="userAccountsMessage" role="status" aria-live="polite"></p>
+<div class="scroll"><table><thead><tr><th>用户称呼</th><th>登录名</th><th>绑定设备</th><th>账户状态</th><th>操作</th></tr></thead><tbody id="userAccounts"></tbody></table></div>
+<details class="settings-panel" id="newUserAccountPanel"><summary>创建普通账户</summary>
+<form id="createUserAccount"><div class="row"><label class="field">登录名<input id="newUserUsername" required minlength="3" maxlength="64" autocomplete="off" pattern="[A-Za-z0-9_.@-]+"></label><label class="field">初始密码<input id="newUserPassword" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label></div><label class="field">绑定用户档案<select id="newUserProfile"></select></label><label class="field" id="newUserNameField" hidden>新档案称呼<input id="newUserName" maxlength="80"></label><p class="muted">可选已有档案或新建档案。设备归属可在用户详情内管理。</p><button id="saveUserAccount">创建普通账户</button></form>
+</details></section>
 </main><div id="message" role="status"></div><footer>登录会话最长 8 小时，退出登录后立即失效。每 5 秒更新连接状态。</footer>
 <script src="/admin/assets/admin.js" defer></script></html>

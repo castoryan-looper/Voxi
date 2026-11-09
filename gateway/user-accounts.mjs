@@ -6,7 +6,7 @@ const usernameValid=value=>typeof value==='string'&&/^[A-Za-z0-9_.@-]{3,64}$/.te
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 const dummy='scrypt:'+'0'.repeat(32)+':'+'0'.repeat(128);
 
-export function createUserAccounts({file,administrator,agent,portal,voicePreview,secure=true}={}){
+export function createUserAccounts({file,administrator,agent,portal,memory,voicePreview,secure=true}={}){
  let accounts=[];const sessions=new Map();let editing=false,checking=false,failures=0,windowAt=0;
  if(file){try{const data=JSON.parse(readFileSync(file,'utf8'));if(data.version!==1||!Array.isArray(data.accounts))throw Error('Invalid user accounts file');accounts=data.accounts;}catch(e){if(e.code!=='ENOENT')throw e;}}
  const ids=new Set(),names=new Set(),owners=new Set();
@@ -42,8 +42,18 @@ export function createUserAccounts({file,administrator,agent,portal,voicePreview
     revoke(a.id);
    }
   }finally{editing=false;}}
-  let profiles=[],directoryAvailable=true;try{const state=await agent();profiles=state.users.map(u=>({id:u.id,name:u.name}));}catch{directoryAvailable=false;}
+  let profiles=[],directoryAvailable=true;
+  try{profiles=memory?(await memory({action:'directory'})).profiles:(await agent()).users.map(u=>({id:u.id,name:u.name}));}
+  catch{directoryAvailable=false;}
   return {accounts:accounts.map(publicAccount),profiles,directoryAvailable,persistent:Boolean(file)};
+ }
+
+ async function detail(userId,section){
+  if(!memory)throw Error('用户档案需要 Pocket Cloud 模式');
+  const profile=await memory({action:'user_detail',userId,section});
+  if(profile.profile?.id!==userId)throw Error('用户档案读取结果不匹配');
+  const account=accounts.find(a=>a.userId===userId);
+  return {...profile,account:account?publicAccount(account):null};
  }
 
  async function handle(req,res){
@@ -87,5 +97,5 @@ export function createUserAccounts({file,administrator,agent,portal,voicePreview
   }
   return json(404,{error:'接口不存在'});
  }
- return {admin,handle,accountCount:()=>accounts.length};
+ return {admin,detail,handle,accountCount:()=>accounts.length};
 }

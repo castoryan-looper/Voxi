@@ -5,8 +5,8 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('./admin-app.mjs',import.meta.url),'utf8').replace('restoreSession();','');
 function page(){
   const nodes=new Map();
-  const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;},get options(){return this.children;},reset(){}});return nodes.get(id);};
-  const location={pathname:'/admin/devices',hash:'',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;}};
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],setAttribute(){},removeAttribute(){},append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;},get options(){return this.children;},reset(){}});return nodes.get(id);};
+  const location={pathname:'/admin/devices',hash:'',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;},replaceState(_a,_b,path){location.pathname=path;}};
   const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},dataset:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
   vm.runInContext(source,context);return {context,get};
 }
@@ -92,14 +92,37 @@ test('the channel editor saves defaults and personal overrides to separate scope
  const {context,get}=page();get('aiForm').hidden=true;context.fetch=async()=>({ok:true,json:async()=>({settings:{}})});vm.runInContext("token='session'",context);await get('reloadAi').onclick();assert.match(get('aiMessage').textContent,/格式不兼容/);assert.equal(get('reloadAi').disabled,false);
  });
 
- test('memory manager reads user, edits profile and renders transcript without HTML injection',async()=>{
- const {context,get}=page();const uid='user-one';const data={users:[{id:uid,name:'Castor',profile:'喜欢科普',enabled:1}],devices:[{id:'esp32-111111111111',user_id:uid}],memories:[{id:'m1',user_id:uid,text:'我喜欢故事',source:'用户转写',created:1}],turns:[{id:'t1',user_id:uid,text:'<script>test</script>',created:1}]};let submitted;
- context.fetch=async(path,options)=>{if(options.body)submitted=JSON.parse(options.body);return {ok:true,json:async()=>data};};vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('memoryPanel').hidden,false);assert.equal(get('memoryName').value,'Castor');assert.match(get('memoryTurns').children[0].children[0].textContent,/<script>/);
- get('memoryName').value='Castor Yan';get('profileForm').onsubmit({preventDefault(){}});await new Promise(r=>setTimeout(r,5));assert.equal(submitted.userId,uid);assert.equal(submitted.name,'Castor Yan');
+ test('user detail saves the visible profile and renders scoped transcript as text',async()=>{
+ const {context,get}=page(),uid='a'.repeat(32);
+ const data={profile:{id:uid,name:'Castor',profile:'喜欢科普',enabled:1},devices:[],account:null,memories:[],turns:[{id:'t1',text:'<script>test</script>',created:1}]};
+ let submitted;
+ context.fetch=async(path,options)=>{
+  if(path.endsWith('/memory')&&options.body){submitted=JSON.parse(options.body);return {ok:true,json:async()=>({})};}
+  assert.match(path,new RegExp('/users/'+uid+'/'));
+  return {ok:true,json:async()=>data};
+ };
+ vm.runInContext("token='session'",context);
+ context.location.pathname='/admin/users/'+uid+'/profile';
+ await vm.runInContext('loadUserDetail()',context);
+ assert.equal(get('memoryName').value,'Castor');
+ get('memoryName').value='Castor Yan';await get('profileForm').onsubmit({preventDefault(){}});
+ assert.equal(submitted.userId,uid);assert.equal(submitted.name,'Castor Yan');
+ context.location.pathname='/admin/users/'+uid+'/memory';
+ await vm.runInContext('loadUserDetail()',context);
+ assert.match(get('memoryTurns').children[0].children[0].textContent,/<script>/);
  });
 
- test('device memory entry selects owner by immutable ID and keeps offline devices visible',async()=>{
- const {context,get}=page();const data={users:[{id:'one',name:'甲',profile:'',enabled:1},{id:'two',name:'乙',profile:'',enabled:1}],devices:[{id:'esp32-111111111111',user_id:'one',name:'桌面设备'},{id:'esp32-222222222222',user_id:'two',name:'床头设备'}],memories:[],turns:[]};context.fetch=async()=>({ok:true,json:async()=>data});vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('devices').children.length,2);assert.equal(get('devices').children[1].children[0].textContent,'床头设备');assert.equal(get('devices').children[1].children[4].textContent,'离线');context.location.pathname='/admin/devices/esp32-222222222222/memory';await vm.runInContext("openDeviceMemory('esp32-222222222222',true)",context);assert.equal(get('memoryUser').value,'two');assert.equal(get('memoryName').value,'乙');assert.match(get('memoryTitle').textContent,/床头设备/);
+ test('legacy device link resolves its owner and loads the unified memory tab',async()=>{
+ const {context,get}=page(),uid='b'.repeat(32),deviceId='esp32-222222222222';
+ const data={profile:{id:uid,name:'乙',profile:'',enabled:1},devices:[{id:deviceId}],memories:[],turns:[]};
+ context.fetch=async path=>({ok:true,json:async()=>path.endsWith('/devices')?{devices:[{id:deviceId,user_id:uid}]}:data});
+ vm.runInContext("token='session'",context);
+ context.location.pathname='/admin/devices/'+deviceId+'/memory';
+ await vm.runInContext("resolveLegacyUser('"+deviceId+"')",context);
+ assert.equal(context.location.pathname,'/admin/users/'+uid+'/memory');
+ await vm.runInContext('loadUserDetail()',context);
+ assert.equal(get('userDetailName').textContent,'乙');
+ assert.equal(get('memoryPanel').hidden,false);
  });
 
  test('page navigation keeps voice separate from assistant settings and guards unsaved changes',async()=>{
