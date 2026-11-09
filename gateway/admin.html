@@ -76,7 +76,7 @@
 <div id="memoryPanel" hidden><h3>网页任务记忆</h3><div id="webTaskMemory"></div>
 <h3>设备端长期记忆</h3><p class="muted">自动记录来自明确表达的喜好。可编辑或删除，变更后设备重新连接以加载更新。</p>
 <form id="factForm"><label class="field" for="factText">添加一条记忆</label><textarea id="factText" maxlength="1000" required placeholder="希望助手长期记住的信息"></textarea><button>添加记忆</button></form><div id="memoryFacts"></div>
-<h3>最近语音转写</h3><p class="muted">最多保留最近 200 条用户转写。转写在后台完成，不保存录音。</p><div id="memoryTurns"></div><button type="button" id="clearMemory" class="danger">清空此用户的背景、记忆与历史</button></div>
+<h3>最近语音转写</h3><p class="muted">最多保留最近 200 条用户转写。转写在后台完成，不保存录音。</p><div id="memoryTurns"></div><button type="button" id="clearMemory" class="danger">清空设备端背景、记忆与转写</button></div>
 </section>
 <section class="card" id="accountSection" hidden><h2>管理员账户</h2><form id="passwordForm" class="row"><input type="password" id="currentPassword" required autocomplete="current-password" placeholder="当前密码"><input type="password" id="newPassword" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="新密码（至少8字符）"><button id="changePassword">修改密码</button></form><p class="muted">修改后所有管理会话退出，请使用新密码登录。</p></section><section class="card" id="eventsSection" hidden><h2>近期连接事件</h2><p class="muted">包括鉴权失败和断线原因；网关重启后清空。</p><ol id="events"></ol></section>
 <section class="card" id="agentSection" hidden>

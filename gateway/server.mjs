@@ -71,7 +71,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       return webMemory.manage(userId,body);
     }:undefined,
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
-    memoryConfiguration:pocketMemory,
+    memoryConfiguration:webMemory?body=>webMemory.forward(pocketMemory,body,body?.userId):pocketMemory,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     agentConfiguration:webMemory?body=>webMemory.forward(pocketAgent,body,body?.userId):pocketAgent,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 
 const normal = text => text.normalize('NFKC').toLowerCase().trim();
 const maxPrompt = 8000;
-const routeChanges = new Set(['channels', 'reset_channels', 'settings', 'settings_patch']);
+const scopeChanges = new Set(['channels', 'reset_channels', 'settings', 'settings_patch', 'profile']);
 const uidPattern = /^[a-f0-9]{32}$/;
 
 function keywordsMatch(keyword, query, words) {
@@ -102,7 +102,7 @@ export function createWebMemory(file, readRoute) {
   };
 
   async function forward(send, body, userId) {
-    if (routeChanges.has(body?.action)) return serialize(() => send(body));
+    if (scopeChanges.has(body?.action)) return serialize(() => send(body));
     if (body?.action !== 'submit' || typeof userId !== 'string' || !uidPattern.test(userId) ||
         typeof body.text !== 'string' || !body.text.trim() || body.text.trim().length > maxPrompt ||
         !Number.isInteger(body.channel) || body.channel < 0 || body.channel > 3 ||

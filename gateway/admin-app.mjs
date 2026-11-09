@@ -301,7 +301,7 @@ $('profileForm').onsubmit=e=>{e.preventDefault();return memoryChange({action:'pr
 $('factForm').onsubmit=async e=>{e.preventDefault();if(await memoryChange({action:'memory',text:$('factText').value}))$('factText').value='';};
 $('memoryDevice').onchange=()=>{$('rebindDevice').disabled=!$('memoryDevice').value;};
 $('rebindDevice').onclick=()=>{const deviceId=$('memoryDevice').value;if(deviceId&&confirm('将这台设备绑定到当前用户并断开设备的当前对话？'))return memoryChange({action:'rebind',deviceId});};
-$('clearMemory').onclick=()=>{if(confirm('永久清空此用户的背景、记忆和历史，并断开当前对话？'))return memoryChange({action:'clear'});};
+$('clearMemory').onclick=()=>{if(confirm('永久清空此用户的设备端背景、记忆和语音转写，并断开当前对话？'))return memoryChange({action:'clear'});};
 $('toggleUserLogin').onclick=()=>{
  const account=userDetailData?.account;
  if(account&&(!account.enabled||confirm('停用此用户的网页登录并撤销已有会话？')))return saveUserDetail('users',{action:'enabled',accountId:account.id,enabled:!account.enabled},'账户状态已保存。');
