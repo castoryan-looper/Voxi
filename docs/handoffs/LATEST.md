@@ -17,3 +17,5 @@
 2026-11-09后续：v4真实Cove两段已走到verifying-audio，失败转为content-mismatch，说明录音和语言检测已恢复。用户明确允许大意一致。v5改为ASR语言检查＋真实Codex语义判断，接受自然寒暄改写；显示实际转写、保留候选供失败重试核对、绑定判断与音频，不要求逐字一致。真实Codex登录测试通过中英改写与跑题拒绝；待云端新两段探测，voicePreviewVersion=5。
 
 2026-11-09：增加 S3 云端 Wi-Fi OTA，独立 `_ota` 构建、双槽迁移、云端发布与启动健康回退。首次 USB 迁移及实机验收仍需执行；详见 [OTA](../OTA.md) 和 [验证记录](../OTA-VALIDATION.md)。
+
+2026-11-09 实机进展：MiniCam 正常按键版已完成首次 USB OTA 分区迁移与烧录，配置保留、4G READY 恢复；编解码及 10 秒下行通过，20 秒 PCM 压测一次补传后 CRC 一致。已保存 Wi-Fi 不在范围内，未完成真实在线 OTA/回退；[完整证据](../OTA-HARDWARE-2026-11-09.md)。测试后恢复 cellular 模式。

@@ -20,3 +20,7 @@
 ## 后续硬件连接尝试
 
 已通过 USB 状态确认设备为正常音量加键对讲的 MiniCam（非 GPIO11 改板），cellular 模式、云端 READY、电量 85%；esptool 确认 S3 rev0.2、16 MB Flash、8 MB PSRAM。高速备份的 stub 读取出现 Serial data stream stopped，ROM 读取可以推进但完整备份尚未成功；后续下载接口无响应。Windows 非管理员会话不能重置 PnP 接口，已请求物理重插。此轮未执行 erase-region 或 write-flash，现有 Flash 和配置未改动。迁移脚本新增 --rom-backup 与完整长度检查，新增顺序测试通过。烧录和 OTA 实机验收仍待完成。
+
+## 最新结果：USB 首次安装已完成
+
+用户重新插入后，采用 ROM 备份成功，已完成 MiniCam 正常按键版 OTA 固件安装并恢复 4G READY。此前未刷写的描述仅是历史阶段。完整烧录、压力测试失败与恢复成功、Wi-Fi 不可用及最终状态详见 [实机记录](OTA-HARDWARE-2026-11-09.md)。完整在线 OTA/回退仍未验收，保持草稿。
