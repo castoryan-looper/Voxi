@@ -71,3 +71,6 @@ jobs:
       - run: pio run --project-dir firmware-c6 -e waveshare_amoled18_v2
       - run: pio run --project-dir firmware-c6 -e zhengchen_minicam_20
       - run: pio run --project-dir firmware-c6 -e zhengchen_minicam_20_gpio11_ptt
+
+      - run: python tools/test_cloud_ota.py
+      - run: pio run --project-dir firmware-c6 -e waveshare_s3g_ota -e waveshare_amoled18_v2_ota -e zhengchen_minicam_20_ota -e zhengchen_minicam_20_gpio11_ptt_ota

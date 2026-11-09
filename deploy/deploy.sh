@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
-mkdir -p .deploy
+mkdir -p .deploy /etc/voxi/firmware
+chmod 755 /etc/voxi/firmware
 exec 9>.deploy/deploy.lock
 flock -w 300 9
 if [[ "${1:-}" != --no-pull ]]; then

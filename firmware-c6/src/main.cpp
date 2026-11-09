@@ -1,3 +1,4 @@
+#include "cloud_ota.h"
 #include "board_profile.h"
 #include "opus_uplink.h"
 #include "standby.h"
@@ -601,11 +602,13 @@ void audioTick(){
     // A synchronous TLS write must not block incoming speech just to report position.
     if(ready&&!tx&&!uploading&&!playing&&!cueActive&&played!=lastReported&&sendText(s))lastReported=played;}
 }
+static bool cacheHealthy=false;
 void setup(){
+  cloudOtaBegin();
   Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
   if(BOARD_POWER_KEY>=0)pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
   encPrev=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):0;
-  diagnosticsBegin();boardInit();audioCacheInit();setupBegin();standbyBegin();
+  diagnosticsBegin();boardInit();cacheHealthy=audioCacheInit();setupBegin();standbyBegin();
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
@@ -668,6 +671,9 @@ void loop(){
     else diagnosticStage(!wifi?(radioUsesCellular()?"cellular_connecting":"wifi_connecting"):radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
+#ifdef VOXI_OTA
+  cloudOtaTick(incoming&&outgoing&&uxQueueMessagesWaiting(incoming)==0&&uxQueueMessagesWaiting(outgoing)==0&&!tx&&!uploading&&!uploadRecovery.pending&&!playing&&!thinking&&!replyPending&&!cueActive&&!audioCacheBusy()&&!speakerTestPending()&&!setupScreenActive()&&used==0&&digitalRead(PIN_PTT)!=LOW, radioConfig.valid&&cacheHealthy&&playback&&ready);
+#endif
   standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));
   delay(1);
 }

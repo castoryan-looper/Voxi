@@ -15,3 +15,5 @@
 2026-11-09补充：v3生产50段均speech-failed，phase=ready，尚未到ASR阶段。v4恢复已实际可播的Codex RPC appendSpeech及原有数据通道配置；启动仅Cove两段验证，通过后才开放全库。新deploy/probe-voice.sh用于真实云端探测，公共协议／未知生成故障立即暂停，增加阶段与安全错误分类。相关本地测试不代替实际云端结果；部署检查voicePreviewVersion=4。
 
 2026-11-09后续：v4真实Cove两段已走到verifying-audio，失败转为content-mismatch，说明录音和语言检测已恢复。用户明确允许大意一致。v5改为ASR语言检查＋真实Codex语义判断，接受自然寒暄改写；显示实际转写、保留候选供失败重试核对、绑定判断与音频，不要求逐字一致。真实Codex登录测试通过中英改写与跑题拒绝；待云端新两段探测，voicePreviewVersion=5。
+
+2026-11-09：增加 S3 云端 Wi-Fi OTA，独立 `_ota` 构建、双槽迁移、云端发布与启动健康回退。首次 USB 迁移及实机验收仍需执行；详见 [OTA](../OTA.md) 和 [验证记录](../OTA-VALIDATION.md)。

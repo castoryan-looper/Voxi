@@ -5,8 +5,10 @@ services:
     env_file: /etc/voxi/gateway.env
     environment:
       ADMIN_STATE_FILE: /state/admin.json
+      FIRMWARE_DIRECTORY: /firmware
     volumes:
       - gateway_state:/state
+      - /etc/voxi/firmware:/firmware:ro
     restart: unless-stopped
     init: true
     read_only: true

@@ -1,0 +1,30 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createHash} from 'node:crypto';
+import {firmwareHandler} from './firmware.mjs';
+test('firmware authenticates requests and serves complete immutable releases only',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'voxi-ota-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ const handler=firmwareHandler({directory:dir,token:'device-secret'});const server=http.createServer(handler);
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+ const base=`http://127.0.0.1:${server.address().port}/api/firmware/`,target='waveshare_s3g_ota';
+ const headers={Authorization:'Bearer device-secret'};const path=base+target+'/manifest.json';
+ assert.equal((await fetch(path)).status,401);
+ assert.equal((await fetch(path,{headers:{Authorization:'Bearer wrong'}})).status,401);
+ assert.equal((await fetch(path,{headers})).status,404);
+ assert.equal((await fetch(path,{headers,method:'POST'})).status,405);
+ assert.equal((await fetch(base+'unknown/manifest.json',{headers})).status,404);
+ const folder=join(dir,target);await mkdir(folder);const image=Buffer.alloc(4096,0xe9),hash=createHash('sha256').update(image).digest('hex');
+ const manifest={schema:1,target,version:'test-1',size:image.length,sha256:hash};
+ await writeFile(join(folder,'manifest.json'),JSON.stringify(manifest));
+ assert.equal((await fetch(path,{headers})).status,404); // No image, no rollout.
+ await writeFile(join(folder,hash+'.bin'),image);
+ const res=await fetch(path,{headers});assert.equal(res.headers.get('cache-control'),'no-store');assert.deepEqual(await res.json(),manifest);
+ const download=await fetch(base+target+'/'+hash+'.bin',{headers});assert.equal(download.headers.get('content-length'),'4096');assert.deepEqual(Buffer.from(await download.arrayBuffer()),image);
+ await writeFile(join(folder,'manifest.json'),JSON.stringify({...manifest,target:'zhengchen_minicam_20_ota'}));assert.equal((await fetch(path,{headers})).status,503);
+ await writeFile(join(folder,'manifest.json'),JSON.stringify({...manifest,size:4194304}));assert.equal((await fetch(path,{headers})).status,503);
+ await writeFile(join(folder,'manifest.json'),'x'.repeat(3000));assert.equal((await fetch(path,{headers})).status,503);
+});

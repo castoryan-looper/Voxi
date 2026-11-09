@@ -1,3 +1,4 @@
+import {firmwareHandler} from './firmware.mjs';
 import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 import {OPUS_BATCH_FORMAT} from './opus-batch.mjs';
 import {UplinkDecoder,UPLINK_FORMAT} from './uplink.mjs';
@@ -12,7 +13,7 @@ import {pocketSettings} from './pocket-settings.mjs';
 import {openClawRelay} from './openclaw-relay.mjs';
 import {createUserAccounts} from './user-accounts.mjs';
 
-export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash}={}) {
+export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',maxConnections=2,revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash,firmwareDirectory=process.env.FIRMWARE_DIRECTORY}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
   if(!['mock','openai','pocket'].includes(mode)) throw Error('MODE must be mock, openai or pocket');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
@@ -22,7 +23,9 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     agent:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
     portal:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined});
+  const firmware=firmwareHandler({directory:firmwareDirectory,token});
   const server=http.createServer((req,res)=>{
+    if(req.url?.startsWith('/api/firmware/')){firmware(req,res).catch(()=>{if(!res.headersSent)res.writeHead(503);res.end();});return;}
     if(req.url?.startsWith('/api/user/')){users.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     if(req.url==='/api/openclaw/relay'){relay(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}

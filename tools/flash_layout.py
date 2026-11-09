@@ -1,12 +1,13 @@
-"""Factory-only firmware: do not flash Arduino's unused OTA-data initializer.
+"""Factory and dual-slot OTA firmware: do not flash Arduino's unused OTA-data initializer.
 Its default 0xe000 address overlaps this board's existing NVS partition.
 Keep the NVS layout unchanged to preserve Pocket/Voxi settings.
 """
 from pathlib import Path
 Import('env')
 rows=(Path(env['PROJECT_DIR'])/env.BoardConfig().get('build.partitions','partitions.csv')).read_text().splitlines()
-assert any(row.startswith('factory,app,factory,') for row in rows)
-assert not any(',ota,' in row or ',ota_0,' in row for row in rows if not row.startswith('#'))
+assert any(row.startswith('factory,app,factory,') or ',app,ota_0,' in row for row in rows)
+# Never write the Arduino initializer at 0xe000: our otadata lives at flash end.
+# On initial USB migration erase ONLY the new storage and otadata ranges.
 images=[(offset,path) for offset,path in env.get('FLASH_EXTRA_IMAGES',[]) if Path(path).name!='boot_app0.bin']
 env.Replace(FLASH_EXTRA_IMAGES=images)
 for offset,path in images:
