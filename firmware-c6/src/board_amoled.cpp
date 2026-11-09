@@ -50,7 +50,7 @@ bool boardTouchActive(){return touchActive;}
 int boardTouchWakePin(){return touchReady?21:-1;}
 
 
-struct View{int channel=0,battery=-1,rssi=0;bool setup=false,hotspot=false,wifi=false,usb=false,pressed=false;char name[24]={},key[16]={};RadioDebugSnapshot debug;};
+struct View{int channel=0,battery=-1,rssi=0;bool setup=false,hotspot=false,wifi=false,usb=false,pressed=false;char name[24]={},key[16]={};RadioDebugSnapshot debug;ChannelLabel channelLabel;};
 static View baseView;static QueueHandle_t views;
 static Arduino_ESP32QSPI displayBus(12,11,4,5,6,7);
 static Arduino_CO5300 panelV2(&displayBus,GFX_NOT_DEFINED,0,368,448,16,0,0,0);
@@ -65,7 +65,7 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(){if(!views)return;View s=baseView;s.debug=radioDebugRead();s.wifi=WiFi.status()==WL_CONNECTED;s.rssi=s.wifi?WiFi.RSSI():0;s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.pressed=touchPtt;xQueueOverwrite(views,&s);}
+static void postView(){if(!views)return;View s=baseView;s.channelLabel=radioChannelLabel(s.channel);s.debug=radioDebugRead();s.wifi=WiFi.status()==WL_CONNECTED;s.rssi=s.wifi?WiFi.RSSI():0;s.battery=batteryLevel;s.usb=HWCDC::isPlugged();s.pressed=touchPtt;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  static uint32_t touchAt=0,batteryAt=0,touchProbeAt=0;uint32_t now=millis();
  if(!touchReady&&now-touchProbeAt>=1000){touchProbeAt=now;if(i2c_master_probe(bus,0x15,5)==ESP_OK){writeReg(0x15,0xfa,0x40);touchReady=true;}}
@@ -102,7 +102,11 @@ static void screenTask(void*){
   if(!s.wifi)canvas.drawLine(16,57,42,76,orange);
   canvas.drawRoundRect(321,58,27,14,3,muted);canvas.fillRect(348,62,3,6,muted);if(s.battery>0)canvas.fillRect(324,61,21*s.battery/100,8,accent);
   canvas.setTextColor(muted);canvas.setCursor(270,58);if(s.battery>=0)canvas.printf("%d%%",s.battery);else canvas.print("USB");
-  canvas.fillRoundRect(16,88,336,104,14,card);canvas.setTextColor(white);canvas.setTextSize(4);canvas.setCursor(30,100);canvas.printf("CH %02d",s.channel+1);
+  canvas.fillRoundRect(16,88,336,104,14,card);canvas.setTextColor(white);canvas.setTextSize(4);canvas.setCursor(30,100);
+  const auto& label=s.channelLabel;
+  if(label.disabled())canvas.print("CH --");else canvas.printf("CH %02d",label.number(s.channel));
+  if(label.hasBitmap)canvas.drawBitmap(30,134,label.bitmap,ChannelLabel::width,ChannelLabel::height,white);
+  else if(!label.disabled()&&label.asciiName()){canvas.setTextSize(1);canvas.setCursor(30,137);canvas.printf("%.20s",label.name);}
   canvas.setTextSize(2);canvas.setTextColor(!strcmp(s.debug.phase,"READY")?accent:orange);canvas.setCursor(30,154);canvas.print(s.debug.phase);
   canvas.setTextSize(1);canvas.setTextColor(muted);canvas.setCursor(18,206);canvas.printf("MIC %luK   TX %luK   RX %luK",(unsigned long)(s.debug.micBytes/1024),(unsigned long)(s.debug.txBytes/1024),(unsigned long)(s.debug.rxBytes/1024));
   canvas.setCursor(18,223);canvas.printf("MIC PEAK %u  /  VOL %d%%",s.debug.peak,volumePercent);

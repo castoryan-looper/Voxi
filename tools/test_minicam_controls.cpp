@@ -1,7 +1,15 @@
 #include "../firmware-c6/include/minicam_controls.h"
+#include "../firmware-c6/include/channel_catalog.h"
 #include "../firmware-c6/include/ptt_hold.h"
 #include <cassert>
 int main(){
+ assert(nextEnabledChannel(0,-1,0b0011)==1);
+ assert(nextEnabledChannel(1,1,0b0011)==0);
+ assert(nextEnabledChannel(0,1,0b1001)==3);
+ assert(nextEnabledChannel(3,-1,0b1001)==0);
+ assert(nextEnabledChannel(0,1,0b0100)==2); // selected route disabled
+ assert(nextEnabledChannel(2,1,0b0100)==2);
+ assert(nextEnabledChannel(2,-1,0)==2);
  assert(MiniCamControls::volumeKey(0)==-1);assert(MiniCamControls::volumeKey(700)==-1);assert(MiniCamControls::volumeKey(701)==0);assert(MiniCamControls::volumeKey(899)==0);assert(MiniCamControls::volumeKey(900)==1);assert(MiniCamControls::volumeKey(3000)==1);assert(MiniCamControls::volumeKey(3001)==0);
  MiniCamControls c;
  c.sample(0,100,false);c.sample(20,100,false);assert(!c.sample(40,100,false).volumeDelta);

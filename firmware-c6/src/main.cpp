@@ -38,6 +38,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include <esp_rom_crc.h>
 #include <esp_heap_caps.h>
 #include <esp_mac.h>
+#include <mbedtls/base64.h>
 #include "device_identity.h"
 
 // Waveshare C6: onboard ES8311, one full-duplex I2S port, Arduino 3.x.
@@ -172,13 +173,18 @@ static uint32_t playbackCreditAt=0;
 #endif
 static size_t fadeRemaining=playbackFadeSamples;
 static uint32_t lastPlaybackWriteAt=0;
-static char agentChannelMode[12]={},agentChannelName[100]={},agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
-const char* radioChannelMode(){return agentChannelMode;}
-const char* radioChannelName(){return agentChannelName;}
+int channel=0;
+static ChannelLabel channelLabels[4];
+static bool channelCatalogKnown=false;
+static uint8_t enabledChannels=0x0f;
+static char agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
+const ChannelLabel& radioChannelLabel(int index){return channelLabels[index];}
 const char* radioTaskState(){return agentTaskState;}
 void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 void opusDiagnostics(JsonDocument& out){
- out["channelMode"]=agentChannelMode;out["channelName"]=agentChannelName;out["agentTaskState"]=agentTaskState;out["agentTaskId"]=agentTaskId;
+ const auto& label=radioChannelLabel(channel);
+ out["channelMode"]=label.mode;out["channelName"]=label.name;out["agentTaskState"]=agentTaskState;out["agentTaskId"]=agentTaskId;
+ out["channelCatalogKnown"]=channelCatalogKnown;out["enabledChannelMask"]=enabledChannels;out["channelNameBitmap"]=label.hasBitmap;
 #ifdef VOXI_BOARD_MINICAM
  out["playbackCreditActive"]=playbackFlowId.length()>0;out["playbackResumeMs"]=playbackGate.threshold()/48;
 #endif
@@ -198,11 +204,47 @@ void opusDiagnostics(JsonDocument& out){
 volatile bool tx=false,uploading=false;
 bool ready=false,ending=false,playing=false,gatewayLinked=false,backendError=false,thinking=false,replyPending=false;
 uint32_t played=0,lastReport=0,pressAt=0;
-int channel=0; bool stable=false,candidate=false;uint32_t changedAt=0;
+bool stable=false,candidate=false;uint32_t changedAt=0;
 int encPrev=0,encSteps=0,pendingChannel=0;uint32_t encAt=0;
 static int requestedChannel=-1;
 static bool channelProtocolReady=false;
 static uint32_t channelSwitchAt=0,channelReadyMs=0;
+
+static bool channelEnabled(int index){return enabledChannels&(1u<<index);}
+static void requestCloudChannel();
+static void receiveChannelCatalog(JsonArrayConst rows){
+  if(rows.size()!=4)return;
+  ChannelLabel next[4];
+  uint8_t mask=0;
+  for(int i=0;i<4;i++){
+    JsonArrayConst row=rows[i].as<JsonArrayConst>();
+    if(row.size()!=3||!row[0].is<const char*>()||!row[1].is<const char*>()||!row[2].is<const char*>())return;
+    const char* name=row[0].as<const char*>();
+    const char* mode=row[1].as<const char*>();
+    const char* bitmap=row[2].as<const char*>();
+    if(strlen(name)>=sizeof(next[i].name))return;
+    const bool legacy=!strcmp(mode,"legacy"),disabled=!strcmp(mode,"disabled");
+    if(!legacy&&!disabled&&strcmp(mode,"fast")&&strcmp(mode,"agent"))return;
+    strlcpy(next[i].name,name,sizeof(next[i].name));
+    if(!legacy)strlcpy(next[i].mode,mode,sizeof(next[i].mode));
+    if(!disabled)mask|=1u<<i;
+    size_t length=0;
+    next[i].hasBitmap=*bitmap&&mbedtls_base64_decode(next[i].bitmap,sizeof(next[i].bitmap),&length,
+        reinterpret_cast<const unsigned char*>(bitmap),strlen(bitmap))==0&&length==sizeof(next[i].bitmap);
+  }
+  for(int i=0;i<4;i++)channelLabels[i]=next[i];
+  const bool wasEmpty=!enabledChannels;
+  enabledChannels=mask;
+  channelCatalogKnown=true;
+  if(!channelEnabled(pendingChannel)){
+    pendingChannel=channelEnabled(channel)?channel:nextEnabledChannel(channel,1,mask);
+    encAt=millis();
+  }
+  if(!mask&&!tx&&!uploading&&!playing&&!thinking)radioDebug("NO CHANNEL","All channels disabled");
+  if(wasEmpty&&channelEnabled(channel)&&pendingChannel==channel&&!tx&&!uploading&&!playing&&!thinking&&!replyPending){
+    ready=false;channelSwitchAt=millis();channelReadyMs=0;requestCloudChannel();
+  }
+}
 
 struct Packet{WStype_t type;size_t len;uint8_t data[2048];};
 struct TxPacket{WStype_t type;size_t len;uint8_t data[2048];};
@@ -268,7 +310,7 @@ static void networkFault(const char* reason){if(!queueFault){diagnosticError(rea
 static void socketWriteFault(bool binary,size_t bytes,uint32_t elapsed){if(!queueFault){retryableWriteFailure=true;ws.writeFailure(binary,bytes,elapsed);queueFault=true;}}
 static bool sendText(String text){TxPacket p{};p.type=WStype_TEXT;p.len=text.length();if(p.len>sizeof(p.data))return false;memcpy(p.data,text.c_str(),p.len);if(xQueueSend(outgoing,&p,pdMS_TO_TICKS(150))!=pdTRUE){networkFault("TX control queue full");return false;}return true;}
 static void requestCloudChannel(){
-  if(!gatewayLinked||!channelProtocolReady||requestedChannel>=0)return;
+  if(!gatewayLinked||!channelProtocolReady||requestedChannel>=0||!channelEnabled(channel))return;
   JsonDocument request;request["type"]="channel";request["channel"]=channel;
   String text;serializeJson(request,text);
   if(sendText(text))requestedChannel=channel;
@@ -430,6 +472,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t!=WStype_TEXT)return;
   JsonDocument d;if(deserializeJson(d,data,len))return;
   String type=d["type"]|"";
+  if(type=="channel_catalog"){receiveChannelCatalog(d["channels"].as<JsonArrayConst>());return;}
   if(type=="task_state"){
     strlcpy(agentTaskState,d["state"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
     return; // A background task must not replace recording/playback availability.
@@ -442,7 +485,11 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(requestedChannel>=0&&requestedChannel!=actual)return;
     requestedChannel=-1;
     if(actual!=channel){requestCloudChannel();return;}
-    strlcpy(agentChannelMode,d["channelMode"]|"",sizeof(agentChannelMode));strlcpy(agentChannelName,d["name"]|"",sizeof(agentChannelName));
+    if(!channelCatalogKnown){
+      auto& label=channelLabels[channel];
+      strlcpy(label.mode,d["channelMode"]|"",sizeof(label.mode));
+      strlcpy(label.name,d["name"]|"",sizeof(label.name));
+    }
     strlcpy(agentTaskState,d["taskState"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
     downlinkProbeReady=d["downlinkProbe"]|false;
 #ifdef VOXI_OPUS_UPLINK
@@ -464,7 +511,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(uploading||replyPending)return;
     if(channelSwitchAt){channelReadyMs=millis()-channelSwitchAt;channelSwitchAt=0;}
     if(uploadRecovery.pending&&tx){ready=true;backendError=false;diagnosticError("");radioDebug("RECORDING","Channel ready: keep recording");return;}
-    radioDebug("READY","Cloud READY confirmed");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);
+    radioDebug(enabledChannels?"READY":"NO CHANNEL",enabledChannels?"Cloud READY confirmed":"All channels disabled");backendError=false;diagnosticError("");diagnosticStage("ready");thinking=false;ready=true;if(!setupScreenActive())displayChannel(channel,true);Serial.printf("Channel %d ready\n",channel+1);
   }
   if(uploadRecovery.pending&&(type=="connecting"||type=="offline"||type=="error")){
     ready=false;if(type!="connecting"){diagnosticError(d["message"]|"Upload reconnect unavailable");resetLink=true;}return;
@@ -517,12 +564,13 @@ static void cachedUploadTick(){
   }
 }
 static bool canRecordDuringSwitch(){return channelSwitchAt&&millis()-channelSwitchAt<=90000;}
-bool radioCanStartRecording(){return (ready||canRecordDuringSwitch())&&!tx&&!uploading&&!thinking&&!playing&&!replyPending&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
+bool radioCanStartRecording(){return channelEnabled(channel)&&(ready||canRecordDuringSwitch())&&!tx&&!uploading&&!thinking&&!playing&&!replyPending&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
 #ifdef VOXI_BOARD_MINICAM
 const char* radioIdleDisplayPhase(){
   if(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||
      audioCacheBusy()||speakerTestPending()||probeActive||probeFinishing)return nullptr;
   if(!radioConfig.valid)return "SETUP NEEDED";
+  if(!enabledChannels)return "NO CHANNEL";
   if(!ready&&canRecordDuringSwitch())return "PTT READY";
   if(!radioNetworkConnected())return radioUsesCellular()?"4G CONNECT":"WIFI CONNECT";
   if(radioConfig.tls&&time(nullptr)<=1700000000)return "SYNC TIME";
@@ -588,13 +636,13 @@ void button(){
   }
 }
 
-void requestChannelDelta(int delta){standbyActivity();pendingChannel=(pendingChannel+delta+4)%4;encAt=millis();}
+void requestChannelDelta(int delta){standbyActivity();pendingChannel=nextEnabledChannel(pendingChannel,delta,enabledChannels);encAt=millis();}
 void encoder(){
-  int action=bleAction();if(action&1){pendingChannel=(pendingChannel+1)%4;encAt=millis();}if(action&2){pendingChannel=(pendingChannel+3)%4;encAt=millis();}
+  int action=bleAction();if(action&1)requestChannelDelta(1);if(action&2)requestChannelDelta(-1);
   static const int8_t table[]={0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
   int now=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):encPrev;
   if(now!=encPrev){encSteps+=table[(encPrev<<2)|now];encPrev=now;
-    if(abs(encSteps)>=4){pendingChannel=(pendingChannel+(encSteps>0?1:3))%4;encSteps=0;encAt=millis();}}
+    if(abs(encSteps)>=4){requestChannelDelta(encSteps>0?1:-1);encSteps=0;}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
   constexpr uint32_t settleMs=BOARD_ENCODER_A>=0?180:0;
   if(!stable&&!uploading&&!uploadRecovery.pending&&!replyPending&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>=settleMs){

@@ -15,6 +15,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   upstream.on('connection',(socket,req)=>{
     assert.equal(req.headers.authorization,'Bearer pocket-only');
     assert.equal(req.headers['x-voxi-device-id'],'esp32-111111111111');
+    socket.send(JSON.stringify({type:'channel_catalog',channels:[['快问','fast',''],['Voxi Agent','agent',''],['备用 2','disabled',''],['备用 3','disabled','']]}));
     socket.send(JSON.stringify({type:'ready',channel:0}));
     socket.on('message',(raw,binary)=>{
       if(binary){seen.push({pcm:raw.length});return;}
@@ -35,6 +36,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   }});
   async function until(check){const start=Date.now();while(!check()){if(Date.now()-start>2000)throw Error('Timed out');await new Promise(r=>setTimeout(r,5));}}
   await until(()=>messages.some(e=>e.type==='ready'));
+  assert.deepEqual(messages[0].channels.map(([name,mode])=>[name,mode]),[['快问','fast'],['Voxi Agent','agent'],['备用 2','disabled'],['备用 3','disabled']]);
   device.send(JSON.stringify({type:'ptt_down'}));device.send(Buffer.alloc(5760));device.send(JSON.stringify({type:'ptt_up'}));
   await until(()=>messages.some(e=>e.type==='audio_end'));
   const downlink=records.find(e=>e.event==='pocket_downlink');

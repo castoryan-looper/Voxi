@@ -1,13 +1,13 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include "channel_catalog.h"
 void boardInit();
 void audioFlush();
 size_t audioRead(int16_t* mono,size_t samples);
 size_t audioWrite(const int16_t* mono,size_t samples);
 void displayChannel(int channel,bool online);
-const char* radioChannelMode();
-const char* radioChannelName();
+const ChannelLabel& radioChannelLabel(int channel);
 const char* radioTaskState();
 void displaySetup(const char* name,const char* key,bool hotspot);
 

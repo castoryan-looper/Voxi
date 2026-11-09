@@ -62,10 +62,10 @@ static S3GScreen screen;
 #else
 static GxEPD2_BW<GxEPD2_154_D67,200> screen(GxEPD2_154_D67(7,15,11,10));
 #endif
-struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};RadioDebugSnapshot debug;};
+struct ScreenState{int channel=0,battery=-1,signal=0;bool online=false,setup=false,hotspot=false,wifi=false,gateway=false,usb=false;char name[24]={},key[16]={},label[24]={};RadioDebugSnapshot debug;ChannelLabel channelLabel;};
 static QueueHandle_t screenQueue;
 static ScreenState screenBase;
-static void enqueueScreen(ScreenState s){screenBase=s;s.debug=radioDebugRead();xQueueOverwrite(screenQueue,&s);}
+static void enqueueScreen(ScreenState s){screenBase=s;s.channelLabel=radioChannelLabel(s.channel);s.debug=radioDebugRead();xQueueOverwrite(screenQueue,&s);}
 static void statusIcons(const ScreenState& state){
   const int color=GxEPD_BLACK;
   // Wi-Fi arcs. A slash distinguishes disconnected from a weak signal.
@@ -106,17 +106,18 @@ static void screenTask(void*){
     // not repaint e-paper every second during the same interaction phase.
     if(!strcmp(state.debug.phase,"BUFFERING")||!strcmp(state.debug.phase,"DRAINING"))strlcpy(state.debug.phase,"PLAYING",sizeof(state.debug.phase));
     bool active=!strcmp(state.debug.phase,"PLAYING")||!strcmp(state.debug.phase,"RECORDING")||!strcmp(state.debug.phase,"SENDING")||!strcmp(state.debug.phase,"WAIT AI");
-    bool samePage=drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key);
+    bool labelChanged=memcmp(&state.channelLabel,&previous.channelLabel,sizeof(ChannelLabel))!=0;
+    bool samePage=drawn&&!labelChanged&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key);
 #ifdef VOXI_BOARD_S3G
     // Snapshot status in idle. Never follow per-second counters in speech.
     if(active)continue;
-    bool pageChanged=!drawn||state.channel!=previous.channel||state.setup!=previous.setup||state.hotspot!=previous.hotspot||state.usb!=previous.usb||strcmp(state.name,previous.name)||strcmp(state.key,previous.key);
+    bool pageChanged=!drawn||labelChanged||state.channel!=previous.channel||state.setup!=previous.setup||state.hotspot!=previous.hotspot||state.usb!=previous.usb||strcmp(state.name,previous.name)||strcmp(state.key,previous.key);
     bool connectionChanged=!drawn||state.wifi!=previous.wifi||strcmp(state.debug.phase,previous.debug.phase);
     bool detailChanged=!drawn||state.battery!=previous.battery||state.signal!=previous.signal||memcmp(&state.debug,&previous.debug,sizeof(state.debug));
     if(!pageChanged&&!connectionChanged&&(!detailChanged||millis()-refreshCompletedAt<60000))continue;
 #endif
     if(active&&samePage&&!strcmp(state.debug.phase,previous.debug.phase))continue;
-    if(drawn&&state.channel==previous.channel&&state.online==previous.online&&state.setup==previous.setup&&state.hotspot==previous.hotspot&&!strcmp(state.name,previous.name)&&!strcmp(state.key,previous.key)&&state.battery==previous.battery&&state.signal==previous.signal&&state.wifi==previous.wifi&&state.gateway==previous.gateway&&state.usb==previous.usb&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
+    if(samePage&&state.battery==previous.battery&&state.signal==previous.signal&&!strcmp(state.label,previous.label)&&!memcmp(&state.debug,&previous.debug,sizeof(state.debug)))continue;
     previous=state;
     refreshes++;
 #ifdef VOXI_BOARD_S3G
@@ -140,8 +141,13 @@ static void screenTask(void*){
         if(state.hotspot){screen.print("http://192.168.4.1/");screen.setCursor(12,94);screen.printf("KEY:%s",state.key);}
         else{screen.print("http://127.0.0.1:8788/");screen.setCursor(12,94);screen.print("Chrome / Edge: Connect USB");}
       }else{
-        screen.setTextSize(3);screen.setCursor(18,53);screen.printf("CH %02d",state.channel+1);
-        screen.setTextSize(1);screen.setCursor(10,84);screen.printf("WiFi:%s Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
+        const auto& label=state.channelLabel;
+        screen.setTextSize(3);screen.setCursor(18,53);
+        if(label.disabled())screen.print("CH --");else screen.printf("CH %02d",label.number(state.channel));
+        screen.setTextSize(1);screen.setCursor(18,84);
+        if(label.hasBitmap)screen.drawBitmap(18,81,label.bitmap,ChannelLabel::width,ChannelLabel::height,GxEPD_BLACK);
+        else if(!label.disabled()&&label.asciiName())screen.printf("%.20s",label.name);
+        else screen.printf("WiFi:%s Gateway:%s",state.wifi?"OK":"--",state.gateway?"OK":"--");
       }
       screen.drawRoundRect(8,107,184,22,3,GxEPD_BLACK);
       screen.setTextSize(2);screen.setCursor(12,110);screen.print(state.debug.phase);
