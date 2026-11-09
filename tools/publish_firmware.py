@@ -28,5 +28,4 @@ def publish(image, destination, target, version):
     manifest={'schema':1,'target':target,'version':version,'size':len(data),'sha256':digest}
     atomic(folder/'manifest.json',json.dumps(manifest).encode());return manifest
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--image',required=True);p.add_argument('--destination',required=True);p.add_argument('--target',choices=TARGETS,required=True);p.add_argument('--version',required=True)
-    a=p.parse_args();print(json.dumps(publish(a.image,a.destination,a.target,a.version)))
+    raise SystemExit('OTA withdrawn by user on 2026-11-09; publishing is disabled. See docs/OTA-WITHDRAWN.md.')

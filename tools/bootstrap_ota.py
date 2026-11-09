@@ -6,7 +6,11 @@ from publish_firmware import TARGETS, validate_image
 def initial_otadata():
     return struct.pack('<I20sII',1,b'\xff'*20,2,zlib.crc32(struct.pack('<I',1),0xffffffff))+b'\xff'*(8192-32)
 
+OTA_MIGRATION_ENABLED=False
+
 def main():
+    if not OTA_MIGRATION_ENABLED:
+        raise SystemExit("OTA withdrawn by user; migration is disabled. See docs/OTA-WITHDRAWN.md.")
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--port',required=True);p.add_argument('--target',choices=TARGETS,required=True)
     p.add_argument('--backup-dir',type=Path,required=True)

@@ -1,5 +1,5 @@
 #include "cloud_ota.h"
-#ifdef VOXI_OTA
+#if defined(VOXI_OTA) && !VOXI_OTA_SUSPENDED
 #include "runtime_config.h"
 #include <WiFi.h>
 #include <NetworkClientSecure.h>
@@ -116,5 +116,5 @@ void cloudOtaStatus(JsonDocument& out){out["otaImageTag"]=imageTag;out["otaEnabl
 #else
 void cloudOtaBegin(){}
 void cloudOtaTick(bool,bool){}
-void cloudOtaStatus(JsonDocument& out){out["otaEnabled"]=false;}
+void cloudOtaStatus(JsonDocument& out){out["otaEnabled"]=false;out["otaState"]="suspended";}
 #endif

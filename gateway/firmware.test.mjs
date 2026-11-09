@@ -8,7 +8,7 @@ import {createHash} from 'node:crypto';
 import {firmwareHandler} from './firmware.mjs';
 test('firmware authenticates requests and serves complete immutable releases only',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'voxi-ota-'));t.after(()=>rm(dir,{recursive:true,force:true}));
- const handler=firmwareHandler({directory:dir,token:'device-secret'});const server=http.createServer(handler);
+ const handler=firmwareHandler({directory:dir,token:'device-secret',enabled:true});const server=http.createServer(handler);
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
  const base=`http://127.0.0.1:${server.address().port}/api/firmware/`,target='waveshare_s3g_ota';
  const headers={Authorization:'Bearer device-secret'};const path=base+target+'/manifest.json';
@@ -27,4 +27,10 @@ test('firmware authenticates requests and serves complete immutable releases onl
  await writeFile(join(folder,'manifest.json'),JSON.stringify({...manifest,target:'zhengchen_minicam_20_ota'}));assert.equal((await fetch(path,{headers})).status,503);
  await writeFile(join(folder,'manifest.json'),JSON.stringify({...manifest,size:4194304}));assert.equal((await fetch(path,{headers})).status,503);
  await writeFile(join(folder,'manifest.json'),'x'.repeat(3000));assert.equal((await fetch(path,{headers})).status,503);
+});
+
+test('withdrawn OTA distribution is disabled by default',async t=>{
+ const server=http.createServer(firmwareHandler({token:'device-secret'}));await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>server.close());
+ const url=`http://127.0.0.1:${server.address().port}/api/firmware/zhengchen_minicam_20_ota/manifest.json`;
+ assert.equal((await fetch(url,{headers:{Authorization:'Bearer device-secret'}})).status,410);
 });

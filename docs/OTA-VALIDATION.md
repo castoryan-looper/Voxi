@@ -1,3 +1,5 @@
+> **OTA 已于 2026-11-09 按用户要求撤回。本文为历史记录，不再执行其中的发布/迁移步骤。见 [下线决定](OTA-WITHDRAWN.md)。**
+
 # OTA 验证记录 — 2026-11-09
 
 基于 Voxi main `50a13a7`，Windows / PlatformIO 6.2 / 项目固定 pioarduino 55.03.33 工具链。

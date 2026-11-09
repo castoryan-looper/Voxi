@@ -671,7 +671,7 @@ void loop(){
     else diagnosticStage(!wifi?(radioUsesCellular()?"cellular_connecting":"wifi_connecting"):radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     if(!setupScreenActive())displayConnection(channel,label,wifi,gatewayLinked,HWCDC::isPlugged());
   }
-#ifdef VOXI_OTA
+#if defined(VOXI_OTA) && !VOXI_OTA_SUSPENDED
   cloudOtaTick(incoming&&outgoing&&uxQueueMessagesWaiting(incoming)==0&&uxQueueMessagesWaiting(outgoing)==0&&!tx&&!uploading&&!uploadRecovery.pending&&!playing&&!thinking&&!replyPending&&!cueActive&&!audioCacheBusy()&&!speakerTestPending()&&!setupScreenActive()&&used==0&&digitalRead(PIN_PTT)!=LOW, radioConfig.valid&&cacheHealthy&&playback&&ready);
 #endif
   standbyTick(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||audioCacheBusy()||speakerTestPending(),!radioConfig.valid||(WiFi.getMode()&WIFI_AP));

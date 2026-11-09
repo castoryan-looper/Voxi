@@ -48,10 +48,15 @@ class OtaTests(unittest.TestCase):
     calls.append(command)
     if 'read-flash' in command:Path(command[-1]).write_bytes(b'\xff'*0x8000)
    args=['bootstrap_ota.py','--port','COM_TEST','--target',target,'--backup-dir',str(backup),'--erase-recording-cache','--rom-backup']
-   with patch.object(bootstrap_ota,'__file__',str(root/'tools/bootstrap_ota.py')),patch('sys.argv',args),patch.object(bootstrap_ota.subprocess,'run',side_effect=run):bootstrap_ota.main()
+   with patch.object(bootstrap_ota,'OTA_MIGRATION_ENABLED',True),patch.object(bootstrap_ota,'__file__',str(root/'tools/bootstrap_ota.py')),patch('sys.argv',args),patch.object(bootstrap_ota.subprocess,'run',side_effect=run):bootstrap_ota.main()
    self.assertEqual(len(calls),3);self.assertIn('--no-stub',calls[0]);self.assertNotIn('--no-stub',calls[1]);self.assertNotIn('--no-stub',calls[2])
    self.assertEqual(calls[1][-3:],['erase-region','0x810000','0x7f0000'])
    self.assertIn('0xffe000',calls[2]);self.assertNotIn('0xe000',calls[2])
    self.assertEqual((backup/'ota-initial.bin').read_bytes(),initial_otadata())
+
+ def test_withdrawn_migration_cannot_touch_device(self):
+  with patch.object(bootstrap_ota.subprocess,'run') as run:
+   with self.assertRaises(SystemExit):bootstrap_ota.main()
+   run.assert_not_called()
 
 if __name__=='__main__':unittest.main()

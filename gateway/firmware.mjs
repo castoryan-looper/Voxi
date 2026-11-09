@@ -3,11 +3,12 @@ import {readFile,open} from 'node:fs/promises';
 import {join} from 'node:path';
 import {pipeline} from 'node:stream/promises';
 export const targets=new Set(['waveshare_s3g_ota','waveshare_amoled18_v2_ota','zhengchen_minicam_20_ota','zhengchen_minicam_20_gpio11_ptt_ota']);
-export function firmwareHandler({directory,token}){
+export function firmwareHandler({directory,token,enabled=false}){
  return async(req,res)=>{
   const deny=(code)=>{res.writeHead(code,{'Cache-Control':'no-store'});res.end();};
   const given=Buffer.from(req.headers.authorization||''),expected=Buffer.from('Bearer '+token);
   if(given.length!==expected.length||!timingSafeEqual(given,expected))return deny(401);
+  if(!enabled)return deny(410); // OTA withdrawn; server never enables this flag.
   if(req.method!=='GET')return deny(405);
   const match=/^\/api\/firmware\/([a-z0-9_]+)\/(manifest\.json|[a-f0-9]{64}\.bin)$/.exec(req.url);
   if(!match||!targets.has(match[1]))return deny(404);
