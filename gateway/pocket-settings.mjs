@@ -16,7 +16,8 @@ export function pocketSettings({url,token,ca},endpoint='config') {
         try{resolve(JSON.parse(raw));}catch{reject(Error('Pocket 配置响应无效'));}
       });
     });
-    const deadline=setTimeout(()=>request.destroy(Error('Pocket 配置请求超时')),endpoint==='voice-preview'?90000:8000);deadline.unref();
+    const timeout=endpoint==='voice-preview'?90000:endpoint==='portal'&&['connect_model','test_model'].includes(value?.action)?11000:8000;
+    const deadline=setTimeout(()=>request.destroy(Error('Pocket 配置请求超时')),timeout);deadline.unref();
     const abort=()=>request.destroy(Error('请求已取消'));
     if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
     request.on('close',()=>{clearTimeout(deadline);signal?.removeEventListener('abort',abort);});request.on('error',error=>reject(Error(error.message==='Pocket 配置请求超时'||error.message==='请求已取消'?error.message:({ENOTFOUND:'找不到 Pocket 后端，请检查共享 Docker 网络',ECONNREFUSED:'Pocket 配置端口未运行，请检查后端容器',ECONNRESET:'Pocket 配置连接被重置，请检查后端运行状态'}[error.code]||'无法连接 Pocket 配置服务，请检查后端部署'))));

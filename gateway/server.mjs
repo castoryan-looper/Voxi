@@ -98,7 +98,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       if(device.authenticated)device.isAlive=true;
       if(binary){inputBytes+=raw.length;return;}
       let control;try{control=JSON.parse(raw);}catch{return;}
-      if(control?.type==='channel'&&Number.isInteger(control.channel)&&channels[control.channel])observedChannel=control.channel;
+      if(control?.type==='channel'&&Number.isInteger(control.channel)&&control.channel>=0&&control.channel<(mode==='pocket'?16:channels.length))observedChannel=control.channel;
       if(control?.type==='ptt_down')observedBusy=true;if(control?.type==='ptt_up')observedBusy=false;
       if(['ptt_down','ptt_up'].includes(control?.type))console.log(JSON.stringify({event:'device_ptt',connection,type:control.type,inputBytes}));
     });
@@ -125,7 +125,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
-      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,connection,audioFormat});
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,connection,audioFormat,
+        extendedChannels:req.headers['x-voxi-channels']==='blocks-v1'});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }

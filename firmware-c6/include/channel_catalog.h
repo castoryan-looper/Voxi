@@ -1,6 +1,8 @@
 #pragma once
 #include <stdint.h>
 
+constexpr int channelLimit = 16;
+
 struct ChannelLabel {
   static constexpr int width = 120, height = 16, bytes = width / 8 * height;
   char name[129]{}, mode[9]{};
@@ -16,11 +18,11 @@ struct ChannelLabel {
   }
 };
 
-inline int nextEnabledChannel(int current, int direction, uint8_t enabled) {
+inline int nextEnabledChannel(int current, int direction, uint16_t enabled) {
   if (!direction) return current;
-  int step = direction > 0 ? 1 : 3;
-  for (int offset = 1; offset <= 4; ++offset) {
-    int next = (current + step * offset) % 4;
+  int step = direction > 0 ? 1 : channelLimit - 1;
+  for (int offset = 1; offset <= channelLimit; ++offset) {
+    int next = (current + step * offset) % channelLimit;
     if (enabled & (1u << next)) return next;
   }
   return current;

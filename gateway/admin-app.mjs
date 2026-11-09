@@ -393,28 +393,53 @@ restoreSession();
 let agentData=null,agentDirty=false,agentReadDone=null,agentGeneration=0,agentDetail=null,agentSubmitId=null,agentTaskRead=0;
 const agentStates={queued:'已保存 · 等待执行',submitting:'正在提交',running:'执行中',needs_input:'需要补充信息',awaiting_approval:'等待确认',cancelling:'正在停止',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',delivery_unknown:'结果未确认'};
 function option(value,text){const o=document.createElement('option');o.value=value;o.textContent=text;return o;}
+function agentChannelsEdited(){channelDirty=true;updateAgentDirty();channelControls();}
 function fillAgentChannels(channels){
- const editor=$('agentChannels'),uid=$('agentChannelUser').value;editor.replaceChildren();
+ const editor=$('agentChannels'),uid=$('agentChannelUser').value,limit=agentData.channelLimit;
+ editor.replaceChildren();
  channels.forEach((channel,index)=>{
+  const slot=channel.slot??index;
   const box=document.createElement('div'),name=document.createElement('input'),mode=document.createElement('select');
   const title=document.createElement('strong'),nameLabel=document.createElement('label'),modeLabel=document.createElement('label');
-  box.className='channel-card';title.textContent='CH'+index;
-  name.id='agentChannelsName'+index;name.value=channel.name;name.maxLength=32;name.required=true;
+  box.className='channel-card';box.dataset.slot=slot;title.textContent='CH'+slot;
+  name.id='agentChannelsName'+slot;name.value=channel.name;name.maxLength=32;name.required=true;
   nameLabel.className='field';nameLabel.htmlFor=name.id;nameLabel.textContent='频道名称';
-  mode.id='agentChannelsMode'+index;modeLabel.className='field';modeLabel.htmlFor=mode.id;modeLabel.textContent='选择助手';
+  mode.id='agentChannelsMode'+slot;modeLabel.className='field';modeLabel.htmlFor=mode.id;modeLabel.textContent='选择助手';
   for(const [value,text] of [['fast','快问 · 即问即答'],['agent','Voxi Agent · 后台执行'],['disabled','停用']])mode.append(option(value,text));
-  if(uid)for(const conn of agentData.connections)if(conn.user_id===uid)mode.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));
-  const target=channel.mode==='openclaw'?'openclaw:'+channel.connectionId:channel.mode;
-  if(channel.mode==='openclaw'&&![...mode.options].some(o=>o.value===target))mode.append(option(target,'连接已失效，请重新选择'));
-  mode.value=target;box.append(title,nameLabel,name,modeLabel,mode);editor.append(box);
+  const target=channel.connectionId?channel.mode+':'+channel.connectionId:channel.mode;
+  if(uid){
+   for(const conn of agentData.connections)if(conn.user_id===uid&&(conn.status==='ready'||target==='openclaw:'+conn.id))
+    mode.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));
+   for(const conn of agentData.modelConnections||[])if(conn.user_id===uid)
+    mode.append(option('model:'+conn.id,conn.name+' · '+conn.model));
+  }
+  if(![...mode.children].some(o=>o.value===target))mode.append(option(target,'连接已失效，请重新选择'));
+  mode.value=target;box.append(title,nameLabel,name,modeLabel,mode);
+  if(limit){
+   const remove=document.createElement('button');
+   remove.type='button';remove.className='danger';remove.textContent='移除 CH'+slot;
+   remove.onclick=()=>{fillAgentChannels(readAgentChannels().filter(row=>row.slot!==slot));agentChannelsEdited();};
+   box.append(remove);
+  }
+  editor.append(box);
  });
+ if(!channels.length)editor.textContent='还没有频道。';
+ $('addAgentChannel').hidden=!limit;$('addAgentChannel').disabled=channels.length>=limit;
 }
 function readAgentChannels(){
- return Array.from({length:4},(_,index)=>{
-  const value=$('agentChannelsMode'+index).value,openclaw=value.startsWith('openclaw:');
-  return {name:$('agentChannelsName'+index).value.trim(),mode:openclaw?'openclaw':value,...(openclaw?{connectionId:value.slice(9)}:{})};
+ return [...$('agentChannels').children].map((card,index)=>{
+  const slot=Number(card.dataset.slot??index);
+  const [mode,connectionId]=$('agentChannelsMode'+slot).value.split(':');
+  return {...(agentData.channelLimit?{slot}:{}),name:$('agentChannelsName'+slot).value.trim(),mode,...(connectionId?{connectionId}:{})};
  });
 }
+$('addAgentChannel').onclick=()=>{
+ const channels=readAgentChannels(),occupied=new Set(channels.map(row=>row.slot));
+ const slot=Array.from({length:agentData.channelLimit},(_,i)=>i).find(i=>!occupied.has(i));
+ if(slot===undefined)return;
+ fillAgentChannels([...channels,{slot,name:'频道 '+slot,mode:'disabled'}].sort((a,b)=>a.slot-b.slot));
+ agentChannelsEdited();$('agentChannelsName'+slot).focus();
+};
 function userChoiceLabels(profiles,devices){
  const names=profiles.map(profile=>[profile.id,profileDisplayName(profile,devices.get(profile.id))]);
  const counts=new Map();
@@ -445,7 +470,7 @@ function renderChannelEditor(){
 function agentTaskChannels(){
  const config=userDetailData?.agent,select=$('agentTaskChannel'),selected=select.value;
  select.replaceChildren();
- for(const [index,c] of (config?.channels||[]).entries())if(['agent','openclaw'].includes(c.mode))select.append(option(String(index),'CH'+index+' · '+c.name));
+ for(const [index,c] of (config?.channels||[]).entries())if(['agent','openclaw','model'].includes(c.mode)){const slot=c.slot??index;select.append(option(String(slot),'CH'+slot+' · '+c.name));}
  if([...select.options].some(o=>o.value===selected))select.value=selected;
  $('agentSubmitForm').hidden=!config?.enabled||!select.options.length;
  $('submitAgentTask').disabled=$('agentSubmitForm').hidden;
@@ -498,7 +523,7 @@ $('reloadAgent').onclick=()=>{
 };
 $('agentSettingsForm').oninput=()=>{serviceDirty=true;updateAgentDirty();};
 $('agentBehaviorForm').oninput=()=>{behaviorDirty=true;updateAgentDirty();};
-$('agentChannelsForm').oninput=()=>{channelDirty=true;updateAgentDirty();channelControls();};
+$('agentChannelsForm').oninput=agentChannelsEdited;
 
 async function submitAgentSettings(button,message,settings,onSaved){
  const session=token,route=routeGeneration;

@@ -7,15 +7,55 @@ function message(text){$('message').textContent=text;}
 async function api(path,body,{timeoutMs=12000,signal}={}){const requestedGeneration=generation;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);const cancel=()=>controller.abort();if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});try{const response=await fetch('/api/user/'+path,{method:body?'POST':'GET',headers:{'X-CSRF-Token':csrf,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),credentials:'same-origin',cache:'no-store',signal:controller.signal});let value;try{value=await response.json();}catch{throw Error('服务暂不可用，请联系管理员检查部署');}if(requestedGeneration!==generation)throw Error('会话已切换，请重新读取');if(!response.ok){if(response.status===401&&path!=='login'&&path!=='password')signedOut();throw Error(value.error||'请求未完成');}return value;}catch(e){if(e.name==='AbortError')throw Error('请求超时，请稍后重试');throw e;}finally{clearTimeout(timer);signal?.removeEventListener('abort',cancel);}}
 const option=(v,t)=>{const node=document.createElement('option');node.value=v;node.textContent=t;return node;};
 function button(label,action,cls='secondary'){const node=document.createElement('button');node.type='button';node.textContent=label;node.className=cls;node.onclick=action;return node;}
-function signedOut(){userVoiceRequest++;userVoicePlayer?.stop(null);generation++;csrf='';data=null;detail=null;dirty=false;dirtyForms.clear();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('identity').textContent='';for(const id of ['password','connectionToken','pairToken','currentPassword','newPassword','profileName','profileText','fastPrompt','connectionName','connectionUrl','myVoice'])$(id).value='';$('pairing').hidden=true;$('myMemoryPanel').open=false;for(const id of ['webTaskMemory','tasks','connections','devices','memories','turns','channels','taskChannel','taskActions','approval'])$(id).replaceChildren();$('detailState').textContent='';$('detailTitle').textContent='';$('memoryEnabled').checked=false;$('detailPrompt').textContent='';$('detailResult').textContent='';$('taskText').value='';$('taskDetail').hidden=true;}
+function signedOut(){userVoiceRequest++;userVoicePlayer?.stop(null);generation++;csrf='';data=null;detail=null;resetModelForm();$('modelProvider').replaceChildren();$('modelConnections').replaceChildren();dirty=false;dirtyForms.clear();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('identity').textContent='';for(const id of ['password','connectionToken','pairToken','currentPassword','newPassword','profileName','profileText','fastPrompt','connectionName','connectionUrl','myVoice'])$(id).value='';$('pairing').hidden=true;$('myMemoryPanel').open=false;for(const id of ['webTaskMemory','tasks','connections','devices','memories','turns','channels','taskChannel','taskActions','approval'])$(id).replaceChildren();$('detailState').textContent='';$('detailTitle').textContent='';$('memoryEnabled').checked=false;$('detailPrompt').textContent='';$('detailResult').textContent='';$('taskText').value='';$('taskDetail').hidden=true;}
 function page(){const tail=location.pathname.replace(/\/$/,'').split('/').pop();return pages.includes(tail)?tail:'profile';}
-function showPage(){if(!csrf)return;const key=page();for(const p of pages){$(p+'Page').hidden=p!==key;const link=document.querySelector('[data-page="'+p+'"]');if(p===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}document.title=({profile:'我的资料',channels:'我的频道',connections:'我的 OpenClaw',tasks:'我的任务',account:'账户安全'}[key])+' · Voxi';}
-function navigate(path){if(dirty&&!confirm('有未保存的设置，离开会丢弃，继续吗？'))return;if(page()==='connections'){ $('pairToken').value='';$('pairing').hidden=true;$('connectionToken').value='';}dirty=false;dirtyForms.clear();userVoiceRequest++;userVoicePlayer?.stop(null);history.pushState({},'',path);showPage();if(data)render(true);message('');}
+function showPage(){if(!csrf)return;const key=page();for(const p of pages){$(p+'Page').hidden=p!==key;const link=document.querySelector('[data-page="'+p+'"]');if(p===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}document.title=({profile:'我的资料',channels:'频道与助手',connections:'接入管理',tasks:'我的任务',account:'账户安全'}[key])+' · Voxi';}
+function navigate(path){if(dirty&&!confirm('有未保存的设置，离开会丢弃，继续吗？'))return;if(page()==='connections'){ $('pairToken').value='';$('pairing').hidden=true;$('connectionToken').value='';resetModelForm();}dirty=false;dirtyForms.clear();userVoiceRequest++;userVoicePlayer?.stop(null);history.pushState({},'',path);showPage();if(data)render(true);message('');}
 document.addEventListener('click',e=>{const link=e.target.closest?.('a[href^="/app"]');if(!link||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||e.button>0)return;e.preventDefault();navigate(new URL(link.href,location.origin).pathname);});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
-window.addEventListener('popstate',()=>{if(dirty&&!confirm('有未保存的修改，继续离开吗？')){history.forward();return;}dirty=false;dirtyForms.clear();userVoiceRequest++;userVoicePlayer?.stop(null);showPage();if(data)render(true);});
-function renderChannels(){const box=$('channels');box.replaceChildren();data.channels.forEach((c,i)=>{const card=document.createElement('div'),label=document.createElement('label'),name=document.createElement('input'),target=document.createElement('select');card.className='channel';label.textContent='CH'+i;name.id='channelName'+i;name.value=c.name;name.maxLength=32;name.required=true;name.setAttribute('aria-label','CH'+i+' 名称');target.id='channelTarget'+i;target.setAttribute('aria-label','CH'+i+' 助手');target.append(option('fast','快问 · 即问即答'),option('agent','Voxi Agent · 后台执行'),option('disabled','未启用'));for(const conn of data.connections)target.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));const value=c.mode==='openclaw'?'openclaw:'+c.connectionId:c.mode;if(![...target.options].some(o=>o.value===value))target.append(option(value,'连接已失效，请重新选择'));target.value=value;card.append(label,name,target);box.append(card);});$('channelSource').textContent=data.inheritsChannels?'当前使用默认频道。修改并保存后，只应用到你自己的设备。':'当前使用你的个人频道。';$('restoreChannels').hidden=data.inheritsChannels;}
-function readChannels(){return Array.from({length:4},(_,i)=>{const value=$('channelTarget'+i).value;return {name:$('channelName'+i).value.trim(),mode:value.startsWith('openclaw:')?'openclaw':value,...(value.startsWith('openclaw:')?{connectionId:value.slice(9)}:{})};});}
+window.addEventListener('popstate',()=>{if(dirty&&!confirm('有未保存的修改，继续离开吗？')){history.forward();return;}resetModelForm();dirty=false;dirtyForms.clear();userVoiceRequest++;userVoicePlayer?.stop(null);showPage();if(data)render(true);});
+const channelSlot=(channel,index)=>channel.slot??index;
+const targetFor=channel=>['model','openclaw'].includes(channel.mode)?channel.mode+':'+channel.connectionId:channel.mode;
+function readTarget(value){const [mode,connectionId]=value.split(':');return connectionId?{mode,connectionId}:{mode};}
+function channelEdited(){dirtyForms.add('channelForm');dirty=true;}
+function renderChannels(channels=data.channels){
+ const box=$('channels'),limit=data.channelLimit;
+ box.replaceChildren();
+ channels.forEach((c,i)=>{
+  const slot=channelSlot(c,i),card=document.createElement('div'),label=document.createElement('label');
+  const name=document.createElement('input'),target=document.createElement('select');
+  card.className='channel';card.dataset.slot=slot;label.textContent='CH'+slot;
+  name.id='channelName'+slot;label.htmlFor=name.id;name.value=c.name;name.maxLength=32;name.required=true;
+  target.id='channelTarget'+slot;target.setAttribute('aria-label','CH'+slot+' 助手');
+  target.append(option('fast','快问 · 即问即答'),option('agent','Voxi Agent · 后台执行'),option('disabled','停用'));
+  const value=targetFor(c);
+  for(const conn of data.connections){
+   if(conn.status==='ready'||value==='openclaw:'+conn.id)target.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));
+  }
+  for(const conn of data.modelConnections||[])target.append(option('model:'+conn.id,conn.name+' · '+conn.model));
+  if(![...target.options].some(o=>o.value===value))target.append(option(value,'连接已失效，请重新选择'));
+  target.value=value;card.append(label,name,target);
+  if(limit)card.append(button('移除 CH'+slot,()=>{channelEdited();renderChannels(readChannels().filter(row=>row.slot!==slot));},'danger'));
+  box.append(card);
+ });
+ if(!channels.length)box.textContent='还没有频道。添加后保存，即可在设备上切换。';
+ $('addChannel').hidden=!limit;$('addChannel').disabled=channels.length>=limit;
+ $('channelSource').textContent=data.inheritsChannels?'当前使用默认频道。修改并保存后，只应用到你的设备。':'当前使用你的个人频道。';
+ $('restoreChannels').hidden=data.inheritsChannels;
+}
+function readChannels(){
+ return [...$('channels').querySelectorAll('[data-slot]')].map(card=>{
+  const slot=Number(card.dataset.slot);
+  return {...(data.channelLimit?{slot}:{}),name:$('channelName'+slot).value.trim(),...readTarget($('channelTarget'+slot).value)};
+ });
+}
+$('addChannel').onclick=()=>{
+ const channels=readChannels(),occupied=new Set(channels.map(row=>row.slot));
+ const slot=Array.from({length:data.channelLimit},(_,i)=>i).find(i=>!occupied.has(i));
+ if(slot===undefined)return;
+ channelEdited();renderChannels([...channels,{slot,name:'频道 '+slot,mode:'disabled'}].sort((a,b)=>a.slot-b.slot));
+ $('channelName'+slot).focus();
+};
 function renderDevices(){ $('devices').replaceChildren();for(const d of data.devices){const box=document.createElement('div'),text=document.createElement('p');box.className='item';text.textContent=(d.name||'我的设备')+' · '+d.id;box.append(text,button('修改名称',async()=>{const name=prompt('设备名称',d.name||'');if(name?.trim())await change({action:'rename_device',deviceId:d.id,name});}));$('devices').append(box);}if(!data.devices.length)$('devices').textContent='暂无绑定设备，请联系管理员绑定。';for(const [id,items] of [['memories',data.memories],['turns',data.turns.slice(0,20)]]){$(id).replaceChildren();for(const item of items){const p=document.createElement('p');p.textContent=item.text;$(id).append(p);}}}
 let webMemoryRead=0;
 async function loadOwnWebMemory(){
@@ -35,25 +75,88 @@ $('myMemoryPanel').ontoggle=()=>{
  if($('myMemoryPanel').open&&!dirtyForms.has('webMemory'))void loadOwnWebMemory();
 };
 function renderConnections(){$('connections').replaceChildren();for(const conn of data.connections){const box=document.createElement('div'),title=document.createElement('h3'),status=document.createElement('p');box.className='item';title.textContent=conn.name;status.textContent=(conn.transport==='relay'?'主动连接':'HTTPS 直连')+' · '+(statuses[conn.status]||conn.status)+' · Agent '+conn.agent;box.append(title,status,button('检测连接',async()=>{try{const result=await api('action',{action:'test_openclaw',connectionId:conn.id});message((result.ok?'检测通过：':'检测未通过：')+(statuses[result.status]||result.status)+'。没有运行模型任务。');await load(false);}catch(e){message(e.message);}}),button('删除连接',async()=>{if(confirm('先解除频道绑定，再删除此连接；删除会撤销连接密钥。'))await change({action:'delete_openclaw',connectionId:conn.id});},'danger'));$('connections').append(box);}}
-function renderTasks(){$('tasks').replaceChildren();for(const task of data.tasks){const box=document.createElement('div'),title=document.createElement('h3'),summary=document.createElement('p');box.className='item';title.textContent='CH'+task.channel+' · '+(states[task.state]||task.state);summary.textContent=task.summary;box.append(title,summary,button('查看详情',()=>openTask(task.id)));$('tasks').append(box);}if(!data.tasks.length)$('tasks').textContent='还没有任务。可以从这里提交，或从设备的 Agent 频道派发。';const selected=$('taskChannel').value;$('taskChannel').replaceChildren();data.channels.forEach((c,i)=>{if(['agent','openclaw'].includes(c.mode))$('taskChannel').append(option(String(i),'CH'+i+' · '+c.name));});if([...$('taskChannel').options].some(o=>o.value===selected))$('taskChannel').value=selected;$('submitTask').disabled=!data.serviceEnabled||!$('taskChannel').options.length;}
-function render(edit=false){if(data)updateMyVoiceDetails();$('serviceNotice').hidden=data.serviceEnabled;if(edit){renderVoiceSettings();$('profileName').value=data.profile.name;$('profileText').value=data.profile.profile;$('memoryEnabled').checked=Boolean(data.profile.enabled);$('fastPrompt').value=data.preferences.fastPrompt;renderChannels();renderDevices();if(page()==='profile'&&$('myMemoryPanel').open)void loadOwnWebMemory();}renderConnections();renderTasks();}
+let editingModel=null;
+function modelFields(fill=false){
+ const provider=data?.modelProviders?.[$('modelProvider').value];
+ if(!provider)return;
+ $('modelWorkspaceField').hidden=!provider.workspaceRequired;
+ $('modelWorkspace').required=provider.workspaceRequired;
+ $('modelDocs').href=provider.docs;
+ if(fill){$('modelId').value=provider.defaultModel;$('modelName').value=provider.name;}
+}
+function resetModelForm(){
+ editingModel=null;
+ $('modelForm').reset();
+ $('modelProvider').disabled=$('modelId').readOnly=$('modelWorkspace').readOnly=false;
+ $('modelKey').required=true;$('modelKey').placeholder='';
+ $('cancelModelEdit').hidden=true;$('saveModel').textContent='验证并接入';
+ if(data){$('modelProvider').selectedIndex=0;modelFields(true);}
+}
+function renderModelConnections(){
+ const providers=data.modelProviders;
+ $('modelSetup').hidden=!providers;
+ if(!providers)return;
+ const select=$('modelProvider');
+ if(!select.options.length){
+  for(const [id,provider] of Object.entries(providers))select.append(option(id,provider.name));
+  modelFields(true);
+ }
+ const list=$('modelConnections');list.replaceChildren();
+ for(const conn of data.modelConnections){
+  const card=document.createElement('div'),title=document.createElement('h3'),description=document.createElement('p');
+  card.className='item';title.textContent=conn.name;description.textContent=providers[conn.provider].name+' · '+conn.model;
+  card.append(title,description,
+   button('检测连接',async()=>{
+    if(busy)return;
+    busy=true;
+    try{await api('action',{action:'test_model',connectionId:conn.id});message('模型验证通过。');}
+    catch(e){message(e.message);}finally{busy=false;}
+   }),
+   button('编辑名称或密钥',()=>{
+    editingModel=conn.id;select.value=conn.provider;select.disabled=true;modelFields();
+    $('modelName').value=conn.name;$('modelId').value=conn.model;$('modelWorkspace').value=conn.workspace;
+    $('modelId').readOnly=$('modelWorkspace').readOnly=true;
+    $('modelKey').value='';$('modelKey').required=false;$('modelKey').placeholder='留空保留现有密钥';
+    $('cancelModelEdit').hidden=false;$('saveModel').textContent='验证并保存';
+    $('modelName').focus();
+   }),
+   button('删除连接',()=>{if(confirm('删除该模型连接？请先解除频道绑定。'))change({action:'delete_model',connectionId:conn.id});},'danger'));
+  list.append(card);
+ }
+}
+$('modelProvider').onchange=()=>modelFields(true);
+$('cancelModelEdit').onclick=()=>{resetModelForm();dirtyForms.delete('modelForm');dirty=dirtyForms.size>0;};
+$('modelForm').onsubmit=async event=>{
+ event.preventDefault();if(busy)return;
+ busy=true;const run=generation;$('saveModel').disabled=true;
+ try{
+  await api('action',{action:'connect_model',connectionId:editingModel,provider:$('modelProvider').value,
+   name:$('modelName').value.trim(),model:$('modelId').value.trim(),workspace:$('modelWorkspace').value.trim(),key:$('modelKey').value.trim()});
+  if(run!==generation)return;
+  resetModelForm();dirtyForms.delete('modelForm');dirty=dirtyForms.size>0;await load(false);
+  if(run===generation)message('模型已通过验证，可在「频道与助手」选择。');
+ }catch(e){if(run===generation)message(e.message);}
+ finally{busy=false;$('saveModel').disabled=false;}
+};
+function renderTasks(){$('tasks').replaceChildren();for(const task of data.tasks){const box=document.createElement('div'),title=document.createElement('h3'),summary=document.createElement('p');box.className='item';title.textContent='CH'+task.channel+' · '+(states[task.state]||task.state);summary.textContent=task.summary;box.append(title,summary,button('查看详情',()=>openTask(task.id)));$('tasks').append(box);}if(!data.tasks.length)$('tasks').textContent='还没有任务。可以从这里提交，或从设备的 Agent 频道派发。';const selected=$('taskChannel').value;$('taskChannel').replaceChildren();data.channels.forEach((c,i)=>{if(['agent','openclaw','model'].includes(c.mode)){const slot=channelSlot(c,i);$('taskChannel').append(option(String(slot),'CH'+slot+' · '+c.name));}});if([...$('taskChannel').options].some(o=>o.value===selected))$('taskChannel').value=selected;$('submitTask').disabled=!data.serviceEnabled||!$('taskChannel').options.length;}
+function render(edit=false){if(data)updateMyVoiceDetails();$('serviceNotice').hidden=data.serviceEnabled;if(edit){renderVoiceSettings();$('profileName').value=data.profile.name;$('profileText').value=data.profile.profile;$('memoryEnabled').checked=Boolean(data.profile.enabled);$('fastPrompt').value=data.preferences.fastPrompt;renderChannels();renderDevices();if(page()==='profile'&&$('myMemoryPanel').open)void loadOwnWebMemory();}renderConnections();renderModelConnections();renderTasks();}
 async function load(edit=false){if(reading){await reading;return load(edit);}const expected=csrf,run=generation;let finish;reading=new Promise(r=>finish=r);try{const state=await api('state');if(expected!==csrf||run!==generation)return;if(!state.profile||state.role!=='user')throw Error('用户服务未更新，请联系管理员');data=state;render(edit);if(detail&&page()==='tasks')await openTask(detail.id,true);}catch(e){if(expected===csrf)message(e.message);}finally{reading=null;finish();}}
 async function change(body){if(busy)return;busy=true;const run=generation;try{await api('action',body);if(run!==generation)return;const form={profile:'profileForm',preferences:'preferenceForm',voice_preference:'voiceForm',channels:'channelForm',reset_channels:'channelForm'}[body.action];if(form)dirtyForms.delete(form);dirty=dirtyForms.size>0;await load(false);if(run!==generation||!data)return;if(['channels','reset_channels'].includes(body.action))renderChannels();if(body.action==='rename_device')renderDevices();if(body.action==='profile'){$('profileName').value=data.profile.name;$('profileText').value=data.profile.profile;$('memoryEnabled').checked=Boolean(data.profile.enabled);}if(body.action==='voice_preference'){userVoicePlayer?.stop(null);renderVoiceSettings();$('myVoiceStatus').textContent='个人音色已保存。设备重连或切换频道生效。';}if(body.action==='preferences')$('fastPrompt').value=data.preferences.fastPrompt;message('已保存。');}catch(e){if(run===generation)message(e.message);}finally{busy=false;}}
 $('loginForm').onsubmit=async e=>{e.preventDefault();generation++;$('loginButton').disabled=true;try{const user=await api('login',{username:$('username').value.trim(),password:$('password').value});csrf=user.csrf;account=user.username;$('password').value='';$('identity').textContent=account+' · 普通用户';$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;showPage();await load(true);message('');}catch(e){message(e.message);}finally{$('loginButton').disabled=false;}};
 $('logout').onclick=async()=>{try{await api('logout',{});signedOut();message('已退出。');}catch(e){message(e.message);}};
-for(const id of ['profileForm','preferenceForm','voiceForm','channelForm','connectionForm'])$(id).oninput=e=>{if(id==='voiceForm'&&e?.target?.id==='myVoiceLanguage')return;dirtyForms.add(id);dirty=true;};
+for(const id of ['profileForm','preferenceForm','voiceForm','channelForm','connectionForm','modelForm'])$(id).oninput=e=>{if(id==='voiceForm'&&e?.target?.id==='myVoiceLanguage')return;dirtyForms.add(id);dirty=true;};
 $('profileForm').onsubmit=e=>{e.preventDefault();change({action:'profile',name:$('profileName').value,profile:$('profileText').value,enabled:$('memoryEnabled').checked});};
 $('preferenceForm').onsubmit=e=>{e.preventDefault();change({action:'preferences',preferences:{fastPrompt:$('fastPrompt').value}});};
 $('channelForm').onsubmit=e=>{e.preventDefault();change({action:'channels',channels:readChannels()});};
 $('restoreChannels').onclick=()=>{if(confirm('恢复默认频道？现有个人频道设置会被替换。'))change({action:'reset_channels'});};
 function transport(){const direct=$('connectionTransport').value==='https';$('directFields').hidden=!direct;$('relayHint').hidden=direct;$('connectionUrl').required=direct;$('connectionToken').required=direct;}
 $('connectionTransport').onchange=transport;
-$('connectionForm').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const run=generation;$('createConnection').disabled=true;try{const result=await api('action',{action:'connect_openclaw',name:$('connectionName').value.trim(),transport:$('connectionTransport').value,url:$('connectionUrl').value.trim(),agent:$('connectionAgent').value.trim(),token:$('connectionToken').value});if(run!==generation)return;$('connectionToken').value='';dirtyForms.delete('connectionForm');dirty=dirtyForms.size>0;await load(false);if(run!==generation)return;$('pairing').hidden=!result.pairingToken;if(result.pairingToken){$('pairToken').type='password';$('pairToken').value=result.pairingToken;$('connectorCommand').textContent='python voxi-openclaw.py --server '+location.origin+' --connection '+result.connectionId;}message('连接已创建。检测通过后，到“我的频道”选择并保存。');}catch(e){message(e.message);}finally{busy=false;$('createConnection').disabled=false;}};
+$('connectionForm').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;const run=generation;$('createConnection').disabled=true;try{const result=await api('action',{action:'connect_openclaw',name:$('connectionName').value.trim(),transport:$('connectionTransport').value,url:$('connectionUrl').value.trim(),agent:$('connectionAgent').value.trim(),token:$('connectionToken').value});if(run!==generation)return;$('connectionToken').value='';dirtyForms.delete('connectionForm');dirty=dirtyForms.size>0;await load(false);if(run!==generation)return;$('pairing').hidden=!result.pairingToken;if(result.pairingToken){$('pairToken').type='password';$('pairToken').value=result.pairingToken;$('connectorCommand').textContent='python voxi-openclaw.py --server '+location.origin+' --connection '+result.connectionId;}message('连接已创建。检测通过后，到「频道与助手」选择并保存。');}catch(e){message(e.message);}finally{busy=false;$('createConnection').disabled=false;}};
 $('copyPair').onclick=async()=>{try{await navigator.clipboard.writeText($('pairToken').value);message('连接密钥已复制。');}catch{$('pairToken').type='text';$('pairToken').select();message('请手动复制选中的密钥。');}};
 $('taskForm').oninput=()=>{submitId=null;};
 $('taskForm').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;$('submitTask').disabled=true;try{submitId||=crypto.randomUUID();const result=await api('action',{action:'submit',channel:Number($('taskChannel').value),requestId:submitId,text:$('taskText').value});submitId=null;$('taskText').value='';await load(false);await openTask(result.task.id);message('任务已保存，无需保持网页在线。'+(result.webMemoryUsed?.length?' 已带入参考记忆 '+result.webMemoryUsed.join('、')+'。':''));}catch(e){message(e.message+'。内容不变时重试使用同一编号，避免重复派发。');}finally{busy=false;if(data)renderTasks();}};
 async function taskAction(action,extra={}){if(!detail)return;try{const result=await api('action',{action,taskId:detail.id,...extra});await load(false);await openTask(result.task.id);message('操作已提交。');}catch(e){message(e.message);}}
-async function openTask(id,poll=false){const expected=csrf;try{const result=await api('action',{action:'detail',taskId:id});if(expected!==csrf)return;detail=result.task;$('taskDetail').hidden=false;$('detailTitle').textContent='任务 '+id.slice(0,8);$('detailState').textContent=(states[detail.state]||detail.state)+' · '+detail.summary;$('detailPrompt').textContent=detail.prompt;$('detailResult').textContent=detail.result||'尚无最终回复。';if(poll&&$('approval').contains(document.activeElement))return;$('approval').replaceChildren();$('taskActions').replaceChildren();if(['queued','running','awaiting_approval','needs_input'].includes(detail.state)||(detail.engine==='openclaw'&&detail.state==='submitting'))$('taskActions').append(button(detail.engine==='openclaw'?'停止等待／核对远端':'取消任务',()=>{if(confirm(detail.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))taskAction('cancel');},'danger'));
+async function openTask(id,poll=false){const expected=csrf;try{const result=await api('action',{action:'detail',taskId:id});if(expected!==csrf)return;detail=result.task;$('taskDetail').hidden=false;$('detailTitle').textContent='任务 '+id.slice(0,8);$('detailState').textContent=(states[detail.state]||detail.state)+' · '+detail.summary;$('detailPrompt').textContent=detail.prompt;$('detailResult').textContent=detail.result||'尚无最终回复。';if(poll&&$('approval').contains(document.activeElement))return;$('approval').replaceChildren();$('taskActions').replaceChildren();if(['queued','running','awaiting_approval','needs_input'].includes(detail.state)||(detail.engine==='openclaw'&&detail.state==='submitting'))$('taskActions').append(button(['openclaw','model'].includes(detail.engine)?'停止等待':'取消任务',()=>{if(confirm(detail.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':detail.engine==='model'?'停止等待模型回复？供应商可能已处理请求并计费。':'请求停止此任务？已经产生的修改不会自动撤销。'))taskAction('cancel');},'danger'));
  if(detail.state==='awaiting_approval'){const pre=document.createElement('pre');pre.textContent=JSON.stringify(detail.approval,null,2);$('approval').append(pre);$('taskActions').append(button('批准本次操作',()=>taskAction('approve')),button('拒绝操作',()=>taskAction('decline'),'danger'));}
  if(detail.state==='needs_input'){const form=document.createElement('form');for(const q of detail.approval?.questions||[]){const label=document.createElement('label'),input=document.createElement('textarea');label.textContent=q.question||q.header||q.id;input.name=q.id;input.required=true;input.maxLength=4000;label.append(input);form.append(label);}const b=document.createElement('button');b.textContent='提交答案';form.append(b);form.onsubmit=e=>{e.preventDefault();const answers={};for(const [key,value] of new FormData(form))answers[key]={answers:[value]};taskAction('answer',{answers});};$('approval').append(form);}
  if(['completed','failed','interrupted','cancelled','delivery_unknown'].includes(detail.state)&&detail.threadId)$('taskActions').append(button('继续此任务',()=>{const text=prompt('补充要求；助手会先核对已有结果');if(text?.trim())taskAction('continue',{text,requestId:crypto.randomUUID()});}));

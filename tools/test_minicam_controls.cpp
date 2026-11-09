@@ -10,6 +10,9 @@ int main(){
  assert(nextEnabledChannel(0,1,0b0100)==2); // selected route disabled
  assert(nextEnabledChannel(2,1,0b0100)==2);
  assert(nextEnabledChannel(2,-1,0)==2);
+ assert(nextEnabledChannel(0,-1,0x8001)==15);
+ assert(nextEnabledChannel(15,1,0x8001)==0);
+ assert(nextEnabledChannel(4,1,0x8080)==7);
  assert(MiniCamControls::volumeKey(0)==-1);assert(MiniCamControls::volumeKey(700)==-1);assert(MiniCamControls::volumeKey(701)==0);assert(MiniCamControls::volumeKey(899)==0);assert(MiniCamControls::volumeKey(900)==1);assert(MiniCamControls::volumeKey(3000)==1);assert(MiniCamControls::volumeKey(3001)==0);
  MiniCamControls c;
  c.sample(0,100,false);c.sample(20,100,false);assert(!c.sample(40,100,false).volumeDelta);

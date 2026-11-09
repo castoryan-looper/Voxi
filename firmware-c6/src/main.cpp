@@ -174,9 +174,9 @@ static uint32_t playbackCreditAt=0;
 static size_t fadeRemaining=playbackFadeSamples;
 static uint32_t lastPlaybackWriteAt=0;
 int channel=0;
-static ChannelLabel channelLabels[4];
+static ChannelLabel channelLabels[channelLimit];
 static bool channelCatalogKnown=false;
-static uint8_t enabledChannels=0x0f;
+static uint16_t enabledChannels=0x0f;
 static char agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
 const ChannelLabel& radioChannelLabel(int index){return channelLabels[index];}
 const char* radioTaskState(){return agentTaskState;}
@@ -210,14 +210,18 @@ static int requestedChannel=-1;
 static bool channelProtocolReady=false;
 static uint32_t channelSwitchAt=0,channelReadyMs=0;
 
-static bool channelEnabled(int index){return enabledChannels&(1u<<index);}
+static bool channelEnabled(int index){return index>=0&&index<channelLimit&&(enabledChannels&(1u<<index));}
 static void requestCloudChannel();
-static void receiveChannelCatalog(JsonArrayConst rows){
-  if(rows.size()!=4)return;
-  ChannelLabel next[4];
-  uint8_t mask=0;
-  for(int i=0;i<4;i++){
-    JsonArrayConst row=rows[i].as<JsonArrayConst>();
+static void receiveChannelCatalog(JsonArrayConst rows,int offset,int total){
+  static ChannelLabel next[channelLimit];
+  static int received=0, expected=0;
+  static uint16_t mask=0;
+  if(offset==0){received=0;expected=total;mask=0;}
+  if(total<4||total>channelLimit||offset!=received||total!=expected||
+      offset<0||offset>=total||rows.size()!=size_t(min(4,total-offset)))return;
+  for(size_t rowIndex=0;rowIndex<rows.size();rowIndex++){
+    const int i=offset+int(rowIndex);
+    JsonArrayConst row=rows[rowIndex].as<JsonArrayConst>();
     if(row.size()!=3||!row[0].is<const char*>()||!row[1].is<const char*>()||!row[2].is<const char*>())return;
     const char* name=row[0].as<const char*>();
     const char* mode=row[1].as<const char*>();
@@ -226,13 +230,15 @@ static void receiveChannelCatalog(JsonArrayConst rows){
     const bool legacy=!strcmp(mode,"legacy"),disabled=!strcmp(mode,"disabled");
     if(!legacy&&!disabled&&strcmp(mode,"fast")&&strcmp(mode,"agent"))return;
     strlcpy(next[i].name,name,sizeof(next[i].name));
-    if(!legacy)strlcpy(next[i].mode,mode,sizeof(next[i].mode));
+    strlcpy(next[i].mode,legacy?"":mode,sizeof(next[i].mode));
     if(!disabled)mask|=1u<<i;
     size_t length=0;
     next[i].hasBitmap=*bitmap&&mbedtls_base64_decode(next[i].bitmap,sizeof(next[i].bitmap),&length,
         reinterpret_cast<const unsigned char*>(bitmap),strlen(bitmap))==0&&length==sizeof(next[i].bitmap);
   }
-  for(int i=0;i<4;i++)channelLabels[i]=next[i];
+  received+=rows.size();
+  if(received!=total)return;
+  for(int i=0;i<channelLimit;i++)channelLabels[i]=i<total?next[i]:ChannelLabel{};
   const bool wasEmpty=!enabledChannels;
   enabledChannels=mask;
   channelCatalogKnown=true;
@@ -352,6 +358,7 @@ static void networkTask(void*){
   authorizationHeader+="opus-24000-batch-v1,";
 #endif
   authorizationHeader+="opus-24000-v1";
+  authorizationHeader+="\r\nX-Voxi-Channels: blocks-v1";
 #ifdef VOXI_BOARD_MINICAM
   authorizationHeader+="\r\nX-Voxi-Standby: connected-v1";
 #endif
@@ -472,7 +479,7 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t!=WStype_TEXT)return;
   JsonDocument d;if(deserializeJson(d,data,len))return;
   String type=d["type"]|"";
-  if(type=="channel_catalog"){receiveChannelCatalog(d["channels"].as<JsonArrayConst>());return;}
+  if(type=="channel_catalog"){receiveChannelCatalog(d["channels"].as<JsonArrayConst>(),d["offset"]|0,d["total"]|4);return;}
   if(type=="task_state"){
     strlcpy(agentTaskState,d["state"]|"",sizeof(agentTaskState));strlcpy(agentTaskId,d["taskId"]|"",sizeof(agentTaskId));
     return; // A background task must not replace recording/playback availability.

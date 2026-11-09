@@ -95,7 +95,7 @@ export function createWebMemory(file, readRoute) {
     try {
       const result = await readRoute(userId);
       return result.profile?.id === userId && [true, 1].includes(result.profile.enabled) &&
-        result.agent?.channels?.[channel]?.mode === 'agent';
+        result.agent?.channels?.some((route,index)=>(route.slot??index)===channel&&route.mode==='agent');
     } catch {
       return false;
     }
@@ -105,7 +105,7 @@ export function createWebMemory(file, readRoute) {
     if (scopeChanges.has(body?.action)) return serialize(() => send(body));
     if (body?.action !== 'submit' || typeof userId !== 'string' || !uidPattern.test(userId) ||
         typeof body.text !== 'string' || !body.text.trim() || body.text.trim().length > maxPrompt ||
-        !Number.isInteger(body.channel) || body.channel < 0 || body.channel > 3 ||
+        !Number.isInteger(body.channel) || body.channel < 0 || body.channel >= 16 ||
         typeof body.requestId !== 'string' || !body.requestId || body.requestId.length > 128) return send(body);
     const {requestId, channel} = body;
     const text = body.text.trim();

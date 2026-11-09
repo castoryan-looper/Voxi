@@ -15,6 +15,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   upstream.on('connection',(socket,req)=>{
     assert.equal(req.headers.authorization,'Bearer pocket-only');
     assert.equal(req.headers['x-voxi-device-id'],'esp32-111111111111');
+    assert.equal(req.headers['x-voxi-channels'],batched?'blocks-v1':undefined);
     socket.send(JSON.stringify({type:'channel_catalog',channels:[['快问','fast',''],['Voxi Agent','agent',''],['备用 2','disabled',''],['备用 3','disabled','']]}));
     socket.send(JSON.stringify({type:'ready',channel:0}));
     socket.on('message',(raw,binary)=>{
@@ -28,7 +29,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
-  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111','X-Voxi-Audio-Format':'opus-24000-v1',...(batched?{'X-Voxi-Downlink-Codecs':`${OPUS_BATCH_FORMAT},opus-24000-v1`}:{})}});
+  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111','X-Voxi-Audio-Format':'opus-24000-v1',...(batched?{'X-Voxi-Downlink-Codecs':`${OPUS_BATCH_FORMAT},opus-24000-v1`,'X-Voxi-Channels':'blocks-v1'}:{})}});
   const messages=[],packets=[];let pcm=0;
   device.on('message',(raw,binary)=>{if(binary){pcm+=raw.length;packets.push(raw);}else {
     const event=JSON.parse(raw);messages.push(event);
