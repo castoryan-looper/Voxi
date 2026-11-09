@@ -5,10 +5,74 @@ async function api(path,body,{timeoutMs=12000,signal}={}){
  try{const response=await fetch('/api/admin/'+path,{method:body?'POST':'GET',credentials:'same-origin',signal:controller.signal,headers:{'X-CSRF-Token':token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store'});let data;try{data=await response.json();}catch{throw Error('服务返回了非 JSON 响应（HTTP '+response.status+'），请更新网关后重试');}if(!response.ok)throw Error(data.error||'请求失败（HTTP '+response.status+'）');return data;}catch(e){if(e.name==='AbortError')throw Error('请求超过'+Math.round(timeoutMs/1000)+'秒未完成，请检查云端服务后重试');throw e;}finally{clearTimeout(timeout);signal?.removeEventListener('abort',cancel);}
 }
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
-const labels={user_account_changed:'用户账户已更新',device_limit:'数量达到上限',unauthorized:'设备令牌被拒绝',device_opened:'设备接入',device_closed:'设备断开',limit_changed:'上限已调整',admin_disconnected:'管理员断开连接',ai_config_changed:'AI 配置已保存',memory_changed:'用户记忆已更新'};
-async function refresh(){if(polling||!token)return;polling=true;const requestToken=token;try{const s=await api('status');if(token!==requestToken)return;$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('navigation').hidden=false;$('breadcrumb').hidden=false;$('online').textContent=s.devices.length;$('limitValue').textContent=s.maxConnections;$('available').textContent=Math.max(0,s.maxConnections-s.devices.length);if(document.activeElement!==$('limit'))$('limit').value=s.maxConnections;$('limit').max=s.capacity;$('capacity').textContent=`可设置 1–${s.capacity} 台。${s.persistent?'配置已启用持久保存，重启后保留。':'当前未启用持久保存。'} 运行模式：${s.mode}`;let registryError='';lastConnections=s.devices;renderDevices();try{const registry=await api('devices');if(token===requestToken&&Array.isArray(registry.devices)){deviceRegistryData=registry.devices;renderDevices();}}catch(e){registryError=' · 设备档案读取失败：'+e.message;}$('events').replaceChildren();for(const e of s.events){const li=document.createElement('li');li.textContent=new Date(e.at).toLocaleTimeString()+' · '+(labels[e.reason]||labels[e.event]||e.event)+(e.connection?' · #'+e.connection:'')+(e.origin?' · '+e.origin:'')+(e.maxConnections?' · 上限 '+e.maxConnections:'');$('events').append(li);}$('updated').textContent='更新于 '+new Date().toLocaleTimeString()+registryError;$('message').textContent='';renderPage();}catch(e){if(token===requestToken)$('message').textContent=e.message;}finally{polling=false;}}
+const labels={user_account_changed:'用户账户已更新',unauthorized:'设备令牌被拒绝',device_opened:'设备接入',device_closed:'设备断开',admin_disconnected:'管理员断开连接',ai_config_changed:'AI 配置已保存',memory_changed:'用户记忆已更新'};
+const integer=new Intl.NumberFormat('zh-CN');
+const shanghaiDate=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium'});
+const count=value=>Number.isSafeInteger(value)&&value>=0?integer.format(value):'—';
+function duration(ms){
+ if(!Number.isFinite(ms)||ms<0)return '—';
+ const seconds=Math.floor(ms/1000);
+ if(ms>0&&seconds===0)return '少于 1 秒';
+ if(seconds<60)return seconds+' 秒';
+ const minutes=Math.floor(seconds/60);
+ return minutes<60?minutes+' 分 '+seconds%60+' 秒':integer.format(Math.floor(minutes/60))+' 小时 '+minutes%60+' 分';
+}
+function fillOverview(data){
+ const {audience,voice,agent}=data?.cloud||{};
+ const fields={overviewUsers:audience?.users,overviewSeen:audience?.usersSeen7d,overviewOccupied:voice?.occupied,
+  overviewAvailable:voice?.available,overviewTodayTurns:audience?.todayTurns,overviewTurns:audience?.voiceTurns,
+  overviewTasks:agent?.tasks,overviewTokens:agent?.totalTokens};
+ for(const [id,value] of Object.entries(fields))$(id).textContent=count(value);
+ $('overviewTodayDuration').textContent=duration(audience?.todayInputMs);
+ $('overviewDuration').textContent=duration(audience?.voiceInputMs);
+ $('overviewAccounts').textContent=data?'网页登录账户 '+count(data.accounts)+' 个':'含设备自动建立的档案';
+ $('overviewRegistered').textContent=audience?('已登记 '+count(audience.devices)+' 台设备'):'当前已认证连接';
+ $('overviewVoiceLimit').textContent=voice?('已配置 '+count(voice.capacity)+' 席，'+count(voice.warmed)+' 席空闲预热'):'按可调度语音席位估算';
+ $('overviewVoiceSince').textContent='仅统计设备已受理的有效语音输入。'+(audience?.firstVoiceDay!=null?'自 '+shanghaiDate.format(audience.firstVoiceDay*1000)+' 起累计。':'新版首次受理后开始累计。');
+ $('overviewTaskStatus').textContent=agent?('执行中 '+count(agent.running)+' · 排队 '+count(agent.queued)+' · 完成 '+count(agent.completed)+' · 异常 '+count(agent.unresolved)):'含 Voxi Agent 与 OpenClaw';
+ $('overviewTokenCoverage').textContent=agent?(count(agent.threadsWithUsage)+' / '+count(agent.codexThreads)+' 个 Voxi Agent 会话有累计记录'):'按 Voxi Agent 会话汇总';
+}
+let overviewRequest=null,overviewReadAt=0;
+async function refreshOverview(force=false){
+ if(!token||currentPage().key!=='overview'||overviewRequest||(!force&&Date.now()-overviewReadAt<15000))return;
+ const session=token,route=routeGeneration;
+ const request=api('overview');overviewRequest=request;$('refreshOverview').disabled=true;
+ try{
+  const data=await request;if(session!==token||route!==routeGeneration)return;
+  fillOverview(data);overviewReadAt=Date.now();
+  $('overviewUpdated').textContent=data.cloudStatus==='ready'?'云端统计更新于 '+new Date().toLocaleTimeString():data.cloudStatus==='disabled'?'当前未接入 Pocket Cloud':'Pocket Cloud 统计暂不可用';
+ }catch(e){
+  if(session===token&&route===routeGeneration){fillOverview(null);$('overviewUpdated').textContent='统计读取失败';}
+ }finally{if(overviewRequest===request){overviewRequest=null;$('refreshOverview').disabled=false;}}
+}
+async function refresh(){
+ if(polling||!token)return;
+ polling=true;const requestToken=token;
+ try{
+  const s=await api('status');if(token!==requestToken)return;
+  for(const id of ['dashboard','logout','navigation','breadcrumb'])$(id).hidden=false;
+  $('login').hidden=true;
+  lastConnections=s.devices;
+  const ids=new Set(s.devices.map(d=>d.deviceId||d.connection));
+  const busy=new Set(s.devices.filter(d=>d.busy).map(d=>d.deviceId||d.connection));
+  $('online').textContent=count(ids.size);$('overviewBusy').textContent=count(busy.size);
+  renderPage();
+  if(currentPage().key==='overview')void refreshOverview();
+  if(currentPage().key==='devices'){
+   renderDevices();let registryError='';
+   try{const registry=await api('devices');if(token!==requestToken)return;if(Array.isArray(registry.devices)){deviceRegistryData=registry.devices;renderDevices();}}
+   catch(e){registryError=' · 设备档案读取失败：'+e.message;}
+   if(token!==requestToken)return;
+   $('updated').textContent='更新于 '+new Date().toLocaleTimeString()+registryError;
+  }
+  $('events').replaceChildren();
+  for(const e of s.events){const li=document.createElement('li');li.textContent=new Date(e.at).toLocaleTimeString()+' · '+(labels[e.reason]||labels[e.event]||e.event)+(e.connection?' · #'+e.connection:'')+(e.origin?' · '+e.origin:'');$('events').append(li);}
+  $('message').textContent='';
+ }catch(e){if(token===requestToken){$('message').textContent=e.message;$('online').textContent=$('overviewBusy').textContent='—';}}
+ finally{polling=false;}
+}
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginButton').disabled=true;try{const data=await api('login',{username:$('username').value.trim(),password:$('secret').value});token=data.csrf;$('secret').value='';await refresh();}catch(e){$('message').textContent=e.message;}finally{$('loginButton').disabled=false;}};
-$('limitForm').onsubmit=async e=>{e.preventDefault();$('save').disabled=true;try{await api('limit',{maxConnections:Number($('limit').value)});await refresh();}catch(e){$('message').textContent=e.message;}finally{$('save').disabled=false;}};
+$('refreshOverview').onclick=()=>{void refresh();return refreshOverview(true);};
 function showLogin(){adminVoicePlayer?.stop(null);voiceDescriptionDirty=false;userAccountsDirty=false;$('newUserPassword').value='';$('userAccounts').replaceChildren();agentGeneration++;agentData=null;agentDirty=false;agentDetail=null;$('credentialKey').value='';$('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;channelDirty=false;serviceDirty=false;connectionDirty=false;$('agentTaskDetail').hidden=true;$('agentTasks').replaceChildren();$('agentDetailResult').textContent='';currentRoute='';$('navigation').hidden=true;$('breadcrumb').hidden=true;memoryData=null;deviceRegistryData=[];lastConnections=[];$('memorySection').hidden=true;$('memoryPanel').hidden=true;$('memoryFacts').replaceChildren();$('memoryTurns').replaceChildren();token='';discardEdits();$('aiForm').hidden=true;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('message').textContent='';}
 $('refresh').onclick=refresh;$('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){$('message').textContent=e.message;}};setInterval(refresh,5000);
 $('passwordForm').onsubmit=async e=>{e.preventDefault();$('changePassword').disabled=true;try{await api('password',{currentPassword:$('currentPassword').value,newPassword:$('newPassword').value});$('currentPassword').value='';$('newPassword').value='';showLogin();$('message').textContent='密码已修改，请重新登录。';}catch(e){$('message').textContent=e.message;}finally{$('changePassword').disabled=false;}};
@@ -93,17 +157,18 @@ $('clearMemory').onclick=()=>{if(confirm('永久清空此用户的背景、记�
 
 
 const pages=[
+ {key:'overview',path:'/admin/overview',title:'运营总览',sections:['overviewSection']},
  {key:'users',path:'/admin/users',title:'用户账户',sections:['usersSection']},
  {key:'agent',path:'/admin/agent',title:'频道与助手',sections:['agentSection']},
  {key:'agentTasks',path:'/admin/agent/tasks',title:'后台任务',sections:['agentTasksSection']},
  {key:'agentCredentials',path:'/admin/agent/credentials',title:'模型密钥',sections:['agentCredentialsSection']},
- {key:'devices',path:'/admin/devices',title:'设备管理',sections:['overviewSection','devicesSection']},
+ {key:'devices',path:'/admin/devices',title:'设备管理',sections:['devicesSection']},
  {key:'voice',path:'/admin/ai/voice',title:'语音与试听',sections:['aiSection']},
  {key:'events',path:'/admin/events',title:'连接事件',sections:['eventsSection']},
  {key:'account',path:'/admin/account',title:'管理员账户',sections:['accountSection']}
 ];
 let currentRoute='',routeGeneration=0;
-function currentPage(){const path=location.pathname.replace(/\/$/,'');const device=path.match(/^\/admin\/devices\/(esp32-[a-f0-9]{12})\/memory$/);if(device)return {key:'memory',path,title:'设备长期记忆',sections:['memorySection'],deviceId:device[1]};return pages.find(p=>p.path===path)||pages.find(p=>p.key==='devices');}
+function currentPage(){const path=location.pathname.replace(/\/$/,'');const device=path.match(/^\/admin\/devices\/(esp32-[a-f0-9]{12})\/memory$/);if(device)return {key:'memory',path,title:'设备长期记忆',sections:['memorySection'],deviceId:device[1]};return pages.find(p=>p.path===path)||pages[0];}
 function dirty(){return voiceDescriptionDirty||voiceDirty||voiceRuntimeDirty||fastStyleDirty||memoryDirty||agentDirty||userAccountsDirty;}
 function discardEdits(){
  voiceDescriptionDirty=voiceDirty=voiceRuntimeDirty=fastStyleDirty=memoryDirty=userAccountsDirty=false;
@@ -116,6 +181,8 @@ function navigate(path){
 }
 function renderPage(force=false){if(!token)return;const page=currentPage();if(!force&&currentRoute===page.path)return;currentRoute=page.path;routeGeneration++;adminVoiceRequest++;adminVoicePlayer?.stop(null);for(const id of ['overviewSection','devicesSection','aiSection','memorySection','eventsSection','accountSection','agentSection','agentTasksSection','agentCredentialsSection'])$(id).hidden=!page.sections.includes(id);$('pageTitle').textContent=page.title;document.title=page.title+' · Voxi 管理后台';$('breadcrumb').textContent=page.key==='memory'?'设备管理 / 长期记忆':'控制台 / '+page.title;for(const p of pages){const link=document.querySelector('[data-nav="'+p.key+'"]');if(link){if(p.key===page.key||(page.key==='memory'&&p.key==='devices'))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}}
  if(page.key==='voice'){$('aiForm').hidden=$('voiceRuntimeForm').hidden=true;loadAi();}
+ if(page.key==='overview'){fillOverview(null);$('overviewUpdated').textContent='';overviewReadAt=0;void refreshOverview();}
+ if(page.key==='devices'){renderDevices();void refresh();}
  $('usersSection').hidden=page.key!=='users';if(page.key==='users')loadUserAccounts();
  if(page.key.startsWith('agent'))loadAgent();
  if(page.key==='agent'){

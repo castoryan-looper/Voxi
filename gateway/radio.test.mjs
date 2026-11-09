@@ -55,8 +55,8 @@ test('peer Ping and incoming device traffic refresh liveness during downlink',as
  ws.close();
 });
 
-test('cloud health, connection budget and malformed events',async t=>{
-  const {server,wss}=createGateway({token:'test',maxConnections:1,revision:'test-sha'});
+test('cloud health and malformed events',async t=>{
+  const {server,wss}=createGateway({token:'test',revision:'test-sha'});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
   const port=server.address().port;
@@ -68,8 +68,6 @@ test('cloud health, connection budget and malformed events',async t=>{
   const options={headers:{Authorization:'Bearer test','X-Voxi-Audio-Format':'opus-24000-v1'}};
   const first=new WebSocket(`ws://127.0.0.1:${port}/radio`,options);
   await new Promise(r=>first.once('open',r));
-  const second=new WebSocket(`ws://127.0.0.1:${port}/radio`,options);
-  assert.equal(await new Promise(r=>second.once('close',r)),1013);
   const error=new Promise(resolve=>first.on('message',(raw,binary)=>{if(!binary){const e=JSON.parse(raw);if(e.type==='error')resolve(e);}}));
   first.send('null');assert.equal((await error).message,'Expected event object');
   first.close();
@@ -91,8 +89,8 @@ test('setup route returns HTML and malformed WebSocket frames do not crash gatew
  const health=await fetch(base+'/healthz');assert.equal(health.status,200);
 });
 
-test('two authenticated devices keep independent channels and a third gets an explicit limit',async t=>{
- const {server,wss}=createGateway({token:'shared-device-token',maxConnections:2});
+test('three authenticated devices keep independent channels',async t=>{
+ const {server,wss}=createGateway({token:'shared-device-token'});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();});
  const url=`ws://127.0.0.1:${server.address().port}/radio`;
@@ -103,8 +101,8 @@ test('two authenticated devices keep independent channels and a third gets an ex
  await until(()=>ma.some(e=>e.type==='ready')&&mb.some(e=>e.type==='ready'));
  a.send(JSON.stringify({type:'channel',channel:3}));await until(()=>ma.some(e=>e.type==='ready'&&e.channel===3));
  assert.equal(mb.filter(e=>e.type==='ready').at(-1).channel,0);
- const third=connect();let error;
- third.on('message',(d,binary)=>{if(!binary)error=JSON.parse(d);});
- const code=await new Promise(r=>third.once('close',r));assert.equal(code,1013);assert.match(error.message,/device limit/i);
+ const third=connect(),mc=[];
+ third.on('message',(d,binary)=>{if(!binary)mc.push(JSON.parse(d));});
+ await until(()=>mc.some(e=>e.type==='ready'&&e.channel===0));
  assert.equal(a.readyState,WebSocket.OPEN);assert.equal(b.readyState,WebSocket.OPEN);
 });

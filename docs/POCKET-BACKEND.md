@@ -12,7 +12,7 @@ ESP32 → Voxi :9443 /radio → Docker 内部 Pocket /voxi
 - 不读取、复制或导出 auth.json / 账号令牌，不把 ChatGPT 登录当作通用 OpenAI API Key。
 - 通过官方 app-server 的 `thread/realtime/start` + WebRTC 协商使用现有登录。没有配置 API Key 时不会回退到收费 API 路径。
 - Pocket 的设备令牌只用于内部服务间鉴权，由连接脚本写入 /etc/voxi/gateway.env，终端不显示它。ESP32 的 Voxi 设备令牌不变。
-- 每次连接创建独立、临时、只读的语音会话，不使用 Pocket 原有任务会话；语音工具清空，客户端不执行任务、批准动作或调用 shell。默认最多两个独立实时语音连接；每路有自己的 VoiceSession、app-server/WebRTC 和频道状态，不共享对话。Pocket 容器内 VOXI_MAX_SESSIONS 可设1–4（默认2），Voxi 的 MAX_CONNECTIONS 也必须允许对应数量。
+- 每路实时语音有独立、临时、只读的 app-server/WebRTC 会话，不使用 Pocket 原有任务会话。设备连接和语音席位分开。Pocket 容器内 `VOXI_MAX_SESSIONS` 可设 1–4（未设置时默认 2）。达到席位数后，其他设备仍可保持在线，按需回收一个空闲席位来响应。
 - 沿用 Voxi 频道、PTT、滤波和打断。原生服务确认 Frameless Bidi 会话配置后设备显示 READY；按住时云端暂存音频，松开后提交，并用静音尾段触发服务端结束检测。
 - Codex 0.163.0 固定版本源码中，直接 Realtime WebSocket 要求 API Key；本适配使用支持账号登录的 WebRTC 路线。
 - 这是实验接口。账号必须有原生语音权限，并受账号实际额度与地区/服务可用性限制；登录成功不等于原生语音一定可用。真实延迟和音色需在此服务器验证。
@@ -74,7 +74,7 @@ docker logs --tail=80 codex-pocket-gateway-1
 
 ## 两台设备同时在线（2026-11-03）
 
-旧connect-pocket脚本会写MAX_CONNECTIONS=1，旧Pocket后端也用单个active布尔锁；只修改网关上限无法实现并发。新版两层都默认允许2路，准入在第一个await前预留槽位，断开或启动失败后释放；第三路明确返回容量错误。原生账号额度/并发能力与服务器CPU内存仍须实测，不能把本地模拟会话测试当作两路真实语音成功。
+设备在线与语音并发分别在「运营总览」中显示。会话启动前预留语音席位，断开或启动失败后释放。所有席位都在工作时，其他设备仍在线，可稍后重试录音。原生账号额度及服务器实际语音吞吐以实测为准。
 
 同一家庭/测试网关下两台ESP32可使用现有Voxi设备令牌和CA；共享令牌不是每设备身份系统。每个WebSocket创建独立会话，频道与音频分别处理。诊断日志用sessionId区分Pocket语音统计。
 
@@ -82,9 +82,9 @@ docker logs --tail=80 codex-pocket-gateway-1
 
 ```bash
 sudo bash deploy/connect-pocket.sh codex-pocket-gateway-1
-docker exec voxi-gateway-1 printenv MAX_CONNECTIONS
+docker exec codex-pocket-gateway-1 printenv VOXI_MAX_SESSIONS
 ```
 
-该脚本会保留ESP32使用的DEVICE_TOKEN和CA，重新同步内部Pocket令牌并将MAX_CONNECTIONS设为2，然后部署Voxi。服务更新会短暂重连；ESP32固件不用改。先检查两台都READY，再分别对话、切台和断开一台，观察另一台是否不受影响；最后再测试两台同时对话。若新板仍失败，查看device_rejected的unauthorized/device_limit，以及Pocket session-limit响应，避免把容量问题误判为令牌问题。
+该脚本会保留 ESP32 使用的 DEVICE_TOKEN 和 CA，重新同步内部 Pocket 令牌，然后部署 Voxi。服务更新会短暂重连。验证时先检查各设备都 READY，再分别对话、切台和断开一台，观察其他设备是否继续在线。
 
 测试：Voxi25项通过；Pocket test_voxi共17项，12项通过、5项可选原生依赖测试跳过。新增两路准入、第三路拒绝、频道隔离、断开释放槽位和存活会话继续使用的回归。

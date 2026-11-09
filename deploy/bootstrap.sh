@@ -16,7 +16,7 @@ if ! git config --global --get-all safe.directory | grep -Fxq "$root"; then
 fi
 if [[ ! -f /etc/voxi/gateway.env ]]; then
   umask 077
-  printf 'MODE=mock\nPORT=8787\nDEVICE_TOKEN=%s\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-realtime-2.1\nOPENAI_VOICE=marin\nMAX_CONNECTIONS=2\n' "$(openssl rand -hex 32)" > /etc/voxi/gateway.env
+  printf 'MODE=mock\nPORT=8787\nDEVICE_TOKEN=%s\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-realtime-2.1\nOPENAI_VOICE=marin\n' "$(openssl rand -hex 32)" > /etc/voxi/gateway.env
 fi
 if [[ ! -f /etc/voxi/deploy.env ]];then printf 'VOXI_HTTPS_PORT=9443\n' > /etc/voxi/deploy.env;fi
 bash "$root/deploy/make-tls.sh" "${1:-43.160.215.253}"

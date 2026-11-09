@@ -10,15 +10,13 @@ function page(){
   const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},dataset:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
   vm.runInContext(source,context);return {context,get};
 }
-const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_rejected',reason:'device_limit',connection:13,maxConnections:2}],maxConnections:2,capacity:4,persistent:true,mode:'pocket'};
-test('admin login renders status and count controls, saves live change and keeps secret out of storage',async()=>{
+const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_opened',connection:12}],mode:'pocket'};
+test('admin login renders device status and keeps secret out of storage',async()=>{
   const {context,get}=page();const requests=[];
-  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/login')?{csrf:'session-csrf'}:{maxConnections:3}};};
+  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/login')?{csrf:'session-csrf'}:{devices:[]}};};
   get('secret').value='admin-secret';await get('loginForm').onsubmit({preventDefault(){}});
-  assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,1);assert.equal(get('devices').children[0].children[0].textContent,'连接 #12');
-  assert.match(get('events').children[0].textContent,/数量达到上限/);
-  get('limit').value='3';await get('limitForm').onsubmit({preventDefault(){}});
-  assert.equal(JSON.parse(requests.find(r=>r.path.endsWith('/limit')).options.body).maxConnections,3);
+  assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,'1');assert.equal(get('devices').children[0].children[0].textContent,'连接 #12');
+  assert.match(get('events').children[0].textContent,/设备接入/);
   assert.equal(requests.find(r=>r.path.endsWith('/status')).options.headers['X-CSRF-Token'],'session-csrf');
   await get('logout').onclick();assert.equal(get('dashboard').hidden,true);assert.equal(vm.runInContext('token',context),'');
 });
@@ -28,10 +26,14 @@ test('pending status cannot reopen dashboard after logout',async()=>{
  await get('logout').onclick();resolve({ok:true,json:async()=>status});await pending;
  assert.equal(get('dashboard').hidden,true);assert.equal(get('login').hidden,false);
 });
-test('save failure remains visible and re-enables button',async()=>{
-  const {context,get}=page();context.fetch=async()=>({ok:false,json:async()=>({error:'保存失败，原数量上限保持不变'})});
-  vm.runInContext("token='admin-secret'",context);get('limit').value='3';await get('limitForm').onsubmit({preventDefault(){}});
-  assert.match(get('message').textContent,/保存失败/);assert.equal(get('save').disabled,false);
+test('overview shows measured zero distinctly from missing usage and capacity',async()=>{
+  const {context,get}=page();context.location.pathname='/admin/';
+  context.fetch=async()=>({ok:true,json:async()=>({accounts:2,cloudStatus:'ready',
+    cloud:{audience:{users:4,todayTurns:0,voiceTurns:12,voiceInputMs:93000},voice:{occupied:4,available:0},agent:{tasks:5,codexThreads:4,threadsWithUsage:0,totalTokens:null}}})});
+  vm.runInContext("token='session-csrf'",context);await vm.runInContext('refreshOverview(true)',context);
+  assert.equal(get('overviewUsers').textContent,'4');assert.equal(get('overviewTodayTurns').textContent,'0');
+  assert.equal(get('overviewDuration').textContent,'1 分 33 秒');assert.equal(get('overviewAvailable').textContent,'0');
+  assert.equal(get('overviewTokens').textContent,'—');assert.equal(get('overviewTokenCoverage').textContent,'0 / 4 个 Voxi Agent 会话有累计记录');
 });
 
 test('quick answer settings save only the edited style, independent of voice',async()=>{

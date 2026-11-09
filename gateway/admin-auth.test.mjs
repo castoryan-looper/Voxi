@@ -18,8 +18,9 @@ test('account login, CSRF, password persistence, invalidation and logout',async 
  const a=await login('initial-password-123');const b=await login('initial-password-123');
  assert.equal((await call('status',null,a.cookie)).status,200);
  assert.equal((await call('session',null,a.cookie)).status,200);
- assert.equal((await call('limit',{maxConnections:3},a.cookie)).status,401);
- assert.equal((await call('limit',{maxConnections:3},a.cookie,a.csrf)).status,200);
+ assert.equal((await call('overview',null,a.cookie)).status,200);
+ assert.equal((await call('disconnect',{connection:1},a.cookie)).status,401);
+ assert.equal((await call('disconnect',{connection:1},a.cookie,a.csrf)).status,404);
  assert.equal((await call('password',{currentPassword:'initial-password-123',newPassword:'short'},a.cookie,a.csrf)).status,400);
  assert.equal((await call('password',{currentPassword:'wrong',newPassword:'replacement-password-456'},a.cookie,a.csrf)).status,401);
  assert.equal((await call('password',{currentPassword:'initial-password-123',newPassword:'replacement-password-456'},a.cookie,a.csrf)).status,200);

@@ -87,5 +87,5 @@ export function createUserAccounts({file,administrator,agent,portal,voicePreview
   }
   return json(404,{error:'接口不存在'});
  }
- return {admin,handle};
+ return {admin,handle,accountCount:()=>accounts.length};
 }
