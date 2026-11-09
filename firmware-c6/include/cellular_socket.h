@@ -31,7 +31,7 @@ public:
  void setReconnectInterval(uint32_t ms){retryMs=ms;}
  void enableHeartbeat(uint32_t interval,uint32_t timeout,uint8_t count){heartbeat.configure(interval,timeout,count,millis());}
  void disableHeartbeat(){heartbeat.configure(0,15000,2,millis());}
- void resumeHeartbeat(){enableHeartbeat(15000,3000,2);}
+ void resumeHeartbeat(){enableHeartbeat(60000,45000,2);}
  bool isConnected()const{return connected&&minicamConnected();}
  static bool minicamConnected();
  bool sendTXT(uint8_t* p,size_t n){return frame(1,p,n);}

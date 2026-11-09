@@ -1,3 +1,4 @@
+import {rotateSession} from './session-policy.mjs';
 import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 import {OPUS_BATCH_FORMAT} from './opus-batch.mjs';
 import {UplinkDecoder,UPLINK_FORMAT} from './uplink.mjs';
@@ -95,7 +96,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     },30000);
     // A stale idle session must not keep a paid model connection forever.
     const lifetime=setInterval(()=>{
-      if(mode==='pocket'&&device.radioBusy)return;
+      if(!rotateSession(mode,device.radioBusy,req.headers['x-voxi-standby']))return;
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){

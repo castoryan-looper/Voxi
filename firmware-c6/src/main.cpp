@@ -100,7 +100,11 @@ public:
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular()){cell.resumeHeartbeat();return;}
 #endif
+#ifdef VOXI_BOARD_MINICAM
+    enableHeartbeat(60000,45000,2);}
+#else
     enableHeartbeat(15000,15000,2);}
+#endif
   bool sendPcm(const uint8_t* data,size_t len){
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular())return cell.sendPcm(data,len);
@@ -124,6 +128,11 @@ RadioSocket ws;
 static bool uplinkOpusReady=false;
 #endif
 String authorizationHeader;
+#ifdef VOXI_BOARD_MINICAM
+constexpr uint32_t RADIO_RECONNECT_MS=2000;
+#else
+constexpr uint32_t RADIO_RECONNECT_MS=5000;
+#endif
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
 constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not internal DMA RAM.
 static uint8_t* playback=nullptr;
@@ -284,7 +293,15 @@ static void networkTask(void*){
   authorizationHeader+="opus-24000-batch-v1,";
 #endif
   authorizationHeader+="opus-24000-v1";
-  ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(5000);ws.enableHeartbeat(15000,3000,2);
+#ifdef VOXI_BOARD_MINICAM
+  authorizationHeader+="\r\nX-Voxi-Standby: connected-v1";
+#endif
+  ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(RADIO_RECONNECT_MS);
+#ifdef VOXI_BOARD_MINICAM
+  ws.enableHeartbeat(60000,45000,2);
+#else
+  ws.enableHeartbeat(15000,3000,2);
+#endif
   TxPacket p;uint32_t retryAt=0;bool heartbeatPaused=false,wasWarm=false;
 #ifdef VOXI_OPUS_UPLINK
   bool encodedUpload=false;
@@ -293,7 +310,7 @@ static void networkTask(void*){
   while(true){if(standbyNetworkRequested){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);if(standbyNetworkRequested){standbyNetworkReady=true;vTaskSuspend(nullptr);}}
     if(warmNetworkRequested){if(!warmNetworkReady){ws.disconnect();xQueueReset(outgoing);xQueueReset(incoming);warmNetworkReady=true;}wasWarm=true;vTaskDelay(pdMS_TO_TICKS(10));continue;}
     if(wasWarm){wasWarm=false;warmNetworkReady=false;retryAt=0;ws.setReconnectInterval(0);}
-    if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();bool quick=fastUploadReconnect;fastUploadReconnect=false;ws.setReconnectInterval(quick?1000:5000);retryAt=millis()+(quick?1000:5000);}
+    if(resetLink){resetLink=false;ws.disconnect();xQueueReset(outgoing);diagnosticReconnect();bool quick=fastUploadReconnect;fastUploadReconnect=false;ws.setReconnectInterval(quick?1000:RADIO_RECONNECT_MS);retryAt=millis()+(quick?1000:RADIO_RECONNECT_MS);}
     if(radioNetworkConnected()&&(!radioConfig.tls||time(nullptr)>1700000000)&&(int32_t)(millis()-retryAt)>=0){
       if(probeStallUntil&&(int32_t)(millis()-probeStallUntil)<0){vTaskDelay(pdMS_TO_TICKS(10));continue;}
       bool connected=ws.isConnected();
@@ -301,7 +318,7 @@ static void networkTask(void*){
       bool sending=connected&&(uploading||uxQueueMessagesWaiting(outgoing)>0);
       if(sending&&!heartbeatPaused){ws.disableHeartbeat();heartbeatPaused=true;}
       if(!sending&&heartbeatPaused){ws.resumeHeartbeat();heartbeatPaused=false;}
-      pumpSocket();ws.setReconnectInterval(5000);
+      pumpSocket();ws.setReconnectInterval(RADIO_RECONNECT_MS);
       // Flash absorbs slow reads; receive control/heartbeat frames while uploading.
       for(int budget=0;budget<4&&!resetLink&&!queueFault;budget++){
         if(!ws.isConnected()||xQueueReceive(outgoing,&p,0)!=pdTRUE)break;
@@ -335,6 +352,7 @@ static void networkTask(void*){
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 }
+void requestLinkReconnect(){resetLink=true;}
 bool radioPrepareStandby(){
  if(!incoming||!outgoing)return true;
  standbyNetworkReady=false;standbyNetworkRequested=true;uint32_t at=millis();

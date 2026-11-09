@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('./setup.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0];
 function page(){
  const nodes=new Map(),stored=new Map();
- const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',style:{},checked:false,hidden:false,disabled:false,textContent:'',children:[],replaceChildren(...v){this.children=v;},append(v){this.children.push(v);},add(v){this.children.push(v);},reportValidity(){return true;}});return nodes.get(id);};
+ const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',dataset:{},style:{},checked:false,hidden:false,disabled:false,textContent:'',children:[],replaceChildren(...v){this.children=v;},append(v){this.children.push(v);},add(v){this.children.push(v);},reportValidity(){return true;}});return nodes.get(id);};
  const context=vm.createContext({document:{getElementById:get,createElement:()=>({append(){}})},location:{protocol:'http:',hostname:'localhost'},TextDecoder,TextEncoder,Map,Set,Promise,Error,Number,JSON,Math,Option:class{constructor(text,value){this.text=text;this.value=value;}},setInterval(){},setTimeout,clearTimeout,sessionStorage:{setItem:(k,v)=>stored.set(k,v),getItem:k=>stored.get(k),removeItem:k=>stored.delete(k)}});
  vm.runInContext(source,context);return {context,get,stored};
 }
@@ -109,4 +109,11 @@ test('USB disconnect hides the volume section and disables its controls',async()
  assert.equal(get('audio').hidden,true);
  assert.equal(get('saveVolume').disabled,true);
  assert.equal(get('speakerTest').disabled,true);
+});
+
+test('connected standby only edits screen timeout and hides retired disconnect/sleep settings',async()=>{
+ const {context,get}=page();vm.runInContext("updateStandby({standbyMode:'connected',standbyScreenMinutes:1,standbyLinkMinutes:0,standbySleepMinutes:0});",context);
+ assert.equal(get('standby').hidden,false);assert.equal(get('standbyLegacy').hidden,true);assert.equal(get('standbyTitle').textContent,'联网待机');
+ context.calls=[];vm.runInContext("api=async(method,body)=>{calls.push({method,body});return {standbyMode:'connected',standbyScreenMinutes:1440,message:'已保存'};};",context);
+ get('standbyScreen').value='1440';await get('saveStandby').onclick();assert.equal(context.calls.length,1);assert.equal(context.calls[0].body.screenMinutes,1440);assert.deepEqual(Object.keys(context.calls[0].body),['screenMinutes']);
 });

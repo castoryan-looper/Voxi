@@ -25,3 +25,5 @@ void requestChannelDelta(int delta);
 
 bool radioCanStartRecording();
 bool radioRecordingActive();
+
+void requestLinkReconnect();

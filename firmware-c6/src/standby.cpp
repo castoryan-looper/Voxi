@@ -13,7 +13,8 @@
 bool radioPrepareStandby();
 bool radioSetWarmStandby(bool idle);
 static StandbyPolicy policy;
-static TieredStandbyPolicy tiers;
+static ConnectedStandbyPolicy connected;
+static uint32_t restoreAt=0,wakeRestoreMs=0,restoreErrors=0;
 static int idleStage=0;
 static uint32_t wakeAt=0;
 struct SleepState{uint32_t magic,count,wake,error;bool wakePending;};
@@ -27,7 +28,7 @@ static bool inputDown(){
 }
 void standbyBegin(){
 #ifdef VOXI_BOARD_MINICAM
- Preferences p;if(p.begin("voxi-standby",true)){TieredStandbyPolicy loaded;if(p.getBytesLength("schedule")==sizeof(loaded))p.getBytes("schedule",&loaded,sizeof(loaded));p.end();if(loaded.valid())tiers=loaded;}
+ Preferences p;if(p.begin("voxi-standby",true)){TieredStandbyPolicy loaded;if(p.getBytesLength("schedule")==sizeof(loaded))p.getBytes("schedule",&loaded,sizeof(loaded));if(loaded.valid())connected.screenMinutes=loaded.screenMinutes;connected.screenMinutes=p.getUInt("screen-live",connected.screenMinutes);p.end();if(!connected.valid())connected.screenMinutes=1;}
 #endif
  if(esp_reset_reason()!=ESP_RST_SW||retained.magic!=0x5658534c)retained={0x5658534c,0,0,0,false};
  wakeGuard=retained.wakePending;wakeGuardUntil=millis()+500;retained.wakePending=false;policy.activity(millis());
@@ -35,31 +36,31 @@ void standbyBegin(){
 }
 void standbyActivity(){
 #ifdef VOXI_BOARD_MINICAM
- if(idleStage){int prior=idleStage;
-  if(!boardSetIdle(false)){diagnosticError("Idle audio restore failed");ESP.restart();return;}
-  idleStage=0;wakeAt=millis();
-  if(prior>=2){radioSetWarmStandby(false);wakeGuard=true;wakeGuardUntil=millis()+150;radioDebug("WAKING","Restoring cloud session");}
+ if(idleStage){
+  uint32_t now=millis();if(restoreAt&&uint32_t(now-restoreAt)<1000)return;restoreAt=now;
+  if(!boardSetIdle(false)){restoreErrors++;diagnosticError("Idle audio restore failed; retrying without radio reset");return;}
+  wakeRestoreMs=millis()-now;idleStage=0;wakeAt=millis();restoreAt=0;
  }
+
 #endif
  policy.activity(millis());
 }
 bool standbySuppressInput(){if(!wakeGuard)return false;if((int32_t)(millis()-wakeGuardUntil)<0)return true;if(!inputDown())wakeGuard=false;return true;}
 void standbyDiagnostics(JsonDocument& out){out["standbyIdleMs"]=uint32_t(millis()-policy.lastActivity);out["standbyTimeoutMs"]=60000;out["standbyMode"]="light_sleep";out["standbyCount"]=retained.count;out["standbyWakeCause"]=retained.wake;out["standbyLastError"]=retained.error;out["standbyWakeInputGuard"]=wakeGuard;
 #ifdef VOXI_BOARD_MINICAM
- out["standbyMode"]="tiered";out["standbyStage"]=idleStage;out["standbyScreenMinutes"]=tiers.screenMinutes;out["standbyLinkMinutes"]=tiers.linkMinutes;out["standbySleepMinutes"]=tiers.sleepMinutes;out["standbyTimeoutMs"]=tiers.sleepMinutes*60000u;out["standbyLastWakeAtMs"]=wakeAt;
+ out["standbyMode"]="connected";out["standbyStage"]=idleStage;out["standbyScreenMinutes"]=connected.screenMinutes;out["standbyLinkMinutes"]=0;out["standbySleepMinutes"]=0;out["standbyTimeoutMs"]=connected.screenMinutes*60000u;out["standbyLastWakeAtMs"]=wakeAt;out["standbyWakeRestoreMs"]=wakeRestoreMs;out["standbyRestoreErrors"]=restoreErrors;out["standbyDisconnectEnabled"]=false;out["standbySleepEnabled"]=false;
 #endif
 }
 bool standbySaveSettings(JsonVariantConst body,JsonDocument& out){
 #ifdef VOXI_BOARD_MINICAM
- const char* keys[]={"screenMinutes","linkMinutes","sleepMinutes"};for(auto key:keys)if(!body[key].is<uint32_t>()){out["error"]="待机时间需要整数分钟";return false;}
- TieredStandbyPolicy next;next.screenMinutes=body["screenMinutes"];next.linkMinutes=body["linkMinutes"];next.sleepMinutes=body["sleepMinutes"];
- if(!next.valid()){out["error"]="需要 1 ≤ 关屏 < 断开云端 < 休眠 ≤ 1440 分钟";return false;}
- // Store all three thresholds in one value so a failed write cannot mix schedules.
+ if(!body["screenMinutes"].is<uint32_t>()){out["error"]="关屏时间需要整数分钟";return false;}
+ ConnectedStandbyPolicy next;next.screenMinutes=body["screenMinutes"];
+ if(!next.valid()){out["error"]="关屏时间需要 1–1440 分钟";return false;}
  Preferences p;if(!p.begin("voxi-standby",false)){out["error"]="无法保存待机设置";return false;}
- bool ok=p.putBytes("schedule",&next,sizeof(next))==sizeof(next);TieredStandbyPolicy check;
- ok=ok&&p.getBytes("schedule",&check,sizeof(check))==sizeof(check)&&check.screenMinutes==next.screenMinutes&&check.linkMinutes==next.linkMinutes&&check.sleepMinutes==next.sleepMinutes;p.end();
+ bool ok=p.putUInt("screen-live",next.screenMinutes)==sizeof(uint32_t)&&p.getUInt("screen-live",0)==next.screenMinutes;p.end();
  if(!ok){out["error"]="待机设置保存失败";return false;}
- tiers=next;standbyActivity();standbyDiagnostics(out);out["message"]="待机时间已保存，立即生效";return true;
+ connected=next;standbyActivity();standbyDiagnostics(out);out["message"]="已保存联网待机：关屏省电，保持4G和云端连接，不进入轻睡眠";return true;
+
 #else
  out["error"]="当前板型暂不支持分级待机";return false;
 #endif
@@ -69,11 +70,11 @@ void standbyTick(bool busy,bool provisioning){
  bool input=inputDown();
  if(BOARD_ENCODER_A>=0){int a=digitalRead(BOARD_ENCODER_A),b=digitalRead(BOARD_ENCODER_B);if(encoderA>=0&&(a!=encoderA||b!=encoderB))input=true;encoderA=a;encoderB=b;}
 #ifdef VOXI_BOARD_MINICAM
- if(busy||input||provisioning){standbyActivity();return;}
- int wanted=tiers.stage(uint32_t(millis()-policy.lastActivity));
+ if(busy||input||provisioning||(idleStage&&restoreAt)){standbyActivity();return;}
+ int wanted=connected.stage(uint32_t(millis()-policy.lastActivity));
  if(wanted>=1&&idleStage==0){if(!boardSetIdle(true)){diagnosticError("Idle audio shutdown failed");standbyActivity();return;}idleStage=1;}
- if(wanted>=2&&idleStage==1){if(!radioSetWarmStandby(true)){diagnosticError("Warm standby deferred");standbyActivity();return;}idleStage=2;}
- if(wanted<3)return;
+ // Preserve TCP/TLS and registration at every idle duration.
+ return;
 #else
  if(!policy.due(millis(),busy,input,provisioning))return;
 #endif

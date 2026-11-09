@@ -210,9 +210,9 @@ bool boardSetIdle(bool idle){
  }else{
   esp_codec_dev_sample_info_t fs={};fs.sample_rate=24000;fs.channel=2;fs.bits_per_sample=16;
   if(esp_codec_dev_open(codec,&fs)!=ESP_OK)return false;
-  if(esp_codec_dev_set_out_vol(codec,80)!=ESP_OK||esp_codec_dev_set_in_gain(codec,24)!=ESP_OK||codecWrite(0x09,0xb0)!=ESP_OK)return false;
-  for(int reg=46;reg<=49;reg++)if(codecWrite(reg,30)!=ESP_OK)return false;
-  if(esp_codec_dev_set_out_mute(codec,false)!=ESP_OK)return false;
+  if(esp_codec_dev_set_out_vol(codec,80)!=ESP_OK||esp_codec_dev_set_in_gain(codec,24)!=ESP_OK||codecWrite(0x09,0xb0)!=ESP_OK){esp_codec_dev_close(codec);return false;}
+  for(int reg=46;reg<=49;reg++)if(codecWrite(reg,30)!=ESP_OK){esp_codec_dev_close(codec);return false;}
+  if(esp_codec_dev_set_out_mute(codec,false)!=ESP_OK){esp_codec_dev_close(codec);return false;}
  }
  idleAudio=idle;idleDisplay=idle;
  if(!idle)audioFlush();

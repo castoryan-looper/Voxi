@@ -1,3 +1,22 @@
+# MiniCam 联网待机（2026-11-09）
+
+默认空闲 1 分钟关屏并关闭音频 codec，保持 CPU、4G 注册、数据网络、TLS/WebSocket 和网络接收任务运行。任一有效按键/USB操作恢复屏幕与音频，不重启、不等待重新注册4G。空闲5分钟、15分钟或更久均不主动断链、不执行 CFUN=0、不进入 light sleep。C6、S3G、AMOLED 原有策略不变。
+
+旧NVS分级设置只继承关屏分钟数，原断链/休眠阈值不再执行；新 screen-live 键独立保存 1–1440 分钟并回读校验。管理页面识别 standbyMode=connected，仅显示关屏时间；兼容旧管理客户端发送的三个字段，但只采用 screenMinutes，回包明确说明联网待机行为。旧 tiered 设备页面保持原样。
+
+客户端60秒无入站数据时发送兜底Ping，等待45秒、最多两次超时；收到任何合法帧均证明存活。网关仍每30秒Ping，正常待机时客户端不再额外发15秒Ping。上传期间保留原来的心跳暂停与完成后恢复机制。MiniCam连接失败重试间隔2秒，保留注册/数据网络，只重建TCP/TLS/语音；实际注册丢失仍由现有模组管理任务恢复。MIPCALL报告数据上下文丢失会立即废弃旧socket，避免假在线。硬件DTR/PSM/eDRX未启用，未验证的引脚/AT低功耗命令不使用。
+
+设备发送 X-Voxi-Standby: connected-v1。新网关对已认证的 Pocket 联网待机客户端取消强制30分钟会话轮换；旧设备及其他模式仍保留原限制。上游自然失效仍可能触发后台重连，不能承诺运营商或上游永不断线；保持语音会话也继续占用现有并发资源。
+
+诊断：standbyStage=0/1、standbyMode=connected、standbySleepEnabled=false、standbyDisconnectEnabled=false、standbyWakeRestoreMs、standbyRestoreErrors；status 的 body.keepAwake=false 只观察不唤醒。音频恢复失败会清理未完成codec初始化并限速重试，保留网络任务，不直接整机重启。
+
+USB link_reconnect 为闲时诊断操作：仅请求重建云端连接，用于验证保留模组注册的后台恢复，忙于录音/播放时拒绝。
+
+实际整机电流、续航、长时间弱网及自然断网恢复需要测量。此实现提供联网待机，不宣称达到模组手册的休眠电流。OTA保持撤回，当前独立分支不包含OTA实现；已迁移设备只刷应用，保留现有分区/NVS。
+
+---
+以下为旧分级方案历史记录，已被上述策略替代：
+
 # MiniCam 分级待机
 
 适用 `zhengchen_minicam_20` 和 `zhengchen_minicam_20_gpio11_ptt`。其他维护板型保留原一分钟休眠行为。

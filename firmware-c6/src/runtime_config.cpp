@@ -91,6 +91,7 @@ static void profilesJson(JsonDocument& d){
   for(unsigned i=0;i<known.count;i++){auto r=rows.add<JsonObject>();r["ssid"]=known.profiles[i].ssid;r["passwordSaved"]=known.profiles[i].password[0]!=0;r["preferred"]=!strcmp(known.preferred,known.profiles[i].ssid);r["connected"]=WiFi.status()==WL_CONNECTED&&WiFi.SSID()==known.profiles[i].ssid;}
 }
 static void fillConfig(JsonDocument& d){
+  d["otaEnabled"]=false;
   d["networkMode"]=radioConfig.networkMode;d["apn"]=radioConfig.apn;
 #ifdef VOXI_BOARD_MINICAM
   d["cellularSupported"]=true;
@@ -178,6 +179,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
   if(method!="status"||!body["keepAwake"].is<bool>()||body["keepAwake"].as<bool>())standbyActivity();
   if(method=="config")fillConfig(out);
   else if(method=="status"){
+    out["otaEnabled"]=false;
     out["networkMode"]=radioConfig.networkMode;out["networkConnected"]=radioNetworkConnected();out["firmware"]=BOARD_NAME;out["configured"]=radioConfig.valid;out["configIssue"]=configIssue;out["configRevision"]=radioConfig.revision;out["storageReady"]=storageReady;out["tokenConfigured"]=radioConfig.token.length()>0;out["caConfigured"]=radioConfig.ca.length()>0;out["cloudConfigured"]=radioConfig.valid;
     out["usbConnected"]=HWCDC::isPlugged();out["screen"]=configView?(ap?"hotspot_setup":"usb_setup"):"radio";out["wifiConnected"]=WiFi.status()==WL_CONNECTED;out["ssid"]=WiFi.SSID();out["ip"]=WiFi.localIP().toString();out["wifiReason"]=(int)wifiReason;
     out["cloudReady"]=cloudNow;out["busy"]=busyNow;out["channel"]=currentChannel+1;out["apActive"]=ap;out["timeReady"]=time(nullptr)>1700000000;
@@ -199,6 +201,7 @@ static int dispatch(const String& method,JsonVariantConst body,JsonDocument& out
     return fail(out,"此板型不支持4G");
 #endif
   }
+  else if(method=="link_reconnect"){if(busyNow){out["error"]="请等待录音和播放结束";return 409;}requestLinkReconnect();out["message"]="后台重建云端连接，保留4G注册与数据网络";}
   else if(method=="opus_probe"){
     if(busyNow){out["error"]="请先等待录音和播放结束";return 409;}
     String hex=body["packet"]|"";size_t n=hex.length()/2;uint8_t packet[1279];int16_t pcm[OPUS_REPLY_SAMPLES];

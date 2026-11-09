@@ -13,3 +13,10 @@ struct StandbyPolicy {
   return uint32_t(now-lastActivity)>=60000;
  }
 };
+
+// MiniCam keeps the radio/network alive at every idle duration.
+struct ConnectedStandbyPolicy {
+ uint32_t screenMinutes=1;
+ bool valid()const{return screenMinutes>=1&&screenMinutes<=1440;}
+ int stage(uint32_t idle)const{return idle>=screenMinutes*60000u?1:0;}
+};

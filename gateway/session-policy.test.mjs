@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {rotateSession} from './session-policy.mjs';
+test('connected standby skips forced rotation; legacy and other modes retain lifetime limits',()=>{assert.equal(rotateSession('pocket',false,'connected-v1'),false);assert.equal(rotateSession('pocket',false,undefined),true);assert.equal(rotateSession('pocket',true,undefined),false);assert.equal(rotateSession('openai',false,'connected-v1'),true);assert.equal(rotateSession('pocket',false,'unknown'),true);});

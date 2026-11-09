@@ -63,7 +63,7 @@ static void parseLine(std::string_view line){
   int code=cellularInteger(args[1]);socketUp=code==0;xSemaphoreTake(stateMutex,portMAX_DELAY);state.socketError=code;xSemaphoreGive(stateMutex);xEventGroupSetBits(events,code==0?OPENED:OPEN_FAILED);
  }else if(name=="+MIPCLOSE"&&count&&args[0]=="0"){socketUp=false;xEventGroupSetBits(events,CLOSED);}
  else if(name=="+MIPSEND"&&count>=2&&args[0]=="0"){sentCount=cellularInteger(args[1]);xEventGroupSetBits(events,SENT);}
- else if(name=="+MIPCALL"&&count>=2&&args[0]=="1")ipUp=args[1]=="1";
+ else if(name=="+MIPCALL"&&count>=2&&args[0]=="1"){ipUp=args[1]=="1";if(!ipUp&&socketUp)tcpFailed("4G data context lost");}
  else if(name=="+CEREG"&&count){int v=cellularInteger(args[count>1&&!quoted[1]?1:0]);xSemaphoreTake(stateMutex,portMAX_DELAY);state.registered=v==1||v==5;xSemaphoreGive(stateMutex);if(v!=1&&v!=5){ipUp=false;char reason[48];snprintf(reason,sizeof(reason),"LTE registration lost: %d",v);tcpFailed(reason);}}
  else if(name=="+CSQ"&&count){xSemaphoreTake(stateMutex,portMAX_DELAY);state.signal=cellularInteger(args[0]);xSemaphoreGive(stateMutex);}
  else if(name=="+CPIN"&&count){xSemaphoreTake(stateMutex,portMAX_DELAY);state.simReady=args[0]=="READY";xSemaphoreGive(stateMutex);}

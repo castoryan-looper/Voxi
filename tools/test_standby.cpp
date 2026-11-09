@@ -1,6 +1,12 @@
 #include "../firmware-c6/include/standby_policy.h"
 #include <assert.h>
+#include <initializer_list>
 int main(){
+ ConnectedStandbyPolicy live;assert(live.valid());
+ assert(live.stage(59999)==0&&live.stage(60000)==1);
+ for(uint32_t minutes: {5u,15u,30u,60u,1440u})assert(live.stage(minutes*60000u)==1);
+ live.screenMinutes=1440;assert(live.valid()&&live.stage(86399999)==0&&live.stage(86400000)==1);
+ live.screenMinutes=0;assert(!live.valid());live.screenMinutes=1441;assert(!live.valid());
  TieredStandbyPolicy tiers;assert(tiers.valid());
  assert(tiers.stage(59999)==0);assert(tiers.stage(60000)==1);
  assert(tiers.stage(299999)==1);assert(tiers.stage(300000)==2);
