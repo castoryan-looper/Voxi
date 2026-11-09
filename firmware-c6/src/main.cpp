@@ -500,6 +500,18 @@ static void cachedUploadTick(){
   }
 }
 bool radioCanStartRecording(){return ready&&!tx&&!uploading&&!thinking&&!playing&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
+#ifdef VOXI_BOARD_MINICAM
+const char* radioIdleDisplayPhase(){
+  if(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||
+     audioCacheBusy()||speakerTestPending()||probeActive||probeFinishing)return nullptr;
+  if(!radioConfig.valid)return "SETUP NEEDED";
+  if(!radioNetworkConnected())return radioUsesCellular()?"4G CONNECT":"WIFI CONNECT";
+  if(radioConfig.tls&&time(nullptr)<=1700000000)return "SYNC TIME";
+  if(ready)return "READY";
+  if(backendError)return "BACKEND ERROR";
+  return gatewayLinked?"WAIT AI":"CLOUD CONNECT";
+}
+#endif
 bool radioRecordingActive(){return tx;}
 bool requestDownlinkTest(uint32_t seconds){
  if(!downlinkProbeReady||!radioCanStartRecording()||seconds<1||seconds>180)return false;

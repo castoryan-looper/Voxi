@@ -67,7 +67,12 @@ class PsramCanvas:public Arduino_Canvas{
  }
 };
 static PsramCanvas canvas;
-static void postView(bool force=false){if(!views||(idleDisplay&&!force))return;View s=baseView;strlcpy(s.channelMode,radioChannelMode(),sizeof(s.channelMode));strlcpy(s.taskState,radioTaskState(),sizeof(s.taskState));auto state=radioDebugRead();strlcpy(s.phase,state.phase,sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
+static const char* viewPhase(const RadioDebugSnapshot& debug){
+ if(pttHeld&&!strcmp(debug.phase,"HOLD 0.3s"))return debug.phase;
+ const char* idlePhase=radioIdleDisplayPhase();
+ return idlePhase?idlePhase:debug.phase;
+}
+static void postView(bool force=false){if(!views||(idleDisplay&&!force))return;View s=baseView;strlcpy(s.channelMode,radioChannelMode(),sizeof(s.channelMode));strlcpy(s.taskState,radioTaskState(),sizeof(s.taskState));auto state=radioDebugRead();strlcpy(s.phase,viewPhase(state),sizeof(s.phase));s.cellular=radioUsesCellular();s.wifi=WiFi.status()==WL_CONNECTED;s.cellularUp=s.cellular&&minicamModemReady();s.wifiBars=minicamWifiBars(s.wifi,s.wifi?WiFi.RSSI():0);s.cellularBars=minicamCellularBars(s.cellularUp,minicamSignal());s.battery=batteryLevel;s.charging=batteryStatus.charging;s.usb=HWCDC::isPlugged();s.volume=volumePercent;xQueueOverwrite(views,&s);}
 void boardStatusTick(){
  uint32_t now=millis();static uint32_t sampleAt=0,batteryAt=0;static MiniCamControls controls;
  if(now-sampleAt>=20){sampleAt=now;
@@ -241,6 +246,8 @@ static uint32_t outputSamples=0,outputErrors=0;static unsigned outputPeak=0;stat
 void speakerTestRequest(){testPending=true;}
 bool speakerTestPending(){return testPending;}
 void speakerDiagnostics(JsonDocument& out){
+ auto debug=radioDebugRead();
+ out["displayPhase"]=String(viewPhase(debug));
  out["displayController"]="ST7789";out["displayReady"]=displayReady;out["displayFrames"]=(uint32_t)displayFrames;out["mainButtonRaw"]=mainRaw;out["volumeKeyMv"]=volumeKeyMv;out["mainButtonClicks"]=mainClicks;out["talkLatched"]=false;out["mainButtonHeld"]=mainHeld;out["pttButtonHeld"]=pttHeld;out["talkButton"]=talkButtonName;out["talkMode"]="hold_to_talk";out["recordingActive"]=radioRecordingActive();out["canStartRecording"]=radioCanStartRecording();out["audioCodec"]="ES8388";minicamModemDiagnostics(out);out["speakerVolume"]=volumePercent;out["speakerWrittenSamples"]=outputSamples;out["speakerPeak"]=outputPeak;out["speakerWriteErrors"]=outputErrors;
  bool wifi=WiFi.status()==WL_CONNECTED;
  if(wifi)out["wifiRssi"]=WiFi.RSSI();else out["wifiRssi"]=nullptr;

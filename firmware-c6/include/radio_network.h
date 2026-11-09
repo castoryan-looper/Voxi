@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #ifdef VOXI_BOARD_MINICAM
 #include "minicam_modem.h"
+const char* radioIdleDisplayPhase();
 #endif
 inline bool radioUsesCellular(){
 #ifdef VOXI_BOARD_MINICAM
