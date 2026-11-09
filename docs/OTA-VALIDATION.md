@@ -16,3 +16,7 @@
 系统只列出 COM10，读取现有 status 时串口初始化返回 Windows 设备错误 31，不能确认板型。未刷写、未擦除设备 Flash、未改变设备配置，未发布生产 manifest，未部署生产云端。
 
 因此当前是**待实机验收的候选实现**，不能声称真实 OTA/断电回退/声音回归已通过。必须在对应 S3 板上完成 OTA.md 中的正常更新、断网/断电、错误镜像与失败启动回退测试后，再启用生产自动发布。开发分支可供审查，勿把编译成功等同于硬件验收。
+
+## 后续硬件连接尝试
+
+已通过 USB 状态确认设备为正常音量加键对讲的 MiniCam（非 GPIO11 改板），cellular 模式、云端 READY、电量 85%；esptool 确认 S3 rev0.2、16 MB Flash、8 MB PSRAM。高速备份的 stub 读取出现 Serial data stream stopped，ROM 读取可以推进但完整备份尚未成功；后续下载接口无响应。Windows 非管理员会话不能重置 PnP 接口，已请求物理重插。此轮未执行 erase-region 或 write-flash，现有 Flash 和配置未改动。迁移脚本新增 --rom-backup 与完整长度检查，新增顺序测试通过。烧录和 OTA 实机验收仍待完成。

@@ -20,7 +20,7 @@ python -m pip install esptool==5.1.0
 python tools/bootstrap_ota.py --port COM10 --target waveshare_s3g_ota --backup-dir work/private-ota-backup-01 --erase-recording-cache
 ```
 
-脚本先读取并保存旧分区表、NVS/PHY；只有备份成功才继续。重建录音区并清空 OTA 状态，写入应用及指向 app0 的 VALID 初始状态，使首次在线升级也有已知的回退槽。只擦除新录音区及 OTA 数据区，旧缓存与未完成录音不保留。私有备份包含登录资料，不能提交进仓库。迁移期间必须保持 USB 和供电；中断可重新通过 USB 恢复。脚本拒绝覆盖已有备份目录。
+脚本先读取并保存旧分区表、NVS/PHY；只有备份成功且长度完整才继续。部分 Windows S3 原生 USB 在 flasher stub 读取时会停住，可增加 `--rom-backup`，仅备份改用 ROM 读取，擦写路径不变。重建录音区并清空 OTA 状态，写入应用及指向 app0 的 VALID 初始状态，使首次在线升级也有已知的回退槽。只擦除新录音区及 OTA 数据区，旧缓存与未完成录音不保留。私有备份包含登录资料，不能提交进仓库。迁移期间必须保持 USB 和供电；中断可重新通过 USB 恢复。脚本拒绝覆盖已有备份目录。
 
 ## 云端发布
 

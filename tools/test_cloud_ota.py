@@ -1,5 +1,7 @@
 import json, tempfile, unittest, runpy, struct
 from bootstrap_ota import initial_otadata
+import bootstrap_ota
+from unittest.mock import patch
 from pathlib import Path
 from publish_firmware import publish, TARGETS
 from test_flash_layout import Environment, SCRIPT
@@ -34,4 +36,22 @@ class OtaTests(unittest.TestCase):
    data[12]=13;image.write_bytes(data)
    with self.assertRaises(ValueError):publish(image,root/'releases',target,'2.0')
    self.assertEqual(json.loads((folder/'manifest.json').read_text()),result)
+
+ def test_rom_backup_finishes_before_erase_and_never_erases_nvs(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);target='zhengchen_minicam_20_ota';built=root/'firmware-c6/.pio/build'/target;built.mkdir(parents=True)
+   data=bytearray(512);data[0]=0xe9;data[12]=9;tag=b'VOXI_OTA_IMAGE:'+target.encode()+b'\0';data[100:100+len(tag)]=tag
+   (built/'firmware.bin').write_bytes(data)
+   for name in ('bootloader.bin','partitions.bin'):(built/name).write_bytes(b'fixture')
+   backup=root/'backup';calls=[]
+   def run(command,check):
+    calls.append(command)
+    if 'read-flash' in command:Path(command[-1]).write_bytes(b'\xff'*0x8000)
+   args=['bootstrap_ota.py','--port','COM_TEST','--target',target,'--backup-dir',str(backup),'--erase-recording-cache','--rom-backup']
+   with patch.object(bootstrap_ota,'__file__',str(root/'tools/bootstrap_ota.py')),patch('sys.argv',args),patch.object(bootstrap_ota.subprocess,'run',side_effect=run):bootstrap_ota.main()
+   self.assertEqual(len(calls),3);self.assertIn('--no-stub',calls[0]);self.assertNotIn('--no-stub',calls[1]);self.assertNotIn('--no-stub',calls[2])
+   self.assertEqual(calls[1][-3:],['erase-region','0x810000','0x7f0000'])
+   self.assertIn('0xffe000',calls[2]);self.assertNotIn('0xe000',calls[2])
+   self.assertEqual((backup/'ota-initial.bin').read_bytes(),initial_otadata())
+
 if __name__=='__main__':unittest.main()

@@ -11,6 +11,7 @@ def main():
     p.add_argument('--port',required=True);p.add_argument('--target',choices=TARGETS,required=True)
     p.add_argument('--backup-dir',type=Path,required=True)
     p.add_argument('--erase-recording-cache',action='store_true',required=True)
+    p.add_argument('--rom-backup',action='store_true',help='Use ROM-only reads if the USB flasher stub stalls during backup')
     a=p.parse_args();root=Path(__file__).resolve().parents[1]
     built=root/'firmware-c6/.pio/build'/a.target
     for name in ('bootloader.bin','partitions.bin','firmware.bin'):
@@ -18,9 +19,12 @@ def main():
     validate_image(built/'firmware.bin',a.target)
     a.backup_dir.mkdir(parents=True,exist_ok=False)
     command=[sys.executable,'-m','esptool','--chip','esp32s3','--port',a.port]
-    def run(*args,after='no-reset'):subprocess.run(command+['--after',after]+list(map(str,args)),check=True)
+    def run(*args,after='no-reset',rom=False):
+        subprocess.run(command+(['--no-stub'] if rom else [])+['--after',after]+list(map(str,args)),check=True)
     # These backups contain credentials. Never commit/upload them.
-    run('read-flash','0x8000','0x8000',a.backup_dir/'partitions-nvs-phy.bin')
+    run('read-flash','0x8000','0x8000',a.backup_dir/'partitions-nvs-phy.bin',rom=a.rom_backup)
+    if (a.backup_dir/'partitions-nvs-phy.bin').stat().st_size!=0x8000:
+        raise RuntimeError('Incomplete backup; device has not been erased')
     mb,_=TARGETS[a.target];storage=0x610000 if mb==8 else 0x810000
     run('erase-region',hex(storage),hex(mb*1024*1024-storage))
     # Select app0 VALID explicitly, so the first online upgrade has a known-good fallback.
