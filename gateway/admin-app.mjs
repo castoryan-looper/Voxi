@@ -1,5 +1,5 @@
 
-const $=id=>document.getElementById(id);let token='',polling=false,voiceDescriptionDirty=false,aiLoaded=false,aiDefaults=null,aiReading=false,aiDirty=false;
+const $=id=>document.getElementById(id);let token='',polling=false,voiceDescriptionDirty=false,voiceDirty=false,voiceRuntimeDirty=false,fastStyleDirty=false;
 async function api(path,body,{timeoutMs=12000,signal}={}){
  const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),timeoutMs);const cancel=()=>controller.abort();if(signal?.aborted)cancel();else signal?.addEventListener('abort',cancel,{once:true});
  try{const response=await fetch('/api/admin/'+path,{method:body?'POST':'GET',credentials:'same-origin',signal:controller.signal,headers:{'X-CSRF-Token':token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store'});let data;try{data=await response.json();}catch{throw Error('服务返回了非 JSON 响应（HTTP '+response.status+'），请更新网关后重试');}if(!response.ok)throw Error(data.error||'请求失败（HTTP '+response.status+'）');return data;}catch(e){if(e.name==='AbortError')throw Error('请求超过'+Math.round(timeoutMs/1000)+'秒未完成，请检查云端服务后重试');throw e;}finally{clearTimeout(timeout);signal?.removeEventListener('abort',cancel);}
@@ -9,25 +9,67 @@ const labels={user_account_changed:'用户账户已更新',device_limit:'数量�
 async function refresh(){if(polling||!token)return;polling=true;const requestToken=token;try{const s=await api('status');if(token!==requestToken)return;$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;$('navigation').hidden=false;$('breadcrumb').hidden=false;$('online').textContent=s.devices.length;$('limitValue').textContent=s.maxConnections;$('available').textContent=Math.max(0,s.maxConnections-s.devices.length);if(document.activeElement!==$('limit'))$('limit').value=s.maxConnections;$('limit').max=s.capacity;$('capacity').textContent=`可设置 1–${s.capacity} 台。${s.persistent?'配置已启用持久保存，重启后保留。':'当前未启用持久保存。'} 运行模式：${s.mode}`;let registryError='';lastConnections=s.devices;renderDevices();try{const registry=await api('devices');if(token===requestToken&&Array.isArray(registry.devices)){deviceRegistryData=registry.devices;renderDevices();}}catch(e){registryError=' · 设备档案读取失败：'+e.message;}$('events').replaceChildren();for(const e of s.events){const li=document.createElement('li');li.textContent=new Date(e.at).toLocaleTimeString()+' · '+(labels[e.reason]||labels[e.event]||e.event)+(e.connection?' · #'+e.connection:'')+(e.origin?' · '+e.origin:'')+(e.maxConnections?' · 上限 '+e.maxConnections:'');$('events').append(li);}$('updated').textContent='更新于 '+new Date().toLocaleTimeString()+registryError;$('message').textContent='';renderPage();}catch(e){if(token===requestToken)$('message').textContent=e.message;}finally{polling=false;}}
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginButton').disabled=true;try{const data=await api('login',{username:$('username').value.trim(),password:$('secret').value});token=data.csrf;$('secret').value='';await refresh();}catch(e){$('message').textContent=e.message;}finally{$('loginButton').disabled=false;}};
 $('limitForm').onsubmit=async e=>{e.preventDefault();$('save').disabled=true;try{await api('limit',{maxConnections:Number($('limit').value)});await refresh();}catch(e){$('message').textContent=e.message;}finally{$('save').disabled=false;}};
-function showLogin(){adminVoicePlayer?.stop(null);voiceDescriptionDirty=false;userAccountsDirty=false;$('newUserPassword').value='';$('userAccounts').replaceChildren();agentGeneration++;agentData=null;agentDirty=false;agentDetail=null;$('credentialKey').value='';$('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;channelDirty=false;serviceDirty=false;connectionDirty=false;$('agentTaskDetail').hidden=true;$('agentTasks').replaceChildren();$('agentDetailResult').textContent='';currentRoute='';$('navigation').hidden=true;$('breadcrumb').hidden=true;memoryData=null;deviceRegistryData=[];lastConnections=[];$('memorySection').hidden=true;$('memoryPanel').hidden=true;$('memoryFacts').replaceChildren();$('memoryTurns').replaceChildren();token='';aiLoaded=false;aiDefaults=null;$('aiForm').hidden=true;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('message').textContent='';}
+function showLogin(){adminVoicePlayer?.stop(null);voiceDescriptionDirty=false;userAccountsDirty=false;$('newUserPassword').value='';$('userAccounts').replaceChildren();agentGeneration++;agentData=null;agentDirty=false;agentDetail=null;$('credentialKey').value='';$('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;channelDirty=false;serviceDirty=false;connectionDirty=false;$('agentTaskDetail').hidden=true;$('agentTasks').replaceChildren();$('agentDetailResult').textContent='';currentRoute='';$('navigation').hidden=true;$('breadcrumb').hidden=true;memoryData=null;deviceRegistryData=[];lastConnections=[];$('memorySection').hidden=true;$('memoryPanel').hidden=true;$('memoryFacts').replaceChildren();$('memoryTurns').replaceChildren();token='';discardEdits();$('aiForm').hidden=true;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('message').textContent='';}
 $('refresh').onclick=refresh;$('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){$('message').textContent=e.message;}};setInterval(refresh,5000);
 $('passwordForm').onsubmit=async e=>{e.preventDefault();$('changePassword').disabled=true;try{await api('password',{currentPassword:$('currentPassword').value,newPassword:$('newPassword').value});$('currentPassword').value='';$('newPassword').value='';showLogin();$('message').textContent='密码已修改，请重新登录。';}catch(e){$('message').textContent=e.message;}finally{$('changePassword').disabled=false;}};
 async function restoreSession(){try{const data=await api('session');token=data.csrf;await refresh();}catch{showLogin();}}
-let aiLegacyChannels=[];
-function fillAi(value){$('voiceChoice').value=value.voice||'cove';aiLegacyChannels=value.channels;$('systemPrompt').value=value.systemPrompt;$('stallSeconds').value=value.responseIdleTimeoutSeconds;$('endSilence').value=value.replyEndSilenceMs;$('statsSeconds').value=value.mediaStatsIntervalSeconds;$('audioRetransmission').checked=value.audioRetransmission;$('audioRecoveryPackets').value=value.audioRecoveryPackets;previewAi();}
-function readAi(){return {voice:$('voiceChoice').value,systemPrompt:$('systemPrompt').value,channels:aiLegacyChannels,responseIdleTimeoutSeconds:Number($('stallSeconds').value),replyEndSilenceMs:Number($('endSilence').value),mediaStatsIntervalSeconds:Number($('statsSeconds').value),audioRetransmission:$('audioRetransmission').checked,audioRecoveryPackets:Number($('audioRecoveryPackets').value)};}
-function previewAi(){$('effectivePrompt').textContent=$('systemPrompt').value;}
-function validateAiResponse(data){if(!data?.settings||typeof data.settings.systemPrompt!=='string'||!Array.isArray(data.settings.channels)||data.settings.channels.length!==4||!data.settings.channels.every(c=>typeof c.name==='string'&&typeof c.persona==='string'))throw Error('后端配置格式不兼容，请同时更新 Pocket 后端和 Voxi 网关');}
-async function loadAi(){
- if(aiReading)return;const requested=token;aiReading=true;$('reloadAi').disabled=true;$('reloadAi').textContent='正在读取…';$('aiMessage').textContent='正在连接云端，读取实际生效配置…';
- try{const data=await api('ai');if(token!==requested)return;validateAiResponse(data);aiDefaults=data.defaults;fillVoiceCatalog(data.voices);fillAi(data.settings);updateVoiceDetails();aiDirty=false;$('runtimeInfo').textContent='模型：'+(data.runtime?.model||'原生语音')+' · 音色：'+(data.runtime?.voice||'cove')+' · 协议：'+(data.runtime?.protocol||'v3');$('developerPrompt').textContent=data.runtime?.developerInstructions||'';$('aiForm').hidden=false;$('aiMessage').textContent='读取成功，可在下方编辑。'+(data.applies||'保存后新连接或切换频道生效。');}
- catch(e){if(token===requested)$('aiMessage').textContent='读取失败：'+e.message+'。可点击“重新读取”重试；未修改任何配置。';}
- finally{aiReading=false;$('reloadAi').disabled=false;$('reloadAi').textContent='重新读取';}
+function fillVoiceSettings(value){
+ $('voiceChoice').value=value.voice||'cove';$('stallSeconds').value=value.responseIdleTimeoutSeconds;
+ $('endSilence').value=value.replyEndSilenceMs;$('statsSeconds').value=value.mediaStatsIntervalSeconds;
+ $('audioRetransmission').checked=value.audioRetransmission;$('audioRecoveryPackets').value=value.audioRecoveryPackets;
 }
-$('aiForm').oninput=e=>{if(['voiceStyleDescription','voiceStyleUseCase'].includes(e?.target?.id)){voiceDescriptionDirty=true;$('voiceDescriptionStatus').textContent='说明尚未保存，请点击保存这款音色的说明。';return;}if(e?.target?.id==='voicePreviewLanguage')return;aiDirty=true;$('aiMessage').textContent='有未保存的修改，请点击“保存 AI 配置”。';};
-$('reloadAi').onclick=()=>{if(aiDirty&&!confirm('重新读取会覆盖尚未保存的编辑，继续吗？'))return;return loadAi();};$('previewAi').onclick=previewAi;
-$('defaultAi').onclick=()=>{if(aiDefaults&&confirm('填入默认值？保存后才会生效。')){const values=readAi();const keys=currentPage().key==='voice'?['voice','responseIdleTimeoutSeconds','replyEndSilenceMs','mediaStatsIntervalSeconds','audioRetransmission','audioRecoveryPackets']:['systemPrompt'];for(const key of keys)values[key]=aiDefaults[key];fillAi(values);aiDirty=true;$('aiMessage').textContent='已填入默认值，尚未保存。';}};
-$('aiForm').onsubmit=async e=>{e.preventDefault();$('saveAi').disabled=true;$('saveAi').textContent='正在保存…';$('aiMessage').textContent='正在保存到云端…';try{const edit=readAi(),latest=await api('ai');validateAiResponse(latest);const expected={...latest.settings};const keys=currentPage().key==='voice'?['voice','responseIdleTimeoutSeconds','replyEndSilenceMs','mediaStatsIntervalSeconds','audioRetransmission','audioRecoveryPackets']:['systemPrompt'];for(const key of keys)expected[key]=edit[key];await api('ai',expected);$('aiMessage').textContent='已提交，正在重新读取核验…';const data=await api('ai');validateAiResponse(data);if(JSON.stringify(data.settings)!==JSON.stringify(expected)&&Object.keys(expected).some(k=>JSON.stringify(data.settings[k])!==JSON.stringify(expected[k])))throw Error('保存后的配置与提交内容不一致，请重新读取检查');aiDirty=false;previewAi();if(currentPage().key==='voice'){adminVoicePlayer?.stop(null);$('voicePreviewStatus').textContent='默认音色已保存。设备重连或切换频道生效。';$('runtimeInfo').textContent='模型：'+(data.runtime?.model||'原生语音')+' · 音色：'+(data.runtime?.voice||expected.voice)+' · 协议：'+(data.runtime?.protocol||'v3');}$('aiMessage').textContent='保存成功，已重新读取并核验一致。'+(data.applies||'新连接或切换频道生效。');}catch(e){$('aiMessage').textContent='保存未确认：'+e.message+'。编辑内容已保留。';}finally{$('saveAi').disabled=false;$('saveAi').textContent='保存 AI 配置';}};
+function validateAiResponse(data){if(typeof data?.settings?.systemPrompt!=='string')throw Error('后端配置格式不兼容，请更新 Pocket Cloud');}
+async function saveAiPatch(patch){
+ const data=await api('ai',{patch});validateAiResponse(data);
+ if(Object.entries(patch).some(([key,value])=>data.settings[key]!==value))throw Error('云端未确认此次修改，请重新读取');
+}
+async function loadAi(){
+ const session=token,route=routeGeneration;
+ $('reloadAi').disabled=true;$('aiMessage').textContent='正在读取云端音色设置…';
+ try{
+  const data=await api('ai');if(token!==session||route!==routeGeneration)return;
+  validateAiResponse(data);fillVoiceCatalog(data.voices);fillVoiceSettings(data.settings);updateVoiceDetails();
+  voiceDirty=voiceRuntimeDirty=voiceDescriptionDirty=false;
+  $('aiForm').hidden=$('voiceRuntimeForm').hidden=false;$('aiMessage').textContent='';$('voiceRuntimeMessage').textContent='';
+ }catch(error){if(token===session&&route===routeGeneration)$('aiMessage').textContent='读取失败：'+error.message;}
+ finally{if(route===routeGeneration)$('reloadAi').disabled=false;}
+}
+async function loadFastStyle(){
+ const session=token,route=routeGeneration;$('fastStyleForm').hidden=true;
+ $('fastStyleMessage').textContent='正在读取…';
+ try{
+  const data=await api('ai');if(token!==session||route!==routeGeneration)return;
+  validateAiResponse(data);$('systemPrompt').value=data.settings.systemPrompt;fastStyleDirty=false;
+  $('fastStyleForm').hidden=false;$('fastStyleMessage').textContent='';
+ }catch(error){if(token===session&&route===routeGeneration)$('fastStyleMessage').textContent='读取失败：'+error.message;}
+}
+$('reloadAi').onclick=()=>{if(voiceDirty||voiceRuntimeDirty||voiceDescriptionDirty){if(!confirm('重新读取会丢弃尚未保存的语音设置，继续吗？'))return;}return loadAi();};
+$('fastStyleForm').oninput=()=>{fastStyleDirty=true;};
+$('voiceRuntimeForm').oninput=()=>{voiceRuntimeDirty=true;};
+for(const id of ['voiceStyleDescription','voiceStyleUseCase'])$(id).oninput=()=>{voiceDescriptionDirty=true;$('voiceDescriptionStatus').textContent='说明尚未保存。';};
+
+async function submitAiPatch(button,message,patch,onSaved){
+ const session=token,route=routeGeneration;$(button).disabled=true;$(message).textContent='正在保存…';
+ try{
+  await saveAiPatch(patch);
+  if(token===session&&route===routeGeneration){onSaved();$(message).textContent='已保存。';}
+ }catch(error){if(token===session&&route===routeGeneration)$(message).textContent='保存失败：'+error.message;}
+ finally{$(button).disabled=false;}
+}
+$('fastStyleForm').onsubmit=e=>{e.preventDefault();const prompt=$('systemPrompt').value;
+ return submitAiPatch('saveFastStyle','fastStyleMessage',{systemPrompt:prompt},()=>{fastStyleDirty=$('systemPrompt').value!==prompt;});
+};
+$('aiForm').onsubmit=e=>{e.preventDefault();const voice=$('voiceChoice').value;
+ return submitAiPatch('saveAi','aiMessage',{voice},()=>{voiceDirty=$('voiceChoice').value!==voice;});
+};
+function readVoiceRuntime(){return {
+ responseIdleTimeoutSeconds:Number($('stallSeconds').value),replyEndSilenceMs:Number($('endSilence').value),
+ mediaStatsIntervalSeconds:Number($('statsSeconds').value),audioRetransmission:$('audioRetransmission').checked,
+ audioRecoveryPackets:Number($('audioRecoveryPackets').value)
+};}
+$('voiceRuntimeForm').onsubmit=e=>{e.preventDefault();const patch=readVoiceRuntime();
+ return submitAiPatch('saveVoiceRuntime','voiceRuntimeMessage',patch,()=>{voiceRuntimeDirty=JSON.stringify(readVoiceRuntime())!==JSON.stringify(patch);});
+};
 let memoryData=null,memoryBusy=false,deviceRegistryData=[],lastConnections=[],memoryDirty=false,activeDeviceId='',memoryReadPromise=null;
 function renderDevices(){
  $('devices').replaceChildren();const registered=new Map(deviceRegistryData.map(d=>[d.id,d]));const rows=lastConnections.map(c=>({...registered.get(c.deviceId),...c,id:c.deviceId,online:true}));for(const d of deviceRegistryData)if(!lastConnections.some(c=>c.deviceId===d.id))rows.push({...d,online:false});
@@ -56,58 +98,183 @@ const pages=[
  {key:'agentTasks',path:'/admin/agent/tasks',title:'后台任务',sections:['agentTasksSection']},
  {key:'agentCredentials',path:'/admin/agent/credentials',title:'模型密钥',sections:['agentCredentialsSection']},
  {key:'devices',path:'/admin/devices',title:'设备管理',sections:['overviewSection','devicesSection']},
- {key:'prompts',path:'/admin/ai/prompts',title:'AI 提示词',sections:['aiSection']},
- {key:'voice',path:'/admin/ai/voice',title:'语音配置',sections:['aiSection']},
+ {key:'voice',path:'/admin/ai/voice',title:'语音与试听',sections:['aiSection']},
  {key:'events',path:'/admin/events',title:'连接事件',sections:['eventsSection']},
  {key:'account',path:'/admin/account',title:'管理员账户',sections:['accountSection']}
 ];
 let currentRoute='',routeGeneration=0;
 function currentPage(){const path=location.pathname.replace(/\/$/,'');const device=path.match(/^\/admin\/devices\/(esp32-[a-f0-9]{12})\/memory$/);if(device)return {key:'memory',path,title:'设备长期记忆',sections:['memorySection'],deviceId:device[1]};return pages.find(p=>p.path===path)||pages.find(p=>p.key==='devices');}
-function dirty(){return voiceDescriptionDirty||aiDirty||memoryDirty||agentDirty||userAccountsDirty;}
-function navigate(path){if(path===location.pathname)return true;if(dirty()&&!confirm('有未保存的修改，离开后将丢弃。继续吗？'))return false;voiceDescriptionDirty=false;aiDirty=false;memoryDirty=false;agentDirty=false;userAccountsDirty=false;history.pushState({},'',path);renderPage(true);return true;}
+function dirty(){return voiceDescriptionDirty||voiceDirty||voiceRuntimeDirty||fastStyleDirty||memoryDirty||agentDirty||userAccountsDirty;}
+function discardEdits(){
+ voiceDescriptionDirty=voiceDirty=voiceRuntimeDirty=fastStyleDirty=memoryDirty=userAccountsDirty=false;
+ channelDirty=serviceDirty=behaviorDirty=connectionDirty=false;updateAgentDirty();
+}
+function navigate(path){
+ if(path===location.pathname)return true;
+ if(dirty()&&!confirm('有未保存的修改，离开后将丢弃。继续吗？'))return false;
+ discardEdits();history.pushState({},'',path);renderPage(true);return true;
+}
 function renderPage(force=false){if(!token)return;const page=currentPage();if(!force&&currentRoute===page.path)return;currentRoute=page.path;routeGeneration++;adminVoiceRequest++;adminVoicePlayer?.stop(null);for(const id of ['overviewSection','devicesSection','aiSection','memorySection','eventsSection','accountSection','agentSection','agentTasksSection','agentCredentialsSection'])$(id).hidden=!page.sections.includes(id);$('pageTitle').textContent=page.title;document.title=page.title+' · Voxi 管理后台';$('breadcrumb').textContent=page.key==='memory'?'设备管理 / 长期记忆':'控制台 / '+page.title;for(const p of pages){const link=document.querySelector('[data-nav="'+p.key+'"]');if(link){if(p.key===page.key||(page.key==='memory'&&p.key==='devices'))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}}
- if(page.key==='prompts'||page.key==='voice'){$('aiForm').hidden=true;$('aiPageTitle').textContent=page.title;$('promptFields').hidden=page.key!=='prompts';$('promptPreview').hidden=page.key!=='prompts';$('previewAi').hidden=page.key!=='prompts';$('voiceFields').hidden=page.key!=='voice';aiLoaded=true;loadAi();}
+ if(page.key==='voice'){$('aiForm').hidden=$('voiceRuntimeForm').hidden=true;loadAi();}
  $('usersSection').hidden=page.key!=='users';if(page.key==='users')loadUserAccounts();
  if(page.key.startsWith('agent'))loadAgent();
+ if(page.key==='agent'){
+  loadFastStyle();
+  if(location.hash==='#assistant-behavior')$('assistant-behavior').scrollIntoView();
+ }
  if(page.key==='memory')openDeviceMemory(page.deviceId,true);
 }
 document.addEventListener('click',event=>{const link=event.target.closest?.('a[href^="/admin/"]');if(!link||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.button>0)return;event.preventDefault();navigate(new URL(link.href,location.origin).pathname);});
-window.addEventListener('popstate',()=>{if(dirty()&&!confirm('有未保存的修改，离开后将丢弃。继续吗？')){history.pushState({},'',currentRoute);return;}voiceDescriptionDirty=false;aiDirty=false;memoryDirty=false;agentDirty=false;userAccountsDirty=false;renderPage(true);});
+window.addEventListener('popstate',()=>{if(dirty()&&!confirm('有未保存的修改，离开后将丢弃。继续吗？')){history.pushState({},'',currentRoute);return;}discardEdits();renderPage(true);});
 window.addEventListener('beforeunload',event=>{if(dirty()){event.preventDefault();event.returnValue='';}});
 restoreSession();
 
-let agentData=null,agentDirty=false,agentReading=false,agentReadDone=null,agentGeneration=0,agentDetail=null,agentSubmitId=null;
+let agentData=null,agentDirty=false,agentReadDone=null,agentGeneration=0,agentDetail=null,agentSubmitId=null;
 const agentStates={queued:'已保存 · 等待执行',submitting:'正在提交',running:'执行中',needs_input:'需要补充信息',awaiting_approval:'等待确认',cancelling:'正在停止',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',delivery_unknown:'结果未确认'};
 function option(value,text){const o=document.createElement('option');o.value=value;o.textContent=text;return o;}
-function fillAgentChannels(id,channels){$(id).replaceChildren();const uid=$('agentChannelUser').value;channels.forEach((c,i)=>{const box=document.createElement('div'),name=document.createElement('input'),mode=document.createElement('select'),label=document.createElement('label');label.className='field';label.textContent='CH'+i;name.id=id+'Name'+i;name.value=c.name;name.maxLength=32;name.required=true;name.setAttribute('aria-label','CH'+i+' 名称');mode.id=id+'Mode'+i;for(const [v,t] of [['fast','快问 · 即问即答'],['agent','Voxi Agent · 后台执行'],['disabled','未启用']])mode.append(option(v,t));if(id==='agentUserChannels')for(const conn of agentData.connections||[])if(conn.user_id===uid)mode.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));const target=c.mode==='openclaw'?'openclaw:'+c.connectionId:c.mode;if(c.mode==='openclaw'&&![...mode.options].some(o=>o.value===target))mode.append(option(target,'失效的 OpenClaw 连接 · 请重新选择'));mode.value=target;mode.setAttribute('aria-label','CH'+i+' 接入助手');box.append(label,name,mode);$(id).append(box);});}
-function readAgentChannels(id){return Array.from({length:4},(_,i)=>{const value=$(id+'Mode'+i).value;return {name:$(id+'Name'+i).value.trim(),mode:value.startsWith('openclaw:')?'openclaw':value,...(value.startsWith('openclaw:')?{connectionId:value.slice(9)}:{})};});}
-function fillAgentUsers(id){const selected=$(id).value;$(id).replaceChildren();for(const user of agentData.users)$(id).append(option(user.id,user.name));if(agentData.users.some(u=>u.id===selected))$(id).value=selected;}
-function channelInheritance(){const inherit=$('useChannelTemplate').checked;$('channelInheritance').textContent=inherit?'沿用公共模板。取消勾选后可为此用户单独命名、选择助手。':'此用户单独设置；公共模板变更不会覆盖这里。';for(let i=0;i<4;i++){ $('agentUserChannelsName'+i).disabled=inherit;$('agentUserChannelsMode'+i).disabled=inherit;}}
-let channelDirty=false,serviceDirty=false,connectionDirty=false,selectedChannelUser='';
-function updateAgentDirty(){agentDirty=channelDirty||serviceDirty||connectionDirty;}
-function agentUserChannels(){const uid=$('agentChannelUser').value;$('selectedUserPreferences').textContent=agentData?.preferencesByUser?.[uid]?.fastPrompt||'沿用服务默认回答风格';selectedChannelUser=uid;if(uid){fillAgentChannels('agentUserChannels',agentData.channelsByUser[uid]||agentData.settings.channels);$('useChannelTemplate').checked=!(agentData.channelOverrides||[]).includes(uid);channelInheritance();}renderOpenClawConnections();}
-function agentTaskChannels(){const uid=$('agentTaskUser').value,selected=$('agentTaskChannel').value;$('agentTaskChannel').replaceChildren();const channels=agentData.channelsByUser[uid]||agentData.settings.channels;channels.forEach((c,i)=>{if(['agent','openclaw'].includes(c.mode))$('agentTaskChannel').append(option(String(i),'CH'+i+' · '+c.name));});if([...$('agentTaskChannel').options].some(o=>o.value===selected))$('agentTaskChannel').value=selected;$('submitAgentTask').disabled=!uid||!$('agentTaskChannel').options.length||!agentData.settings.enabled;}
+function fillAgentChannels(channels){
+ const editor=$('agentChannels'),uid=$('agentChannelUser').value;editor.replaceChildren();
+ channels.forEach((channel,index)=>{
+  const box=document.createElement('div'),name=document.createElement('input'),mode=document.createElement('select');
+  const title=document.createElement('strong'),nameLabel=document.createElement('label'),modeLabel=document.createElement('label');
+  box.className='channel-card';title.textContent='CH'+index;
+  name.id='agentChannelsName'+index;name.value=channel.name;name.maxLength=32;name.required=true;
+  nameLabel.className='field';nameLabel.htmlFor=name.id;nameLabel.textContent='频道名称';
+  mode.id='agentChannelsMode'+index;modeLabel.className='field';modeLabel.htmlFor=mode.id;modeLabel.textContent='选择助手';
+  for(const [value,text] of [['fast','快问 · 即问即答'],['agent','Voxi Agent · 后台执行'],['disabled','停用']])mode.append(option(value,text));
+  if(uid)for(const conn of agentData.connections)if(conn.user_id===uid)mode.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));
+  const target=channel.mode==='openclaw'?'openclaw:'+channel.connectionId:channel.mode;
+  if(channel.mode==='openclaw'&&![...mode.options].some(o=>o.value===target))mode.append(option(target,'连接已失效，请重新选择'));
+  mode.value=target;box.append(title,nameLabel,name,modeLabel,mode);editor.append(box);
+ });
+}
+function readAgentChannels(){
+ return Array.from({length:4},(_,index)=>{
+  const value=$('agentChannelsMode'+index).value,openclaw=value.startsWith('openclaw:');
+  return {name:$('agentChannelsName'+index).value.trim(),mode:openclaw?'openclaw':value,...(openclaw?{connectionId:value.slice(9)}:{})};
+ });
+}
+function fillAgentUsers(id){
+ const select=$(id),selected=select.value;select.replaceChildren();
+ if(id==='agentChannelUser')select.append(option('','默认频道（未自定义的用户）'));
+ for(const user of agentData.users)select.append(option(user.id,user.name));
+ if(agentData.users.some(user=>user.id===selected)||id==='agentChannelUser')select.value=agentData.users.some(user=>user.id===selected)?selected:'';
+}
+let channelDirty=false,serviceDirty=false,behaviorDirty=false,connectionDirty=false,selectedChannelUser='',channelSaving=false;
+function updateAgentDirty(){agentDirty=channelDirty||serviceDirty||behaviorDirty||connectionDirty;}
+function channelControls(){
+ $('agentChannelUser').disabled=channelSaving;$('agentChannelFields').disabled=channelSaving;
+ $('saveAgentChannels').disabled=channelSaving||!channelDirty;$('restoreAgentChannels').disabled=channelSaving;
+}
+function renderChannelEditor(){
+ const uid=$('agentChannelUser').value,custom=agentData.channelOverrides.includes(uid);
+ selectedChannelUser=uid;
+ fillAgentChannels(agentData.channelsByUser?.[uid]||agentData.settings.channels);
+ $('channelScopeHint').textContent=!uid?'默认频道供未自定义的用户使用。设备会跳过停用的频道。':custom?'此用户使用个人频道，所有绑定设备共用。':'此用户跟随默认频道。修改并保存后，只应用到此用户。';
+ $('saveAgentChannels').textContent=uid?'保存此用户的频道':'保存默认频道';
+ $('restoreAgentChannels').hidden=!custom;$('agentConnections').hidden=!uid;channelControls();
+ renderOpenClawConnections();
+}
+function agentTaskChannels(){const uid=$('agentTaskUser').value,selected=$('agentTaskChannel').value;$('agentTaskChannel').replaceChildren();const channels=agentData.channelsByUser?.[uid]||agentData.settings.channels;channels.forEach((c,i)=>{if(['agent','openclaw'].includes(c.mode))$('agentTaskChannel').append(option(String(i),'CH'+i+' · '+c.name));});if([...$('agentTaskChannel').options].some(o=>o.value===selected))$('agentTaskChannel').value=selected;$('submitAgentTask').disabled=!uid||!$('agentTaskChannel').options.length||!agentData.settings.enabled;}
 function credentialStatus(){if(!agentData)return;const c=agentData.credentials[$('credentialProvider').value];$('credentialState').textContent=c?.configured?'已加密保存 · 当前 Codex 执行器未使用此密钥':'尚未配置 · 当前使用服务器既有 Codex 登录';}
 function renderAgentTasks(){$('agentTasks').replaceChildren();for(const task of agentData.tasks){const row=document.createElement('tr');cell(row,task.summary||task.id.slice(0,8));cell(row,(agentData.users.find(u=>u.id===task.user_id)?.name||task.user_id.slice(0,8))+' / CH'+task.channel);cell(row,agentStates[task.state]||task.state);cell(row,new Date(task.updated*1000).toLocaleString());const td=cell(row,''),button=document.createElement('button');button.type='button';button.className='secondary';button.textContent='查看';button.onclick=()=>openAgentTask(task.id,task.user_id);td.append(button);$('agentTasks').append(row);}if(!agentData.tasks.length){const row=document.createElement('tr');cell(row,'还没有任务。可以在上方提交，或从设备 Agent 频道按键说话。');$('agentTasks').append(row);}}
+function renderAgentSnapshot(data,refreshEditors){
+  if(!data.settings||!Array.isArray(data.tasks)||!Array.isArray(data.users)||!Array.isArray(data.connections)||!Array.isArray(data.channelOverrides))
+   throw Error('频道配置需要新版 Pocket Cloud。');
+  agentData=data;
+  const s=data.settings;
+  $('channelServiceStatus').textContent=s.enabled?'频道服务已开启':'频道服务已关闭';
+  $('toggleChannelService').textContent=s.enabled?'关闭频道服务':'开启频道服务';
+  $('toggleChannelService').hidden=false;$('channelServiceNotice').hidden=s.enabled;
+  $('agentRuntime').textContent=(data.runtime.ready?'执行器已连接':data.runtime.lastError||'执行器会在首次任务时连接')+'。使用服务器的 Codex 登录。';
+  if(refreshEditors){
+   $('agentModel').value=s.model;$('agentConcurrency').value=s.maxConcurrent;$('agentTimeout').value=s.maxTaskSeconds;$('agentInstructions').value=s.instructions;
+   fillAgentUsers('agentChannelUser');fillAgentUsers('agentTaskUser');renderChannelEditor();agentTaskChannels();
+   $('channelEditor').hidden=$('agentSettingsForm').hidden=$('agentBehaviorForm').hidden=false;
+  }else renderOpenClawConnections();
+  renderAgentTasks();credentialStatus();
+}
 async function loadAgent(poll=false){
- if(!token)return;if(agentReadDone){await agentReadDone;return loadAgent(poll);}let finishRead;agentReadDone=new Promise(resolve=>{finishRead=resolve;});agentReading=true;const generation=agentGeneration,requested=token;
- try{const data=await api('agent');if(generation!==agentGeneration||requested!==token)return;if(!data.settings||!Array.isArray(data.tasks)||!Array.isArray(data.users)||!Array.isArray(data.connections)||!Array.isArray(data.channelOverrides))throw Error('频道接入功能需要新版 Pocket 后端，请先运行 deploy/upgrade-pocket-agent.py 再刷新');agentData=data;
- $('channelServiceNotice').hidden=data.settings.enabled;
- $('agentRuntime').textContent='Voxi Agent：'+data.runtime.engine+' · '+(data.runtime.ready?'已连接':data.runtime.lastError||'将在首次任务时连接')+' · 使用既有 Codex 登录。自己的 OpenClaw 状态见下方连接列表。';
- if(!poll){const s=data.settings;$('agentEnabled').checked=s.enabled;$('agentModel').value=s.model;$('agentConcurrency').value=s.maxConcurrent;$('agentTimeout').value=s.maxTaskSeconds;$('agentInstructions').value=s.instructions;fillAgentChannels('agentChannels',s.channels);fillAgentUsers('agentChannelUser');fillAgentUsers('agentTaskUser');agentUserChannels();agentTaskChannels();channelDirty=false;serviceDirty=false;connectionDirty=false;updateAgentDirty();$('agentSettingsForm').hidden=false;$('agentUserChannelsForm').hidden=!data.users.length;agentDirty=false;$('agentMessage').textContent=data.users.length?(data.settings.enabled?'':'频道服务尚未启用，请打开服务开关并保存。'):'先让设备连接一次，以建立可绑定的用户档案。';}
- renderAgentTasks();credentialStatus();if(poll)renderOpenClawConnections();
- if(poll&&agentDetail)await openAgentTask(agentDetail.id,agentDetail.user_id,true);
- }catch(error){if(requested===token&&generation===agentGeneration)$(currentPage().key==='agentTasks'?'agentTaskMessage':currentPage().key==='agentCredentials'?'credentialMessage':'agentMessage').textContent=error.message;}
- finally{agentReading=false;agentReadDone=null;finishRead();}
+ if(!token)return;
+ if(agentReadDone){await agentReadDone;return loadAgent(poll);}
+ let finishRead;agentReadDone=new Promise(resolve=>{finishRead=resolve;});
+ const generation=agentGeneration,session=token,route=routeGeneration;
+ try{
+  const data=await api('agent');if(generation!==agentGeneration||session!==token||route!==routeGeneration)return;
+  renderAgentSnapshot(data,!poll);
+  if(poll&&agentDetail&&currentPage().key==='agentTasks')await openAgentTask(agentDetail.id,agentDetail.user_id,true);
+ }catch(error){if(session===token&&generation===agentGeneration)$(currentPage().key==='agentTasks'?'agentTaskMessage':currentPage().key==='agentCredentials'?'credentialMessage':'agentMessage').textContent=error.message;}
+ finally{agentReadDone=null;finishRead();}
 }
 async function agentMutation(body){const requested=token,result=await api('agent',body);if(requested!==token)throw Error('会话已退出');return result;}
-$('reloadAgent').onclick=()=>{if(!agentDirty||confirm('重新读取会覆盖尚未保存的编辑，继续吗？'))loadAgent();};
+$('reloadAgent').onclick=()=>{
+ if((agentDirty||fastStyleDirty)&&!confirm('重新读取会丢弃尚未保存的修改，继续吗？'))return;
+ channelDirty=serviceDirty=behaviorDirty=connectionDirty=fastStyleDirty=false;updateAgentDirty();
+ $('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;
+ $('agentMessage').textContent='';loadAgent();loadFastStyle();
+};
 $('refreshAgentTasks').onclick=()=>loadAgent(true);
-$('agentSettingsForm').oninput=()=>{serviceDirty=true;updateAgentDirty();};$('agentEnabled').onchange=()=>{serviceDirty=true;updateAgentDirty();};$('agentUserChannelsForm').oninput=()=>{channelDirty=true;updateAgentDirty();};$('useChannelTemplate').onchange=()=>{channelInheritance();channelDirty=true;updateAgentDirty();};
-$('agentSettingsForm').onsubmit=async event=>{event.preventDefault();$('saveAgentSettings').disabled=true;try{await agentMutation({action:'settings',settings:{enabled:$('agentEnabled').checked,model:$('agentModel').value.trim(),maxConcurrent:Number($('agentConcurrency').value),maxTaskSeconds:Number($('agentTimeout').value),instructions:$('agentInstructions').value,channels:readAgentChannels('agentChannels')}});serviceDirty=false;updateAgentDirty();await loadAgent(true);if(!channelDirty)agentUserChannels();$('agentMessage').textContent='服务与模板已保存。设备下一轮录音／切台使用新配置。';}catch(error){$('agentMessage').textContent=error.message;}finally{$('saveAgentSettings').disabled=false;}};
-$('agentChannelUser').onchange=()=>{if((channelDirty||connectionDirty)&&!confirm('切换用户会丢弃尚未保存的频道或连接编辑，继续吗？')){$('agentChannelUser').value=selectedChannelUser;return;}channelDirty=false;connectionDirty=false;updateAgentDirty();$('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;agentUserChannels();};
+$('agentSettingsForm').oninput=()=>{serviceDirty=true;updateAgentDirty();};
+$('agentBehaviorForm').oninput=()=>{behaviorDirty=true;updateAgentDirty();};
+$('agentChannelsForm').oninput=()=>{channelDirty=true;updateAgentDirty();channelControls();};
+
+async function submitAgentSettings(button,message,settings,onSaved){
+ const session=token,route=routeGeneration;
+ $(button).disabled=true;$(message).textContent='正在保存…';
+ try{
+  const data=await agentMutation({action:'settings_patch',settings});
+  if(agentReadDone)await agentReadDone;
+  if(token!==session||route!==routeGeneration)return;
+  renderAgentSnapshot(data,false);onSaved?.();updateAgentDirty();$(message).textContent='已保存。';
+ }catch(error){if(token===session&&route===routeGeneration)$(message).textContent='保存失败：'+error.message;}
+ finally{$(button).disabled=false;}
+}
+$('toggleChannelService').onclick=()=>{
+ if(!agentData)return;
+ const enabled=!agentData.settings.enabled;
+ if(!enabled&&!confirm('关闭后，设备会使用旧版语音频道。已经接收的任务会继续运行。确定关闭？'))return;
+ return submitAgentSettings('toggleChannelService','agentMessage',{enabled},()=>{agentTaskChannels();});
+};
+function readAgentRuntime(){return {model:$('agentModel').value.trim(),maxConcurrent:Number($('agentConcurrency').value),maxTaskSeconds:Number($('agentTimeout').value)};}
+$('agentSettingsForm').onsubmit=event=>{
+ event.preventDefault();const settings=readAgentRuntime();
+ return submitAgentSettings('saveAgentSettings','agentSettingsMessage',settings,()=>{serviceDirty=JSON.stringify(readAgentRuntime())!==JSON.stringify(settings);});
+};
+$('agentBehaviorForm').onsubmit=event=>{
+ event.preventDefault();const instructions=$('agentInstructions').value;
+ return submitAgentSettings('saveAgentBehavior','agentBehaviorMessage',{instructions},()=>{behaviorDirty=$('agentInstructions').value!==instructions;});
+};
+$('agentChannelUser').onchange=()=>{
+ if((channelDirty||connectionDirty)&&!confirm('切换配置对象会丢弃尚未保存的频道或连接编辑，继续吗？')){$('agentChannelUser').value=selectedChannelUser;return;}
+ channelDirty=connectionDirty=false;updateAgentDirty();
+ $('openclawForm').reset();openclawTransport();$('openclawPairToken').value='';$('openclawPairing').hidden=true;
+ $('agentConnections').open=false;$('agentMessage').textContent='';$('openclawMessage').textContent='';
+ renderChannelEditor();
+};
 $('agentTaskUser').onchange=agentTaskChannels;
-$('agentUserChannelsForm').onsubmit=async event=>{event.preventDefault();try{await agentMutation({action:$('useChannelTemplate').checked?'reset_channels':'channels',userId:$('agentChannelUser').value,...(!$('useChannelTemplate').checked?{channels:readAgentChannels('agentUserChannels')}:{})});channelDirty=false;updateAgentDirty();await loadAgent(true);agentUserChannels();$('agentMessage').textContent='此用户频道已保存。';}catch(error){$('agentMessage').textContent=error.message;}};
+async function saveChannelScope(body,message){
+ const session=token,route=routeGeneration;
+ channelSaving=true;channelControls();
+ try{
+  const data=await agentMutation(body);
+  if(agentReadDone)await agentReadDone;
+  if(token!==session||route!==routeGeneration)return;
+  renderAgentSnapshot(data,false);channelDirty=false;updateAgentDirty();
+  renderChannelEditor();agentTaskChannels();$('agentMessage').textContent=message;
+ }catch(error){if(token===session&&route===routeGeneration)$('agentMessage').textContent='保存失败：'+error.message;}
+ finally{channelSaving=false;channelControls();}
+}
+$('agentChannelsForm').onsubmit=event=>{
+ event.preventDefault();if(!channelDirty||channelSaving)return;
+ const userId=$('agentChannelUser').value,channels=readAgentChannels();
+ return saveChannelScope(userId?{action:'channels',userId,channels}:{action:'settings_patch',settings:{channels}},
+  userId?'已保存此用户的频道。':'已保存默认频道。');
+};
+$('restoreAgentChannels').onclick=()=>{
+ const userId=$('agentChannelUser').value;
+ if(userId&&!channelSaving&&confirm('恢复此用户的默认频道？现有个人频道设置会被替换。'))
+  return saveChannelScope({action:'reset_channels',userId},'已恢复默认频道。');
+};
 $('agentSubmitForm').oninput=()=>{agentSubmitId=null;};
 $('agentSubmitForm').onsubmit=async event=>{event.preventDefault();$('submitAgentTask').disabled=true;try{agentSubmitId ||= crypto.randomUUID();const data=await agentMutation({action:'submit',userId:$('agentTaskUser').value,channel:Number($('agentTaskChannel').value),requestId:agentSubmitId,text:$('agentTaskText').value});$('agentTaskText').value='';agentSubmitId=null;$('agentTaskMessage').textContent='任务已保存；不需要保持此网页或设备在线。';await loadAgent(true);await openAgentTask(data.task.id,data.task.user_id);}catch(error){$('agentTaskMessage').textContent=error.message+'。内容未修改时重试沿用同一请求编号，避免重复提交。';}finally{if(agentData)agentTaskChannels();}};
 async function agentTaskAction(action,extra={}){if(!agentDetail)return;const task=agentDetail;try{const data=await agentMutation({action,userId:task.user_id,taskId:task.id,...extra});await loadAgent(true);await openAgentTask(data.task.id,data.task.user_id);$('agentTaskMessage').textContent='操作已提交。';}catch(error){$('agentTaskMessage').textContent=error.message;}}
@@ -142,7 +309,7 @@ $('openclawForm').onsubmit=async event=>{
  const data=await agentMutation({action:'connect_openclaw',userId:uid,name:$('openclawName').value.trim(),transport:$('openclawTransport').value,url:$('openclawUrl').value.trim(),agent:$('openclawAgent').value.trim(),token:$('openclawToken').value});
  $('openclawToken').value='';connectionDirty=false;updateAgentDirty();await loadAgent(true);
  if(uid!==$('agentChannelUser').value)return;
- const current=readAgentChannels('agentUserChannels');fillAgentChannels('agentUserChannels',current);channelInheritance();
+ fillAgentChannels(readAgentChannels());
  $('openclawPairing').hidden=!data.pairingToken;
  if(data.pairingToken){$('openclawPairToken').value=data.pairingToken;$('openclawCommand').textContent='python voxi-openclaw.py --server '+location.origin+' --connection '+data.connectionId;}
  $('openclawMessage').textContent=data.pairingToken?'连接已创建。按下方步骤在 OpenClaw 电脑启动连接器，再检测并绑定频道。':'连接已加密保存。请检测连接，通过后绑定到频道。';
@@ -151,8 +318,6 @@ $('openclawForm').onsubmit=async event=>{
 $('copyOpenclawPair').onclick=async()=>{try{await navigator.clipboard.writeText($('openclawPairToken').value);$('openclawMessage').textContent='已复制连接密钥，请粘贴到本机连接器提示中。';}catch{$('openclawPairToken').type='text';$('openclawPairToken').select();$('openclawMessage').textContent='请手动复制选中的连接密钥。';}};
 setInterval(()=>{if(token&&currentPage().key==='agent')loadAgent(true);},10000);
 
-$('editUserChannels').onclick=()=>{$('useChannelTemplate').checked=false;channelInheritance();channelDirty=true;updateAgentDirty();$('agentMessage').textContent='现在可以编辑此用户频道，修改后请保存。';};
-$('enableChannelService').onclick=()=>{$('agentEnabled').checked=true;$('agentSettingsForm').requestSubmit();};
 let userAccountsDirty=false;
 async function loadUserAccounts(){const requested=token;try{const data=await api('users');if(requested!==token)return;const selected=$('newUserProfile').value;$('newUserProfile').replaceChildren();for(const u of data.profiles)if(!data.accounts.some(a=>a.userId===u.id))$('newUserProfile').append(option(u.id,u.name));$('newUserProfile').append(option('','新建用户档案'));if([...$('newUserProfile').options].some(o=>o.value===selected))$('newUserProfile').value=selected;userProfileChoice();$('userAccounts').replaceChildren();
  for(const a of data.accounts){const tr=document.createElement('tr');cell(tr,a.username+' · 普通用户');cell(tr,data.profiles.find(p=>p.id===a.userId)?.name||'档案已失效');cell(tr,a.enabled?'可登录':'已停用');const td=cell(tr,''),toggle=document.createElement('button');toggle.className='secondary';toggle.type='button';toggle.textContent=a.enabled?'停用账户':'启用账户';toggle.onclick=async()=>{try{await api('users',{action:'enabled',accountId:a.id,enabled:!a.enabled});await loadUserAccounts();$('userAccountsMessage').textContent='账户状态已保存，旧会话已撤销。';}catch(e){$('userAccountsMessage').textContent=e.message;}};td.append(toggle);
@@ -200,7 +365,7 @@ async function refreshVoiceLibrary(prepare=false,probe=false){
 }
 $('prepareVoiceLibrary').onclick=()=>refreshVoiceLibrary(true);
 $('probeVoiceLibrary').onclick=()=>refreshVoiceLibrary(false,true);
-$('voiceChoice').onchange=()=>{if(voiceDescriptionDirty&&!confirm('音色说明尚未保存，切换会丢弃，继续吗？')){$('voiceChoice').value=voiceDescriptionVoice;return;}voiceDescriptionDirty=false;adminVoiceRequest++;adminVoicePlayer?.stop();updateVoiceDetails();aiDirty=true;};
+$('voiceChoice').onchange=()=>{if(voiceDescriptionDirty&&!confirm('音色说明尚未保存，切换会丢弃，继续吗？')){$('voiceChoice').value=voiceDescriptionVoice;return;}voiceDescriptionDirty=false;adminVoiceRequest++;adminVoicePlayer?.stop();updateVoiceDetails();voiceDirty=true;};
 $('voicePreviewLanguage').onchange=()=>{adminVoiceRequest++;adminVoicePlayer?.stop();updateVoiceDetails(false);};
 $('saveVoiceDescription').onclick=async()=>{const voice=$('voiceChoice').value,session=token,style=$('voiceStyleDescription').value,useCase=$('voiceStyleUseCase').value;$('saveVoiceDescription').disabled=true;try{await api('voice-preview',{action:'describe',voice,style,useCase});if(session!==token)return;const latest=await api('ai');if(session!==token)return;voiceMetadata=latest.voices;for(const v of voiceMetadata.options){const o=[...$('voiceChoice').options].find(o=>o.value===v.id);if(o)o.textContent=voiceOptionLabel(v,voiceMetadata.library?.voices?.find(r=>r.id===v.id));}updateVoiceDetails(false);voiceDescriptionDirty=false;$('voiceDescriptionStatus').textContent='音色说明已保存。只更新展示说明，不会改变声音或设备当前音色。';}catch(e){$('voiceDescriptionStatus').textContent=e.message;}finally{$('saveVoiceDescription').disabled=false;}};
 $('previewVoice').onclick=async()=>{const request=++adminVoiceRequest,session=token;try{const {createVoicePreview}=await import('/shared/voice-preview.js');if(request!==adminVoiceRequest||session!==token||currentPage().key!=='voice')return;adminVoicePlayer??=createVoicePreview({audio:$('voicePreviewAudio'),status:$('voicePreviewStatus'),caption:$('voicePreviewActualText'),request:(body,options)=>api('voice-preview',body,options)});await adminVoicePlayer.play($('voiceChoice').value,$('voicePreviewLanguage').value);}catch(e){if(session===token)$('voicePreviewStatus').textContent=e.message;}};

@@ -5,8 +5,8 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('./admin-app.mjs',import.meta.url),'utf8').replace('restoreSession();','');
 function page(){
   const nodes=new Map();
-  const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;}});return nodes.get(id);};
-  const location={pathname:'/admin/devices',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;}};
+  const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',hidden:false,textContent:'',disabled:false,children:[],append(...v){this.children.push(...v);},replaceChildren(...v){this.children=v;},get options(){return this.children;},reset(){}});return nodes.get(id);};
+  const location={pathname:'/admin/devices',hash:'',origin:'http://localhost'};const history={pushState(_a,_b,path){location.pathname=path;}};
   const context=vm.createContext({window:{addEventListener(){}},location,history,URL,document:{addEventListener(){},querySelector(){return null;},getElementById:get,createElement:()=>({children:[],style:{},dataset:{},set id(v){this._id=v;nodes.set(v,this);},get id(){return this._id;},append(...v){this.children.push(...v);},textContent:''})},setInterval(){},confirm:()=>true,fetch:()=>{},Date,Number,Math,JSON,Error,AbortController,setTimeout,clearTimeout});
   vm.runInContext(source,context);return {context,get};
 }
@@ -34,17 +34,55 @@ test('save failure remains visible and re-enables button',async()=>{
   assert.match(get('message').textContent,/保存失败/);assert.equal(get('save').disabled,false);
 });
 
- test('AI editor reads real settings, previews unsaved prompt and saves only supported fields',async()=>{
- const {context,get}=page();const settings={systemPrompt:'完整讲故事',channels:Array.from({length:4},(_,i)=>({name:'呼号'+i,persona:'伙伴'})),responseIdleTimeoutSeconds:30,replyEndSilenceMs:1000,mediaStatsIntervalSeconds:10,audioRetransmission:true,audioRecoveryPackets:64};const requests=[];
- context.fetch=async(path,options)=>{requests.push({path,options});if(options.method==='POST')Object.assign(settings,JSON.parse(options.body));return {ok:true,json:async()=>({settings,defaults:settings,runtime:{model:'native',voice:'cove',protocol:'v3',developerInstructions:'Voice only'},applies:'新连接生效'})};};
- vm.runInContext("token='admin-secret'",context);await vm.runInContext('loadAi()',context);assert.equal(get('aiForm').hidden,false);assert.match(get('effectivePrompt').textContent,/完整讲故事/);
- get('systemPrompt').value='改成慢慢讲';get('previewAi').onclick();assert.match(get('effectivePrompt').textContent,/改成慢慢讲/);await get('aiForm').onsubmit({preventDefault(){}});
- const saved=JSON.parse(requests.find(r=>r.options.method==='POST').options.body);assert.equal(saved.systemPrompt,'改成慢慢讲');assert.equal(saved.audioRetransmission,true);assert.equal(saved.audioRecoveryPackets,64);assert.match(get('aiMessage').textContent,/保存成功/);
- });
+test('quick answer settings save only the edited style, independent of voice',async()=>{
+ const {context,get}=page();const settings={systemPrompt:'完整讲故事',voice:'cove',audioRecoveryPackets:64},requests=[];
+ context.fetch=async(path,options)=>{
+  if(options.body){const body=JSON.parse(options.body);requests.push(body);Object.assign(settings,body.patch);}
+  return {ok:true,json:async()=>({settings})};
+ };
+ vm.runInContext("token='session'",context);
+ await vm.runInContext('loadFastStyle()',context);
+ assert.equal(get('fastStyleForm').hidden,false);
+ get('systemPrompt').value='改成慢慢讲';await get('fastStyleForm').onsubmit({preventDefault(){}});
+ assert.deepEqual(requests,[{patch:{systemPrompt:'改成慢慢讲'}}]);
+ assert.equal(settings.voice,'cove');assert.equal(settings.audioRecoveryPackets,64);
+ assert.match(get('fastStyleMessage').textContent,/已保存/);
+});
 
+test('the channel editor saves defaults and personal overrides to separate scopes',async()=>{
+ const {context,get}=page(),uid='owner';
+ const channels=Array.from({length:4},(_,i)=>({name:'频道'+i,mode:i===0?'fast':'agent'}));
+ const settings={enabled:true,channels,maxConcurrent:2,instructions:'任务规则'};
+ const data={settings,users:[{id:uid,name:'用户'}],tasks:[],connections:[],channelOverrides:[],channelsByUser:{},credentials:{},runtime:{ready:true}};
+ const requests=[];
+ context.fetch=async(path,options)=>{
+  if(options.body){
+   const body=JSON.parse(options.body);requests.push(body);
+   if(body.action==='settings_patch')Object.assign(settings,body.settings);
+   if(body.action==='channels'){data.channelsByUser[uid]=body.channels;data.channelOverrides=[uid];}
+   if(body.action==='reset_channels'){delete data.channelsByUser[uid];data.channelOverrides=[];}
+  }
+  return {ok:true,json:async()=>data};
+ };
+ vm.runInContext("token='session'",context);
+ await vm.runInContext('loadAgent()',context);
+ assert.equal(get('agentChannelUser').value,'');assert.equal(get('saveAgentChannels').disabled,true);
+ get('agentChannelsName0').value='公共快问';get('agentChannelsForm').oninput();
+ await get('agentChannelsForm').onsubmit({preventDefault(){}});
+ assert.deepEqual(Object.keys(requests[0].settings),['channels']);
+ get('agentChannelUser').value=uid;get('agentChannelUser').onchange();
+ assert.equal(get('agentChannelsName0').value,'公共快问');assert.equal(get('restoreAgentChannels').hidden,true);
+ get('agentChannelsName0').value='个人快问';get('agentChannelsForm').oninput();
+ await get('agentChannelsForm').onsubmit({preventDefault(){}});
+ assert.equal(requests[1].action,'channels');assert.equal(requests[1].userId,uid);
+ assert.equal(settings.channels[0].name,'公共快问');assert.equal(get('restoreAgentChannels').hidden,false);
+ await get('restoreAgentChannels').onclick();
+ assert.deepEqual(requests[2],{action:'reset_channels',userId:uid});
+ assert.equal(get('agentChannelsName0').value,'公共快问');
+});
  test('read button immediately shows loading and recovers after backend failure',async()=>{
  const {context,get}=page();get('aiForm').hidden=true;let resolve;context.fetch=()=>new Promise(r=>resolve=r);vm.runInContext("token='session'",context);
- const pending=get('reloadAi').onclick();assert.equal(get('reloadAi').disabled,true);assert.match(get('aiMessage').textContent,/正在连接/);
+ const pending=get('reloadAi').onclick();assert.equal(get('reloadAi').disabled,true);assert.match(get('aiMessage').textContent,/正在读取/);
  resolve({ok:false,status:502,json:async()=>({error:'请先更新 Pocket 后端以启用 AI 配置'})});await pending;
  assert.equal(get('reloadAi').disabled,false);assert.match(get('aiMessage').textContent,/读取失败/);assert.match(get('aiMessage').textContent,/Pocket/);assert.equal(get('aiForm').hidden,true);
  });
@@ -62,6 +100,6 @@ test('save failure remains visible and re-enables button',async()=>{
  const {context,get}=page();const data={users:[{id:'one',name:'甲',profile:'',enabled:1},{id:'two',name:'乙',profile:'',enabled:1}],devices:[{id:'esp32-111111111111',user_id:'one',name:'桌面设备'},{id:'esp32-222222222222',user_id:'two',name:'床头设备'}],memories:[],turns:[]};context.fetch=async()=>({ok:true,json:async()=>data});vm.runInContext("token='session'",context);await get('loadMemory').onclick();assert.equal(get('devices').children.length,2);assert.equal(get('devices').children[1].children[0].textContent,'床头设备');assert.equal(get('devices').children[1].children[4].textContent,'离线');context.location.pathname='/admin/devices/esp32-222222222222/memory';await vm.runInContext("openDeviceMemory('esp32-222222222222',true)",context);assert.equal(get('memoryUser').value,'two');assert.equal(get('memoryName').value,'乙');assert.match(get('memoryTitle').textContent,/床头设备/);
  });
 
- test('page navigation separates prompts and voice and guards unsaved changes',async()=>{
- const {context,get}=page();context.fetch=async()=>({ok:false,status:502,json:async()=>({error:'fixture backend offline'})});vm.runInContext("token='session'",context);vm.runInContext("navigate('/admin/ai/voice')",context);assert.equal(context.location.pathname,'/admin/ai/voice');assert.equal(get('voiceFields').hidden,false);assert.equal(get('promptFields').hidden,true);assert.equal(get('devicesSection').hidden,true);vm.runInContext('aiDirty=true',context);context.confirm=()=>false;assert.equal(vm.runInContext("navigate('/admin/devices')",context),false);assert.equal(context.location.pathname,'/admin/ai/voice');context.confirm=()=>true;assert.equal(vm.runInContext("navigate('/admin/devices')",context),true);assert.equal(get('devicesSection').hidden,false);assert.equal(get('aiSection').hidden,true);
+ test('page navigation keeps voice separate from assistant settings and guards unsaved changes',async()=>{
+ const {context,get}=page();context.fetch=async()=>({ok:false,status:502,json:async()=>({error:'fixture backend offline'})});vm.runInContext("token='session'",context);vm.runInContext("navigate('/admin/ai/voice')",context);assert.equal(context.location.pathname,'/admin/ai/voice');assert.equal(get('aiSection').hidden,false);assert.equal(get('agentSection').hidden,true);assert.equal(get('devicesSection').hidden,true);vm.runInContext('voiceDirty=true',context);context.confirm=()=>false;assert.equal(vm.runInContext("navigate('/admin/devices')",context),false);assert.equal(context.location.pathname,'/admin/ai/voice');context.confirm=()=>true;assert.equal(vm.runInContext("navigate('/admin/devices')",context),true);assert.equal(get('devicesSection').hidden,false);assert.equal(get('aiSection').hidden,true);
  });
