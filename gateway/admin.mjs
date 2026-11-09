@@ -1,7 +1,7 @@
 import {createAdminAuth} from './admin-auth.mjs';
 import {timingSafeEqual} from 'node:crypto';
 
-export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,userAccounts,userDetail,voicePreview,username,passwordHash,accountFile,secureCookies=true}={}) {
+export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,userAccounts,userDetail,userWebMemory,voicePreview,username,passwordHash,accountFile,secureCookies=true}={}) {
   const auth=createAdminAuth({username,passwordHash,file:accountFile,secure:secureCookies});
   const events=[];
   function record(event){events.unshift({at:new Date().toISOString(),...event});events.length=Math.min(events.length,50);}
@@ -27,6 +27,11 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
       try{return json(200,await userAccounts());}catch(e){return json(400,{error:e.message});}
     }
     const profilePath=/^\/api\/admin\/users\/([a-f0-9]{32})\/(profile|devices|memory|tasks)$/.exec(req.url);
+    const webMemoryPath=/^\/api\/admin\/users\/([a-f0-9]{32})\/web-memory$/.exec(req.url);
+    if(req.method==='GET'&&webMemoryPath){
+      if(!userWebMemory)return json(409,{error:'网页任务记忆存储未启用'});
+      try{return json(200,await userWebMemory(webMemoryPath[1]));}catch(e){return json(400,{error:e.message});}
+    }
     if(req.method==='GET'&&profilePath){
       try{return json(200,await userDetail(profilePath[1],profilePath[2]));}catch(e){return json(502,{error:e.message});}
     }
@@ -53,6 +58,10 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
       for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>131072)return json(413,{error:'请求过大'});}
       body=JSON.parse(body);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();
     }catch{return json(400,{error:'JSON 无效'});}
+    if(webMemoryPath){
+      if(!userWebMemory)return json(409,{error:'网页任务记忆存储未启用'});
+      try{return json(200,await userWebMemory(webMemoryPath[1],body));}catch(e){return json(400,{error:e.message});}
+    }
     if(req.url==='/api/admin/users'){
       try{const result=await userAccounts(body);record({event:'user_account_changed',action:body.action});return json(200,result);}catch(e){return json(400,{error:e.message});}
     }

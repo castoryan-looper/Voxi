@@ -290,6 +290,9 @@ summary { cursor: pointer; }
 #userSearch { width: min(340px, 100%); }
 #memoryDevice { width: min(400px, 100%); }
 #memoryFacts { margin-top: 16px; }
+#webTaskMemory .web-memory-item { border-top: 1px solid var(--line); padding: 13px 0; overflow-wrap: anywhere; }
+.web-memory-items { margin-top: 14px; }
+.web-memory-form input { width: min(100%, 620px); }
 #memoryTurns { max-height: 360px; margin-bottom: 16px; overflow: auto; }
 #memoryTurns > div { padding: 8px 0 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 

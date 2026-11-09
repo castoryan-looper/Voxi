@@ -6,7 +6,7 @@ const usernameValid=value=>typeof value==='string'&&/^[A-Za-z0-9_.@-]{3,64}$/.te
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 const dummy='scrypt:'+'0'.repeat(32)+':'+'0'.repeat(128);
 
-export function createUserAccounts({file,administrator,agent,portal,memory,voicePreview,secure=true}={}){
+export function createUserAccounts({file,administrator,agent,portal,memory,webMemory,voicePreview,secure=true}={}){
  let accounts=[];const sessions=new Map();let editing=false,checking=false,failures=0,windowAt=0;
  if(file){try{const data=JSON.parse(readFileSync(file,'utf8'));if(data.version!==1||!Array.isArray(data.accounts))throw Error('Invalid user accounts file');accounts=data.accounts;}catch(e){if(e.code!=='ENOENT')throw e;}}
  const ids=new Set(),names=new Set(),owners=new Set();
@@ -78,6 +78,11 @@ export function createUserAccounts({file,administrator,agent,portal,memory,voice
   const current=session(req);
   if(!current||(req.method!=='GET'&&!equal(req.headers['x-csrf-token'],current.csrf)))return json(401,{error:'请登录普通用户账户'});
   if(path==='/api/user/session'&&req.method==='GET')return json(200,{username:current.account.username,role:'user',csrf:current.csrf});
+  if(path==='/api/user/web-memory'&&['GET','POST'].includes(req.method)){
+   if(!webMemory)return json(409,{error:'网页任务记忆存储未启用'});
+   if(body&&('userId' in body||'actorUserId' in body))return json(403,{error:'不能指定其他身份'});
+   try{return json(200,webMemory.manage(current.account.userId,body));}catch(e){return json(400,{error:e.message});}
+  }
   if(path==='/api/user/logout'&&req.method==='POST'){sessions.delete(current.id);res.setHeader('Set-Cookie',cookie('',0));return json(200,{ok:true});}
   if(path==='/api/user/password'&&req.method==='POST'){
    if(checking||editing)return json(429,{error:'请稍后重试'});
@@ -92,7 +97,13 @@ export function createUserAccounts({file,administrator,agent,portal,memory,voice
   }
   if((path==='/api/user/state'&&req.method==='GET')||(path==='/api/user/action'&&req.method==='POST')){
    try{ready();const action=body||{action:'snapshot'};if('actorUserId' in action||'userId' in action||'role' in action)return json(403,{error:'不能指定其他身份'});
-    const data=await portal({...action,actorUserId:current.account.userId});return json(200,data);
+    const userId=current.account.userId,packet={...action,actorUserId:userId};
+    const send=body=>{
+      if(session(req)?.id!==current.id)throw Error('账户会话已失效');
+      return portal(body);
+    };
+    const data=webMemory?await webMemory.forward(send,packet,userId):await send(packet);
+    return json(200,data);
    }catch(e){return json(400,{error:e.message});}
   }
   return json(404,{error:'接口不存在'});

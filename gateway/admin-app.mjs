@@ -184,7 +184,7 @@ function resetUserDetail(){
  userDetailData=null;userDetailRead++;agentTaskRead++;agentDetail=null;agentSubmitId=null;
  $('userProfilePanel').hidden=$('userDevicesPanel').hidden=$('memoryPanel').hidden=true;
  $('agentTaskDetail').hidden=$('agentSubmitForm').hidden=true;
- for(const id of ['memoryFacts','memoryTurns','userDevices','agentTasks','agentTaskChannel','agentApproval','agentTaskActions','agentTaskEvents'])$(id).replaceChildren();
+ for(const id of ['webTaskMemory','memoryFacts','memoryTurns','userDevices','agentTasks','agentTaskChannel','agentApproval','agentTaskActions','agentTaskEvents'])$(id).replaceChildren();
  for(const id of ['userDetailName','userDetailSummary','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
  $('userResetPanel').open=false;
@@ -239,6 +239,13 @@ function renderUserProfile(data){
  $('userAccountActions').hidden=!account;$('bindUserAccount').hidden=Boolean(account);
  $('toggleUserLogin').textContent=account?.enabled?'停用账户':'启用账户';
 }
+async function loadWebTaskMemory(userId,current){
+ const container=$('webTaskMemory');
+ try{
+  const {mountWebMemory}=await import('/shared/web-memory.js');
+  await mountWebMemory(container,body=>api('users/'+userId+'/web-memory',body),current,value=>{memoryDirty=value;});
+ }catch(e){if(current())container.textContent=e.message;}
+}
 async function loadUserDetail(){
  const page=currentPage(),session=token,route=routeGeneration,read=++userDetailRead;
  if(!page.userId||!session)return;
@@ -258,7 +265,10 @@ async function loadUserDetail(){
    try{const registry=await api('devices');if(!current())return;fillRebindDevices(registry.devices);}
    catch(e){if(current()){$('userDetailMessage').textContent='可绑定设备读取失败：'+e.message;return;}}
   }
-  if(page.userTab==='memory'){renderUserMemory(data);$('memoryPanel').hidden=false;}
+  if(page.userTab==='memory'){
+   renderUserMemory(data);$('memoryPanel').hidden=false;
+   void loadWebTaskMemory(page.userId,current);
+  }
   if(page.userTab==='tasks'){agentTaskChannels();renderAgentTasks(data.agent?.tasks||[]);}
   memoryDirty=false;$('userDetailMessage').textContent='';
   return data;
@@ -538,7 +548,7 @@ $('agentSubmitForm').onsubmit=async event=>{
   const data=await agentMutation({action:'submit',userId,channel:Number($('agentTaskChannel').value),requestId:agentSubmitId,text:$('agentTaskText').value});
   if(!current())return;
   $('agentTaskText').value='';agentSubmitId=null;memoryDirty=false;
-  $('agentTaskMessage').textContent='任务已保存。';
+  $('agentTaskMessage').textContent='任务已保存。'+(data.webMemoryUsed?.length?' 已带入参考记忆 '+data.webMemoryUsed.join('、')+'。':'');
   await loadUserDetail();if(current())await openAgentTask(data.task.id,userId);
  }catch(error){if(current())$('agentTaskMessage').textContent=error.message+'。内容未修改时重试会沿用同一请求编号。';}
  finally{if(current())agentTaskChannels();}

@@ -12,6 +12,7 @@ import {createAdmin} from './admin.mjs';
 import {pocketSettings} from './pocket-settings.mjs';
 import {openClawRelay} from './openclaw-relay.mjs';
 import {createUserAccounts} from './user-accounts.mjs';
+import {createWebMemory} from './web-memory.mjs';
 
 export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
@@ -20,10 +21,13 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   if(mode==='pocket'&&(!pocketToken||!pocketUrl||!['ws:','wss:'].includes(new URL(pocketUrl).protocol)))throw Error('Set POCKET_URL and POCKET_DEVICE_TOKEN');
   const relay=openClawRelay(mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined);
   const pocketMemory=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'memory'):undefined;
+  const webMemory=pocketMemory&&adminStateFile?createWebMemory(adminStateFile+'.web-memory.sqlite',
+    userId=>pocketMemory({action:'user_detail',userId,section:'tasks'})):null;
+  const pocketAgent=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined;
   const users=createUserAccounts({file:adminStateFile?adminStateFile+'.users':undefined,administrator:adminUsername,
-    memory:pocketMemory,
+    memory:pocketMemory,webMemory,
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
-    agent:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
+    agent:pocketAgent,
     portal:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined});
   const server=http.createServer((req,res)=>{
     if(req.url?.startsWith('/api/user/')){users.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
@@ -31,6 +35,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(req.url?.startsWith('/api/admin/')){admin.handle(req,res).catch(()=>{if(!res.headersSent)res.writeHead(500);res.end();});return;}
     const path=new URL(req.url,'http://gateway').pathname;
     const assets={'/shared/voice-preview.js':['voice-preview.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
+    assets['/shared/web-memory.js']=['web-memory-ui.mjs','text/javascript; charset=utf-8'];
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
     if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/tasks','/app/account'].includes(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
@@ -52,6 +57,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(req.url!=='/healthz'){res.writeHead(404);res.end();return;}
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision,downlinkFormat:OPUS_FORMAT,opusOnly:true,audioBitrate:OPUS_BITRATE}));
   });
+  server.once('close',()=>webMemory?.close());
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
   const connected=new Map();
@@ -60,10 +66,14 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     userAccounts:users.admin,
     userDetail:users.detail,
+    userWebMemory:webMemory?async(userId,body)=>{
+      await users.detail(userId,'profile');
+      return webMemory.manage(userId,body);
+    }:undefined,
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
     memoryConfiguration:pocketMemory,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
-    agentConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'agent'):undefined,
+    agentConfiguration:webMemory?body=>webMemory.forward(pocketAgent,body,body?.userId):pocketAgent,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
     overview:async()=>{
       const local={accounts:users.accountCount()};

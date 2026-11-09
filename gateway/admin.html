@@ -73,7 +73,8 @@
 </div></div></div>
 <div id="userDevicesPanel" hidden><h3>绑定设备</h3><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>状态</th><th>操作</th></tr></thead><tbody id="userDevices"></tbody></table></div>
 <details class="settings-panel"><summary>将已有设备绑定到此用户</summary><p class="muted">变更会断开该设备的当前对话。原用户的记忆和任务仍归原用户。</p><div class="row"><select id="memoryDevice" aria-label="选择要绑定的设备"></select><button type="button" id="rebindDevice" class="secondary">确认绑定</button></div></details></div>
-<div id="memoryPanel" hidden><h3>长期记忆</h3><p class="muted">自动记录来自明确表达的喜好。可编辑或删除，变更后设备重新连接以加载更新。</p>
+<div id="memoryPanel" hidden><h3>网页任务记忆</h3><div id="webTaskMemory"></div>
+<h3>设备端长期记忆</h3><p class="muted">自动记录来自明确表达的喜好。可编辑或删除，变更后设备重新连接以加载更新。</p>
 <form id="factForm"><label class="field" for="factText">添加一条记忆</label><textarea id="factText" maxlength="1000" required placeholder="希望助手长期记住的信息"></textarea><button>添加记忆</button></form><div id="memoryFacts"></div>
 <h3>最近语音转写</h3><p class="muted">最多保留最近 200 条用户转写。转写在后台完成，不保存录音。</p><div id="memoryTurns"></div><button type="button" id="clearMemory" class="danger">清空此用户的背景、记忆与历史</button></div>
 </section>
@@ -123,7 +124,7 @@ openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证
 <form id="agentSubmitForm" hidden><label class="field">Agent 频道<select id="agentTaskChannel"></select></label><label class="field">任务<textarea id="agentTaskText" rows="3" maxlength="8000" required placeholder="例如：在云端工作区生成一份项目检查清单"></textarea></label><button id="submitAgentTask">提交任务</button></form>
 <p class="muted">显示此用户最近 100 条任务。语音可说“查看进度”“读结果”“取消任务”“继续任务，……”；批准操作请查看具体请求。重启后的未确认任务不会自动重放。</p>
 <div class="scroll"><table><thead><tr><th>任务</th><th>频道</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="agentTasks"></tbody></table></div>
-<article id="agentTaskDetail" hidden><h3 id="agentDetailTitle"></h3><p id="agentDetailState"></p><h4>原始任务</h4><pre id="agentDetailPrompt"></pre><h4>结果</h4><pre id="agentDetailResult"></pre><p id="agentUsage"></p><div id="agentApproval"></div><div class="row" id="agentTaskActions"></div><details><summary>状态记录</summary><ol id="agentTaskEvents"></ol></details></article>
+<article id="agentTaskDetail" hidden><h3 id="agentDetailTitle"></h3><p id="agentDetailState"></p><h4>任务内容与参考背景</h4><pre id="agentDetailPrompt"></pre><h4>结果</h4><pre id="agentDetailResult"></pre><p id="agentUsage"></p><div id="agentApproval"></div><div class="row" id="agentTaskActions"></div><details><summary>状态记录</summary><ol id="agentTaskEvents"></ol></details></article>
 </section>
 <section class="card" id="agentCredentialsSection" hidden>
 <h2>模型密钥</h2><p class="muted">密钥写入服务器加密存储，保存后不会回显。当前执行器继续使用既有 Codex 登录；填写密钥不会切换执行器，也不代表已验证可用。</p>

@@ -13,14 +13,14 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=raw?JSON.parse(raw):null;forwarded.push({path:req.url,auth:req.headers.authorization,body});res.setHeader('Content-Type','application/json');
   if(req.url==='/voxi/agent')res.end(JSON.stringify({users:[{id:A,name:'Alice profile'},{id:B,name:'Bob profile'}],runtime:{userPortalVersion:1}}));
   else if(req.url==='/voxi/memory'&&body?.action==='directory')res.end(JSON.stringify({profiles:[{id:A,name:'Alice profile',deviceCount:1},{id:B,name:'Bob profile',deviceCount:0}]}));
-  else if(req.url==='/voxi/memory'&&body?.action==='user_detail')res.end(JSON.stringify({profile:{id:body.userId},devices:[],agent:{tasks:[]}}));
+  else if(req.url==='/voxi/memory'&&body?.action==='user_detail')res.end(JSON.stringify({profile:{id:body.userId,enabled:1},devices:[],agent:{tasks:[],channels:[{mode:'fast'},{mode:'agent'}]}}));
   else if(req.url==='/voxi/portal')res.end(JSON.stringify({role:'user',profile:{id:body.actorUserId},action:body.action}));
   else if(req.url==='/voxi/voice-preview')res.end(JSON.stringify({voice:body.voice,audioFormat:'wav',audioBase64:'fixture-audio'}));
   else{res.statusCode=404;res.end('{}');}
- });await new Promise(r=>backend.listen(0,'127.0.0.1',r));t.after(()=>{backend.close();rmSync(dir,{recursive:true,force:true});});
+ });await new Promise(r=>backend.listen(0,'127.0.0.1',r));
  const hash=await passwordHash('admin-password-123');const apps=[];
  async function app(){const app=createGateway({mode:'pocket',token:'device',adminUsername:'admin',adminPasswordHash:hash,adminStateFile:join(dir,'admin.json'),pocketToken:'private-internal',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});apps.push(app);await new Promise(r=>app.server.listen(0,'127.0.0.1',r));return `http://127.0.0.1:${app.server.address().port}`;}
- t.after(()=>{for(const app of apps){app.wss.close();app.server.close();}});
+ t.after(async()=>{await Promise.all([...apps.map(app=>{app.wss.close();return new Promise(r=>app.server.close(r));}),new Promise(r=>backend.close(r))]);rmSync(dir,{recursive:true,force:true});});
  let base=await app();
  const call=(path,body,session={})=>fetch(base+path,{method:body?'POST':'GET',headers:{...(body?{'Content-Type':'application/json'}:{}),...(session.cookie?{Cookie:session.cookie}:{}),...(session.csrf?{'X-CSRF-Token':session.csrf}:{})},...(body?{body:JSON.stringify(body)}:{})});
  async function login(type,username,password){const r=await call(`/api/${type}/login`,{username,password});assert.equal(r.status,200);const data=await r.json();assert.equal(data.role,type==='admin'?'admin':'user');assert.match(r.headers.get('set-cookie'),/HttpOnly/);return {cookie:r.headers.get('set-cookie').split(';')[0],csrf:data.csrf};}
@@ -40,6 +40,24 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  for(const body of [{action:'snapshot',userId:B},{action:'snapshot',actorUserId:B},{action:'snapshot',role:'admin'}])assert.equal((await call('/api/user/action',body,alice)).status,403);
  const state=await(await call('/api/user/state',null,alice)).json();assert.equal(state.profile.id,A);
  const last=forwarded.at(-1);assert.equal(last.path,'/voxi/portal');assert.equal(last.body.actorUserId,A);assert.equal(last.auth,'Bearer private-internal');
+ const note={action:'save',category:'project',title:'4G 排查',text:'临时 MTU 900 下仍有重传。',keywords:'MiniCam,4G,重传'};
+ const memoryPath='/api/admin/users/'+A+'/web-memory';
+ assert.equal((await call(memoryPath,note,{cookie:admin.cookie})).status,401);
+ assert.equal((await call(memoryPath,note,alice)).status,401);
+ assert.equal((await call(memoryPath,note,admin)).status,200);
+ assert.equal((await call('/api/user/web-memory',{...note,userId:B},alice)).status,403);
+ assert.deepEqual((await(await call('/api/user/web-memory',null,bob)).json()).items,[]);
+ assert.equal((await(await call('/api/user/web-memory',null,alice)).json()).items[0].title,note.title);
+ const draft={action:'submit',channel:1,text:'继续排查 MiniCam 4G',requestId:'voice-notes'};
+ const sent=await(await call('/api/user/action',draft,alice)).json();
+ assert.deepEqual(sent.webMemoryUsed,[note.title]);
+ assert.match(forwarded.at(-1).body.text,/临时 MTU 900/);
+ assert.equal(forwarded.at(-1).body.actorUserId,A);
+ await call('/api/user/action',draft,bob);
+ assert.equal(forwarded.at(-1).body.text,draft.text);
+ const adminTask=await(await call('/api/admin/agent',{...draft,userId:A,requestId:'admin-notes'},admin)).json();
+ assert.deepEqual(adminTask.webMemoryUsed,[note.title]);
+ assert.match(forwarded.at(-1).body.text,/临时 MTU 900/);
  assert.equal((await call('/api/user/voice-preview',{voice:'ember',actorUserId:B},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{action:'prepare'},alice)).status,403);
  assert.equal((await call('/api/user/voice-preview',{action:'probe'},alice)).status,403);
