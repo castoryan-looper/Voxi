@@ -22,7 +22,9 @@ openclaw gateway restart</pre><p><a href="/downloads/voxi-openclaw.py" download=
 <div class="notice" id="skillPreview" hidden></div><h3>我导入的 Skill</h3><div id="importedSkills"></div></section>
 <section class="card"><h2>发现 MCP</h2><p class="muted">搜索官方 MCP Registry。列表会区分目录条目与 Voxi 已支持的接入。</p>
 <form id="mcpRegistryForm"><label>关键词<input id="mcpRegistryQuery" required maxlength="80" value="github-mcp-server"></label><button id="mcpRegistrySearch">搜索官方 Registry</button></form>
-<div id="mcpRegistryResults"></div>
+<div id="mcpRegistryResults"></div><div class="notice" id="mcpRemoteConfig" hidden></div>
+<h3>我的远程 MCP</h3><p class="muted">支持公开 HTTPS 与目录声明的 API Key。OAuth 或本地安装型服务会显示兼容性提示。</p>
+<div id="mcpRemoteConnections"></div><pre id="mcpRemoteResult" hidden></pre>
 <h3>GitHub 只读 MCP</h3><p id="githubCapabilityState" class="muted"></p>
 <p class="muted">创建 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">细粒度 GitHub Token ↗</a>，只选一个仓库，将 Contents 和 Pull requests 权限设为 Read-only。Voxi 只允许读取所填仓库的文件和 PR。</p>
 <form id="githubCapabilityForm"><label>仓库<input id="githubRepository" required maxlength="150" placeholder="owner/repo"></label><label>细粒度 Token<input id="githubCapabilityToken" type="password" autocomplete="new-password" maxlength="261" required></label><button id="githubAuthorize">验证并保存授权</button></form>
