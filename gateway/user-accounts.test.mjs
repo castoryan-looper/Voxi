@@ -10,9 +10,20 @@ const A='a'.repeat(32),B='b'.repeat(32);
 
 test('user accounts persist, stay scoped, cannot elevate, and revoke all sessions on password/reset/disable',async t=>{
  const dir=mkdtempSync(join(tmpdir(),'voxi-users-'));const forwarded=[];
+ const profiles=[{id:A,name:'Alice profile',deviceCount:1},{id:B,name:'Bob profile',deviceCount:0}];
+ const archived=new Set();let failDelete=false;
  const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const body=raw?JSON.parse(raw):null;forwarded.push({path:req.url,auth:req.headers.authorization,body});res.setHeader('Content-Type','application/json');
   if(req.url==='/voxi/agent')res.end(JSON.stringify({users:[{id:A,name:'Alice profile'},{id:B,name:'Bob profile'}],runtime:{userPortalVersion:1}}));
-  else if(req.url==='/voxi/memory'&&body?.action==='directory')res.end(JSON.stringify({profiles:[{id:A,name:'Alice profile',deviceCount:1},{id:B,name:'Bob profile',deviceCount:0}]}));
+  else if(req.url==='/voxi/memory'&&body?.action==='directory')res.end(JSON.stringify({profiles:profiles.filter(p=>!archived.has(p.id))}));
+  else if(req.url==='/voxi/memory'&&['check_delete_user','delete_user'].includes(body?.action)){
+   if(body.userId===A){res.statusCode=400;return res.end(JSON.stringify({error:'请先转移绑定设备'}));}
+   if(body.action==='delete_user'){
+    if(failDelete){res.statusCode=500;return res.end('{}');}
+    archived.add(body.userId);
+   }
+   res.end(JSON.stringify({ok:true,userId:body.userId}));
+  }
+  else if(req.url==='/voxi/memory'&&body?.action==='user_detail'&&archived.has(body.userId)){res.statusCode=400;res.end(JSON.stringify({error:'用户档案不存在'}));}
   else if(req.url==='/voxi/memory'&&body?.action==='user_detail')res.end(JSON.stringify({profile:{id:body.userId,enabled:1},devices:[],agent:{tasks:[],channels:[{mode:'fast'},{mode:'agent'}]}}));
   else if(req.url==='/voxi/portal')res.end(JSON.stringify({role:'user',profile:{id:body.actorUserId},action:body.action}));
   else if(req.url==='/voxi/voice-preview')res.end(JSON.stringify({voice:body.voice,audioFormat:'wav',audioBase64:'fixture-audio'}));
@@ -87,7 +98,22 @@ test('user accounts persist, stay scoped, cannot elevate, and revoke all session
  alice=await login('user','alice','alice-changed-456');
  assert.equal((await call('/api/admin/users',{action:'password',accountId:aid,password:'reset-password-789'},admin)).status,200);
  assert.equal((await call('/api/user/state',null,alice)).status,401);
+ const deletion={action:'delete',userId:B,confirmUserId:B};
+ assert.equal((await call('/api/admin/users',deletion,bob)).status,401);
+ assert.equal((await call('/api/admin/users',deletion,{cookie:admin.cookie})).status,401);
+ assert.equal((await call('/api/admin/users',{...deletion,confirmUserId:A},admin)).status,400);
+ assert.equal((await call('/api/admin/users',{action:'delete',userId:A,confirmUserId:A},admin)).status,400);
+ assert.equal((await call('/api/user/session',null,bob)).status,200);
+ failDelete=true;
+ assert.match((await(await call('/api/admin/users',deletion,admin)).json()).error,/网页登录已停用/);
+ assert.equal((await call('/api/user/session',null,bob)).status,401);
+ failDelete=false;
+ assert.equal((await call('/api/admin/users',deletion,admin)).status,200);
+ assert.equal((await call('/api/admin/users',deletion,admin)).status,200); // retry is safe
+ list=await(await call('/api/admin/users',null,admin)).json();
+ assert.deepEqual(list.accounts.map(a=>a.userId),[A]);assert.deepEqual(list.profiles.map(p=>p.id),[A]);
  base=await app();alice=await login('user','alice','reset-password-789');assert.equal((await call('/api/user/state',null,alice)).status,200);
+ assert.equal((await call('/api/user/login',{username:'bob',password:'bob-password-123'})).status,401);
  assert.equal((await call('/api/user/logout',{},alice)).status,200);assert.equal((await call('/api/user/session',null,alice)).status,401);
 });
 

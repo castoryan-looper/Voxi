@@ -112,6 +112,28 @@ test('the channel editor saves defaults and personal overrides to separate scope
  assert.match(get('memoryTurns').children[0].children[0].textContent,/<script>/);
  });
 
+test('user deletion requires opening the panel and typing the exact profile ID',async()=>{
+ const {context,get}=page(),uid='a'.repeat(32),requests=[];
+ const detail={profile:{id:uid,name:'测试用户',profile:'',enabled:1},devices:[]};
+ context.location.pathname='/admin/users/'+uid+'/profile';
+ vm.runInContext("token='session'",context);
+ context.fetch=async(path,options)=>{
+  if(options.body)requests.push(JSON.parse(options.body));
+  return {ok:true,json:async()=>path.endsWith('/profile')?detail:path.endsWith('/devices')?{devices:[]}:{profiles:[],accounts:[],directoryAvailable:true}};
+ };
+ await vm.runInContext('loadUserDetail()',context);
+ const submit=()=>get('deleteUserForm').onsubmit({preventDefault(){}});
+ get('deleteUserId').value=uid;await submit();
+ assert.deepEqual(requests,[]);
+ get('deleteUserPanel').open=true;
+ get('deleteUserId').value=uid.slice(-6);get('deleteUserId').oninput();await submit();
+ assert.equal(get('deleteUser').disabled,true);assert.deepEqual(requests,[]);
+ get('deleteUserId').value=uid;get('deleteUserId').oninput();
+ assert.equal(get('deleteUser').disabled,false);await submit();
+ assert.deepEqual(requests,[{action:'delete',userId:uid,confirmUserId:uid}]);
+ assert.equal(context.location.pathname,'/admin/users');
+});
+
  test('legacy device link resolves its owner and loads the unified memory tab',async()=>{
  const {context,get}=page(),uid='b'.repeat(32),deviceId='esp32-222222222222';
  const data={profile:{id:uid,name:'乙',profile:'',enabled:1},devices:[{id:deviceId}],memories:[],turns:[]};

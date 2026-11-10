@@ -18,6 +18,29 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
  const cookie=(id,age)=>`voxi_user=${id}; Path=/api/user/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
  const ready=()=>{if(!agent||!portal)throw Error('用户服务需要 Pocket Cloud 模式');};
 
+ async function deleteUser({userId,confirmUserId}){
+  if(typeof userId!=='string'||!/^[a-f0-9]{32}$/.test(userId)||confirmUserId!==userId)throw Error('请输入完整用户 ID 确认删除');
+  if(!memory)throw Error('用户删除需要 Pocket Cloud 模式');
+  const request=async action=>{
+   const result=await memory({action,userId,confirmUserId});
+   if(result.ok!==true||result.userId!==userId)throw Error('Pocket Cloud 未确认此用户的删除操作');
+  };
+  await request('check_delete_user');
+  const account=accounts.find(a=>a.userId===userId);
+  if(account){
+   // Persist the access revocation first so a timeout or process restart
+   // cannot leave a deleted profile's account enabled.
+   if(account.enabled)save(accounts.map(a=>a.id===account.id?{...a,enabled:false}:a));
+   revoke(account.id);
+  }
+  try{await request('delete_user');}
+  catch(e){throw Error((account?'网页登录已停用。':'')+'尚未确认用户删除，可重试：'+e.message);}
+  if(account){
+   try{save(accounts.filter(a=>a.id!==account.id));}
+   catch{throw Error('用户档案已移除，网页登录已停用，但登录记录清理失败。请检查账户存储后重试。');}
+  }
+ }
+
  async function admin(body){
   ready();if(editing)throw Error('账户正在保存，请稍后重试');
   if(body){editing=true;try{
@@ -34,9 +57,15 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
     if(accounts.some(a=>a.userId===userId))throw Error('此用户档案已绑定登录账户');
     const next={id:randomBytes(16).toString('hex'),username:body.username,userId,role:'user',enabled:true,passwordHash:await passwordHash(body.password)};
     save([...accounts,next]);
+   }else if(action==='delete'){
+    await deleteUser(body);
    }else{
     const a=accounts.find(a=>a.id===body.accountId);if(!a)throw Error('账户不存在');
-    if(action==='enabled'){if(typeof body.enabled!=='boolean')throw Error('账户状态无效');save(accounts.map(x=>x.id===a.id?{...x,enabled:body.enabled}:x));}
+    if(action==='enabled'){
+     if(typeof body.enabled!=='boolean')throw Error('账户状态无效');
+     if(body.enabled&&memory)await detail(a.userId,'profile');
+     save(accounts.map(x=>x.id===a.id?{...x,enabled:body.enabled}:x));
+    }
     else if(action==='password'){if(typeof body.password!=='string'||body.password.length<8||body.password.length>128)throw Error('新密码需要8–128字符');const hash=await passwordHash(body.password);save(accounts.map(x=>x.id===a.id?{...x,passwordHash:hash}:x));}
     else throw Error('账户操作无效');
     revoke(a.id);
