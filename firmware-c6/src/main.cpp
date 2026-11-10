@@ -22,6 +22,7 @@ SET_LOOP_TASK_STACK_SIZE(16384);
 #include "runtime_config.h"
 #include "radio_network.h"
 #ifdef VOXI_BOARD_MINICAM
+#include "adaptive_playback.h"
 #include "cellular_socket.h"
 #endif
 #include "opus_reply.h"
@@ -165,6 +166,8 @@ static bool replyBatched=false;
 static const char* replyFormat(){return replyBatched?"opus-24000-batch-v1":"opus-24000-v1";}
 size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
+static bool replyInterrupted=false;
+static uint32_t replyInterruptedAt=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
 static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
 #if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
@@ -173,6 +176,19 @@ static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedByte
 static PlaybackGate playbackGate(2*48000,6*48000,48000,true);
 #else
 static PlaybackGate playbackGate;
+#endif
+static uint32_t rebufferStartedAt=0,rebufferCount=0,rebufferTotalMs=0,rebufferMaxMs=0;
+static void finishRebuffer(uint32_t now){
+  if(!rebufferStartedAt)return;
+  const uint32_t duration=now-rebufferStartedAt;
+  rebufferTotalMs+=duration;
+  rebufferMaxMs=max(rebufferMaxMs,duration);
+  rebufferStartedAt=0;
+}
+#ifdef VOXI_BOARD_MINICAM
+static AdaptivePlayback adaptivePlayback;
+static bool adaptiveActive=false,recoveryNeedsPacket=false;
+static uint32_t earlyRefillResumes=0;
 #endif
 #ifdef VOXI_BOARD_MINICAM
 static String playbackFlowId;
@@ -187,13 +203,18 @@ static uint16_t enabledChannels=0x0f;
 static char agentTaskState[24]={},agentTaskId[40]={},captureRequestId[40]={};
 const ChannelLabel& radioChannelLabel(int index){return channelLabels[index];}
 const char* radioTaskState(){return agentTaskState;}
-void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=playbackGate.rebuffers;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
+void playbackDiagnostics(JsonDocument& out){char identity[32];deviceIdentity(identity,sizeof(identity));out["deviceId"]=identity;out["replyTransportFormat"]=replyFormat();out["replyWireBytesPerSecond"]=3200;out["board"]=BOARD_NAME;out["psramBytes"]=ESP.getPsramSize();out["freePsramBytes"]=ESP.getFreePsram();out["replyReceivedBytes"]=replyRxBytes;out["replyConsumedBytes"]=replyConsumedBytes;out["replyReceivedCrc"]=replyRxCrc;out["replyConsumedCrc"]=replyConsumedCrc;out["replyIntegrityComplete"]=replyIntegrityComplete;out["replyIntegrityPassed"]=replyIntegrityComplete&&replyRxBytes==replyConsumedBytes&&replyRxCrc==replyConsumedCrc;out["replyGapMaxMs"]=replyGapMaxMs;out["playbackCapacityMs"]=CAP/(replyBytesPerSample*24);out["playbackPeakMs"]=playbackPeakBytes/(replyBytesPerSample*24);out["playbackServiceGapMaxMs"]=playbackServiceGapMaxMs;out["playbackBufferedMs"]=used/(replyBytesPerSample*24);out["playbackRebuffers"]=rebufferCount;out["playbackTargetMs"]=playbackGate.targetBytes/(replyBytesPerSample*24);}
 void opusDiagnostics(JsonDocument& out){
+ out["playbackRebufferTotalMs"]=rebufferTotalMs;
+ out["playbackRebufferMaxMs"]=rebufferMaxMs;
  const auto& label=radioChannelLabel(channel);
  out["channelMode"]=label.mode;out["channelName"]=label.name;out["agentTaskState"]=agentTaskState;out["agentTaskId"]=agentTaskId;
  out["channelCatalogKnown"]=channelCatalogKnown;out["enabledChannelMask"]=enabledChannels;out["channelNameBitmap"]=label.hasBitmap;
 #ifdef VOXI_BOARD_MINICAM
  out["playbackCreditActive"]=playbackFlowId.length()>0;out["playbackResumeMs"]=playbackGate.threshold()/48;
+ out["playbackPolicy"]=radioUsesCellular()?"adaptive-4g-bounded-refill":"legacy";
+ out["playbackEarlyRefillResumes"]=earlyRefillResumes;
+ if(adaptiveActive){out["playbackDeficitMs"]=adaptivePlayback.deficitMs();out["playbackNextStartupMs"]=adaptivePlayback.startupMs();}
 #endif
 #ifdef VOXI_OPUS_UPLINK
  out["opusUplinkFrames"]=opusUplinkFrames;out["opusUplinkErrors"]=opusUplinkErrors;out["opusUplinkMaxUs"]=opusUplinkMaxUs;out["opusUplinkWireBytes"]=opusUplinkWireBytes;
@@ -444,6 +465,7 @@ bool radioSetWarmStandby(bool idle){
 void control(const char* type){JsonDocument d;d["type"]=type;String s;serializeJson(d,s);sendText(s);}
 void flushAudio(){
  downlinkProbeWaiting=false;
+ finishRebuffer(millis());
 #ifdef VOXI_BOARD_MINICAM
  playbackFlowId="";
 #endif
@@ -457,7 +479,7 @@ static bool deferUploadRecovery(){
 }
 void fault(){if(retryableWriteFailure){retryableWriteFailure=false;if(deferUploadRecovery())return;}uploadRecovery.pending=false;replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeState="failed";probeActive=false;probeFinishing=false;probePassed=false;}radioDebug("ERROR","Audio/queue fault: reconnect");ready=false;tx=false;thinking=false;flushAudio();resetLink=true;Serial.println("Link reset");}
 void onWs(WStype_t t,uint8_t* data,size_t len){
-  if(t==WStype_DISCONNECTED||t==WStype_CONNECTED){requestedChannel=-1;channelProtocolReady=false;downlinkProbeReady=false;discardProbeAudio=false;}
+  if(t==WStype_DISCONNECTED||t==WStype_CONNECTED){requestedChannel=-1;channelProtocolReady=false;downlinkProbeReady=false;discardProbeAudio=false;replyInterrupted=false;}
 #ifdef VOXI_OPUS_UPLINK
   if(t==WStype_DISCONNECTED)uplinkOpusReady=false;
 #endif
@@ -465,11 +487,22 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(t==WStype_DISCONNECTED)replyCodecReady=false;
   if(t==WStype_DISCONNECTED){gatewayLinked=false;if(deferUploadRecovery())return;if(playing||thinking||replyPending)diagnosticTurnFailure("Gateway disconnected during reply");replyPending=false;audioCacheClose();uploading=false;micBatchUsed=0;if(probeActive||probeFinishing){probeActive=false;probeFinishing=false;probePassed=false;probeState="failed";}radioDebug("OFFLINE","Gateway disconnected");gatewayLinked=false;diagnosticStage(backendError?"backend_error":"disconnected");ready=false;tx=false;thinking=false;flushAudio();if(!setupScreenActive())displayChannel(channel,false);return;}
   if(t==WStype_CONNECTED){replyCodecReady=false;radioDebug("WAIT AI","Gateway connected");gatewayLinked=true;diagnosticStage("cloud_handshake");ready=false;return;}
+  if(replyInterrupted)return; // Late frames belong to the interrupted connection.
   if(t==WStype_BIN){
     if(discardProbeAudio)return;
     if(!turnTiming.firstPcm)turnTiming.firstPcm=millis();
     radioDebugRx(len);
-    if(playing){uint32_t now=millis();if(lastReplyPacketAt)replyGapMaxMs=max(replyGapMaxMs,now-lastReplyPacketAt);lastReplyPacketAt=now;}
+    if(playing){
+      const uint32_t now=millis(),gap=now-lastReplyPacketAt;
+      if(replyWireMessages)replyGapMaxMs=max(replyGapMaxMs,gap);
+      lastReplyPacketAt=now;
+#ifdef VOXI_BOARD_MINICAM
+      if(adaptiveActive&&recoveryNeedsPacket){
+        playbackGate.targetBytes=adaptivePlayback.recoveryMs(gap)*48;
+        recoveryNeedsPacket=false;
+      }
+#endif
+    }
     if(tx)return;
     OpusReplySpan frames[3];size_t count=opusReplyPackets(data,len,replyBatched,frames);
     if(!replyCodecReady||!count){diagnosticError("Invalid Opus transport envelope");fault();return;}
@@ -521,7 +554,8 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     // C6 must keep its watermarks below the 96KB internal PCM buffer.
     playbackGate.resumeBytes=CAP<=2*48000?28800:48000;
 #ifdef VOXI_BOARD_MINICAM
-    playbackGate.resumeBytes=2*48000;playbackGate.recoveryStepBytes=48000;playbackGate.recoveryMaxBytes=4*48000;
+    playbackGate.resumeBytes=adaptiveActive&&playing?0:2*48000;
+    playbackGate.recoveryStepBytes=48000;playbackGate.recoveryMaxBytes=4*48000;
 #endif
     if(uploading||replyPending)return;
     if(channelSwitchAt){channelReadyMs=millis()-channelSwitchAt;channelSwitchAt=0;}
@@ -548,8 +582,23 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
     if(!replyCodecReady||!opusReplyReset()){diagnosticError("Opus not confirmed or decoder reset failed");fault();return;}
 #ifdef VOXI_BOARD_MINICAM
     playbackFlowId=d["flowId"]|"";playbackCreditAt=0;
+    earlyRefillResumes=0;
+    if(radioUsesCellular()){
+      adaptiveActive=true;
+      recoveryNeedsPacket=false;
+      playbackGate.stepBytes=0;
+      playbackGate.resumeBytes=0; // The estimator supplies both watermarks.
+      playbackGate.targetBytes=adaptivePlayback.startupMs()*48;
+      adaptivePlayback.begin(millis());
+    }else if(adaptiveActive){
+      adaptiveActive=false;
+      playbackGate.targetBytes=playbackGate.initialBytes;
+      playbackGate.stepBytes=48000;
+      playbackGate.resumeBytes=96000;
+    }
 #endif
-    replyWireBytes=replyWireMessages=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=replyGapMaxMs=0;lastPlaybackWriteAt=playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;playbackGate.reset();fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
+    rebufferStartedAt=rebufferCount=rebufferTotalMs=rebufferMaxMs=0;
+    replyWireBytes=replyWireMessages=0;replyRxCrc=replyConsumedCrc=replyRxBytes=replyConsumedBytes=0;replyIntegrityComplete=false;lastReplyPacketAt=millis();replyGapMaxMs=0;lastPlaybackWriteAt=playbackServiceAt=playbackServiceGapMaxMs=0;playbackPeakBytes=0;playbackGate.reset();fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Reply audio: prebuffering");thinking=false;played=0;ending=false;playing=true;
   }
   if(type=="audio_end"){replyPending=false;radioDebug("DRAINING","Reply stream ended");ending=true;}
 }
@@ -585,9 +634,10 @@ static void cachedUploadTick(){
   }
 }
 static bool canRecordDuringSwitch(){return channelSwitchAt&&millis()-channelSwitchAt<=90000;}
-bool radioCanStartRecording(){return channelEnabled(channel)&&(ready||canRecordDuringSwitch())&&!tx&&!uploading&&!thinking&&!playing&&!replyPending&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
+bool radioCanStartRecording(){return channelEnabled(channel)&&(ready||canRecordDuringSwitch())&&!tx&&!uploading&&!thinking&&!playing&&!replyPending&&!replyInterrupted&&!audioCacheBusy()&&!probeActive&&!probeFinishing&&!uploadRecovery.pending;}
 #ifdef VOXI_BOARD_MINICAM
 const char* radioIdleDisplayPhase(){
+  if(replyInterrupted)return "REPLY RETRY";
   if(tx||uploading||uploadRecovery.pending||playing||thinking||replyPending||cueActive||
      audioCacheBusy()||speakerTestPending()||probeActive||probeFinishing)return nullptr;
   if(!radioConfig.valid)return "SETUP NEEDED";
@@ -667,7 +717,7 @@ void encoder(){
     if(abs(encSteps)>=4){requestChannelDelta(encSteps>0?1:-1);encSteps=0;}}
   // Coalesce rapid rotation, and defer switching until PTT is released.
   constexpr uint32_t settleMs=BOARD_ENCODER_A>=0?180:0;
-  if(!stable&&!uploading&&!uploadRecovery.pending&&!replyPending&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>=settleMs){
+  if(!stable&&!uploading&&!uploadRecovery.pending&&!replyPending&&!replyInterrupted&&!thinking&&!playing&&pendingChannel!=channel&&millis()-encAt>=settleMs){
     tx=false;ready=false;flushAudio();channel=pendingChannel;if(!setupScreenActive())displayChannel(channel,false);
     channelSwitchAt=millis();channelReadyMs=0;requestCloudChannel();
   }
@@ -688,14 +738,28 @@ void audioTick(){
   }
   // Watermarks apply only when priming/refilling, never to continuous playback.
   if(playing){uint32_t now=millis();if(playbackServiceAt)playbackServiceGapMaxMs=max(playbackServiceGapMaxMs,now-playbackServiceAt);playbackServiceAt=now;}
+#ifdef VOXI_BOARD_MINICAM
+  if(adaptiveActive&&playing&&!ending&&replyConsumedBytes&&!rebufferStartedAt){
+    adaptivePlayback.observe(millis(),replyRxBytes/48,used/48);
+  }
+#endif
   // If input runs dry, count it and refill before restarting.
   uint32_t previousRefills=playbackGate.rebuffers;
   bool waitingForBuffer=!playbackGate.primed;
   for(int budget=0;budget<6&&!tx&&playing&&!cueActive;budget++){
     uint32_t now=millis();
+    bool resumeEarly=false;
+#ifdef VOXI_BOARD_MINICAM
+    if(adaptiveActive&&!ending&&!playbackGate.primed&&rebufferStartedAt){
+      resumeEarly=adaptivePlayback.resumeRefillEarly(now,used/48,playbackGate.threshold()/48);
+    }
+#endif
     // DMA can still be playing after the software ring runs out. Give a
     // nearby batch a chance to arrive before starting a multi-second refill.
-    if(!playbackGate.canWrite(used,ending,lastPlaybackWriteAt&&now-lastPlaybackWriteAt<25))break;
+    if(!playbackGate.canWrite(used,ending,lastPlaybackWriteAt&&now-lastPlaybackWriteAt<25,resumeEarly))break;
+#ifdef VOXI_BOARD_MINICAM
+    if(resumeEarly)earlyRefillResumes++;
+#endif
     if(!replyCuePlayed){replyCuePlayed=true;startRadioCue();radioDebug("PLAYING","RX squelch: reply begins");return;}
     if(waitingForBuffer){radioDebug("PLAYING","Audio buffer ready: resumed");waitingForBuffer=false;}
     size_t count=min(used/replyBytesPerSample,(size_t)240);int16_t mono[240];
@@ -706,6 +770,13 @@ void audioTick(){
     size_t written=count?audioWrite(mono,count):0;
     if(!written)break; // DMA full: retry next loop without consuming any PCM.
     lastPlaybackWriteAt=millis();
+#ifdef VOXI_BOARD_MINICAM
+    if(adaptiveActive&&(!replyConsumedBytes||rebufferStartedAt)){
+      adaptivePlayback.begin(lastPlaybackWriteAt,replyRxBytes/48);
+      recoveryNeedsPacket=false;
+    }
+#endif
+    finishRebuffer(lastPlaybackWriteAt);
     if(written&&!turnTiming.voice)turnTiming.voice=millis();
     fadeRemaining=written>=fadeRemaining?0:fadeRemaining-written;
     size_t consumed=written*replyBytesPerSample;
@@ -713,14 +784,29 @@ void audioTick(){
     if(first<consumed)replyConsumedCrc=esp_rom_crc32_le(replyConsumedCrc,playback,consumed-first);
     replyConsumedBytes+=consumed;
     tail=(tail+consumed)%CAP;used-=consumed;played+=written;
-    if(ending&&used==0){replyIntegrityComplete=true;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");playing=false;ending=false;thinking=false;}
   }
-  if(playbackGate.rebuffers!=previousRefills){fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Audio jitter: refilling");}
-  if(!tx&&playing&&ending&&used==0){replyIntegrityComplete=true;playing=ending=thinking=false;turnTiming.finished=millis();radioDebug(ready?"READY":"WAIT AI","Speaker playback complete");}
+  if(playbackGate.rebuffers!=previousRefills){
+    rebufferCount++;
+    rebufferStartedAt=millis();
+#ifdef VOXI_BOARD_MINICAM
+    if(adaptiveActive){
+      adaptivePlayback.underrun();
+      playbackGate.targetBytes=adaptivePlayback.recoveryMs()*48;
+      recoveryNeedsPacket=true;
+    }
+#endif
+    fadeRemaining=playbackFadeSamples;radioDebug("BUFFERING","Audio jitter: refilling");
+  }
+  if(!tx&&playing&&ending&&used==0){
+    replyIntegrityComplete=!replyInterrupted;
+    playing=ending=thinking=false;turnTiming.finished=millis();
+    radioDebug(replyInterrupted?"REPLY RETRY":ready?"READY":"WAIT AI",
+      replyInterrupted?"Interrupted audio tail drained":"Speaker playback complete");
+  }
 #ifdef VOXI_BOARD_MINICAM
   // Best-effort nonblocking enqueue; network task owns all TLS writes.
   // Absolute consumed bytes charge even delayed/in-flight audio to server credit.
-  if(playing&&gatewayLinked&&playbackFlowId.length()&&millis()-playbackCreditAt>=1500){
+  if(playing&&!replyInterrupted&&gatewayLinked&&playbackFlowId.length()&&millis()-playbackCreditAt>=1500){
     JsonDocument credit;credit["type"]="playback_credit";credit["flowId"]=playbackFlowId;
     credit["consumedBytes"]=replyConsumedBytes;credit["capacityBytes"]=CAP;
     String text;serializeJson(credit,text);TxPacket packet{};packet.type=WStype_TEXT;packet.len=text.length();
@@ -734,6 +820,29 @@ void audioTick(){
     d["ms"]=played>1440?(played-1440)/24:0;String s;serializeJson(d,s);
     // A synchronous TLS write must not block incoming speech just to report position.
     if(ready&&!tx&&!uploading&&!playing&&!cueActive&&played!=lastReported&&sendText(s))lastReported=played;}
+}
+static void replyWatchdogTick(){
+  constexpr uint32_t silenceMs=25000;
+  constexpr uint32_t drainDeadlineMs=4000;
+  constexpr uint32_t dmaTailMs=75;
+  uint32_t now=millis();
+  if(replyInterrupted){
+    if(gatewayLinked&&((!playing&&now-turnTiming.finished>=dmaTailMs)||now-replyInterruptedAt>=drainDeadlineMs)){
+      gatewayLinked=false;replyPending=false;
+      flushAudio();resetLink=true;
+    }
+    return;
+  }
+  uint32_t gap=now-lastReplyPacketAt;
+  if(playing&&!ending&&gap>=silenceMs&&uxQueueMessagesWaiting(incoming)==0){
+    // An open socket can still stop delivering audio and its end marker.
+    // Let the short tail bypass the refill watermark without marking it complete.
+    replyInterrupted=true;replyInterruptedAt=now;ending=true;ready=false;
+    replyGapMaxMs=max(replyGapMaxMs,gap);
+    diagnosticTurnFailure("Audio downlink stalled; reply interrupted");
+    diagnosticError("Audio downlink stalled; reply interrupted");
+    radioDebug("REPLY RETRY","Audio stalled: draining before reconnect");
+  }
 }
 void setup(){
   Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
@@ -774,10 +883,10 @@ void loop(){
   for(int i=0;i<8&&xQueuePeek(incoming,&p,0)==pdTRUE;i++){
     // audio_end is ordered after its PCM. Drain that tail before the next
     // control event can reset playback for a following segment.
-    if(playing&&ending&&p.type==WStype_TEXT)break;
+    if(!replyInterrupted&&playing&&ending&&p.type==WStype_TEXT)break;
     // Leave a valid PCM frame queued until playback frees room. This pauses
     // socket reads via the bounded incoming queue, instead of discarding audio.
-    if(p.type==WStype_BIN&&(replyBatched?3u:1u)*960>CAP-used)break;
+    if(!replyInterrupted&&p.type==WStype_BIN&&(replyBatched?3u:1u)*960>CAP-used)break;
     if(xQueueReceive(incoming,&p,0)!=pdTRUE)break;
     onWs(p.type,p.data,p.len);
   }
@@ -796,6 +905,7 @@ void loop(){
   cachedUploadTick();
   static bool wifiWas=false;bool wifiNow=radioNetworkConnected();if(wifiNow!=wifiWas){wifiWas=wifiNow;radioDebug(wifiNow?"WAIT AI":(radioUsesCellular()?"NO 4G":"NO WIFI"),wifiNow?(radioUsesCellular()?"4G connected":"WiFi connected"):(radioUsesCellular()?"4G disconnected":"WiFi disconnected"));}
   if(!radioNetworkConnected()){if(uploading)deferUploadRecovery();if(!uploadRecovery.pending){if(ready||tx||playing||used)flushAudio();tx=false;}ready=false;diagnosticStage(radioUsesCellular()?"cellular_connecting":"wifi_connecting");}
+  replyWatchdogTick();
   if(!standbyScreenOff()){button();encoder();audioTick();}
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();

@@ -18,8 +18,8 @@ struct PlaybackGate {
     }
     return reserve<targetBytes?reserve:targetBytes;
   }
-  bool canWrite(size_t bytes,bool ending,bool dmaGrace=false){
-    if(!primed){if(bytes>=threshold()||(ending&&bytes))primed=true;else return false;}
+  bool canWrite(size_t bytes,bool ending,bool dmaGrace=false,bool resumeEarly=false){
+    if(!primed){if(bytes>=threshold()||((ending||(recovering&&resumeEarly))&&bytes))primed=true;else return false;}
     if(!bytes&&dmaGrace&&!ending)return false;
     if(!bytes){if(!ending){rebuffers++;primed=false;recovering=true;if(targetBytes<maxBytes)targetBytes=stepBytes>maxBytes-targetBytes?maxBytes:targetBytes+stepBytes;}return false;}
     return true;
