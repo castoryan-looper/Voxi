@@ -695,7 +695,7 @@ async function openAgentTask(id,user,poll=false){
  if(poll&&$('agentApproval').contains(document.activeElement))return;
  $('agentTaskActions').replaceChildren();$('agentApproval').replaceChildren();
  const button=(label,action,cls='secondary')=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.className=cls;b.onclick=action;$('agentTaskActions').append(b);};
- if(['queued','running','awaiting_approval','needs_input'].includes(task.state)||(task.engine==='openclaw'&&task.state==='submitting'))button(task.engine==='openclaw'?'停止等待／核对远端':'取消任务',()=>{if(confirm(task.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))agentTaskAction('cancel');},'danger');
+ if(['queued','running','awaiting_approval','needs_input'].includes(task.state)||(task.engine==='openclaw'&&task.state==='submitting'))button(['openclaw','model'].includes(task.engine)?'停止等待':'取消任务',()=>{if(confirm(task.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':task.engine==='model'?'停止等待后，服务端可能仍在执行并计费。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))agentTaskAction('cancel');},'danger');
  if(task.state==='awaiting_approval'){const pre=document.createElement('pre');pre.textContent=JSON.stringify(task.approval,null,2);$('agentApproval').append(pre);button('批准本次操作',()=>agentTaskAction('approve'));button('拒绝本次操作',()=>agentTaskAction('decline'),'danger');}
  if(task.state==='needs_input'){const form=document.createElement('form');for(const q of task.approval?.questions||[]){const label=document.createElement('label'),input=document.createElement('textarea');label.className='field';label.textContent=q.question||q.header||q.id;input.name=q.id;input.required=true;input.maxLength=4000;label.append(input);form.append(label);}const submit=document.createElement('button');submit.textContent='提交答案';form.append(submit);form.onsubmit=e=>{e.preventDefault();const answers={};for(const [key,value] of new FormData(form))answers[key]={answers:[value]};agentTaskAction('answer',{answers});};$('agentApproval').append(form);}
  if(['completed','failed','cancelled','interrupted','delivery_unknown'].includes(task.state)&&task.threadId)button('继续此任务',()=>{const text=prompt('补充要求（会先核对已有结果，避免重复执行）');if(text?.trim())agentTaskAction('continue',{text,requestId:crypto.randomUUID()});});
@@ -708,15 +708,28 @@ setInterval(()=>{if(token&&currentPage().key==='agentTasks')loadAgent(true);},50
 const openclawStatuses={ready:'接口与认证正常',offline:'连接器离线',unverified:'尚未连接／检测',unreachable:'无法连接，请检查地址、证书与网络',unauthorized:'Gateway Token／密码错误',forbidden:'Gateway 拒绝访问',endpoint_disabled:'Responses 接口未启用或版本不兼容',http_error:'接口返回异常'};
 
 let selectedConnectionUser='',connectionBusy=false;
+function providerOption(provider){
+ const group=provider.category==='app'?'应用':provider.category==='aggregator'?'模型聚合':'直连模型';
+ return group+' / '+provider.name;
+}
 function modelConnectionFields(fill=false){
  const provider=agentData?.modelProviders?.[$('adminModelProvider').value];
+ const app=provider?.category==='app';
+ $('adminModelIdField').hidden=Boolean(provider?.fixedModel);
+ $('adminModelId').required=!provider?.fixedModel;
+ $('adminModelIdLabel').textContent=provider?.modelLabel||'模型 ID';
+ $('adminModelWorkspaceLabel').textContent=provider?.workspaceLabel||'百炼北京业务空间 ID';
+ $('adminModelKeyLabel').textContent=app?'应用 API Key':'平台 API Key';
+ $('adminModelHint').textContent=app
+  ?'使用已发布的 Dify Cloud 应用密钥。验证只检查应用和输入设置。'+(provider.continuation?'已完成的对话可从任务详情继续。':'请配置一个文本输入和文本输出。')
+  :'使用服务商 API 账户。验证会发送一次短文本请求，费用计入该账户。';
  $('adminModelWorkspaceField').hidden=!provider?.workspaceRequired;
  $('adminModelWorkspace').required=Boolean(provider?.workspaceRequired);
  $('adminModelDocs').href=provider?.docs||'#';
  if(fill){
   $('adminModelName').value=provider?.name||'';
   $('adminModelId').value=provider?.defaultModel||'';
-  $('adminModelWorkspace').value='';
+  $('adminModelWorkspace').value=provider?.defaultWorkspace||'';
  }
 }
 function resetConnectionEditors(){
@@ -741,7 +754,7 @@ function renderConnectionEditor(refresh){
  $('modelConnectionPanel').hidden=!Object.keys(providers).length;
  if(refresh){
   const provider=$('adminModelProvider'),previous=provider.value;
-  provider.replaceChildren(...Object.entries(providers).map(([id,p])=>option(id,p.name)));
+  provider.replaceChildren(...Object.entries(providers).map(([id,p])=>option(id,providerOption(p))));
   provider.value=Object.hasOwn(providers,previous)?previous:Object.keys(providers)[0]||'';
   modelConnectionFields(!modelConnectionDirty);
  }
@@ -750,7 +763,7 @@ function renderConnectionEditor(refresh){
   c=>(c.transport==='relay'?'家中／内网主动连接':'云端 HTTPS')+' · '+(openclawStatuses[c.status]||c.status)+' · Agent '+c.agent);
  renderConnections('adminModelConnections','adminModelMessage','model',
   (agentData.modelConnections||[]).filter(c=>c.user_id===uid),
-  c=>(providers[c.provider]?.name||c.provider)+' · '+c.model);
+  c=>(providers[c.provider]?.name||c.provider)+' · '+(providers[c.provider]?.fixedModel?'凭据已验证':c.model+' · 已验证'));
 }
 async function connectionAction(button,message,body,onSuccess){
  if(connectionBusy||currentPage().key!=='agentConnections'||!body.userId||$('agentConnectionUser').value!==body.userId)return;
@@ -777,7 +790,7 @@ function renderConnections(container,message,kind,connections,describe){
   test.textContent='检测连接';remove.textContent='删除连接';
   const body={userId:uid,connectionId:conn.id};
   test.onclick=()=>connectionAction(test,message,{...body,action:'test_'+kind},result=>
-   kind==='model'?'模型验证通过。':(result.ok?'检测通过：':'检测未通过：')+(openclawStatuses[result.status]||result.status)+'。');
+   kind==='model'?'接入验证通过。':(result.ok?'检测通过：':'检测未通过：')+(openclawStatuses[result.status]||result.status)+'。');
   remove.onclick=()=>{
    if(confirm('删除该接入？请先解除频道绑定。'))
     return connectionAction(remove,message,{...body,action:'delete_'+kind},()=> '接入已删除。');
