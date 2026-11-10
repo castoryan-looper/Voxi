@@ -73,6 +73,22 @@ test('cloud health and malformed events',async t=>{
   first.close();
 });
 
+test('all web interfaces load the shared theme',async t=>{
+ const {server,wss}=createGateway({token:'test'});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ t.after(()=>{wss.close();server.close();});
+ for(const path of ['/admin/overview','/app/profile','/setup/']){
+  const response=await fetch(base+path);
+  assert.equal(response.status,200);
+  assert.match(await response.text(), /href="\/shared\/theme\.css"/);
+ }
+ const theme=await fetch(base+'/shared/theme.css');
+ assert.equal(theme.status,200);
+ assert.match(theme.headers.get('content-type'),/^text\/css/);
+ assert.match(await theme.text(),/color-scheme: dark/);
+});
+
 test('setup route returns HTML and malformed WebSocket frames do not crash gateway',async t=>{
  const {server,wss}=createGateway({token:'test'});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
