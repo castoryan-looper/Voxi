@@ -20,7 +20,7 @@ static constexpr EventBits_t DONE=1,FAILED=2,OPENED=4,OPEN_FAILED=8,SENT=16,CLOS
 static std::atomic<int> sentCount{-1};
 static std::atomic<bool> configured{false},selected{false},stopping{false},stopped{false},socketUp{false},ipUp{false};
 static std::atomic<bool> waiting{false};
-static std::atomic<bool> redialPending{false};
+static std::atomic<bool> redialPending{false},reattachPending{false};
 static std::atomic<bool> screenOff{false};
 static std::atomic<TaskHandle_t> managerTask{nullptr};
 static void notifyManager(){if(auto task=managerTask.load())xTaskNotifyGive(task);}
@@ -28,7 +28,7 @@ void minicamModemSetScreenOff(bool off){if(screenOff.exchange(off)!=off)notifyMa
 static char apn[64]={},response[2048]={};static size_t responseLength=0;
 static constexpr size_t RING_SIZE=128*1024,LINE_SIZE=128*1024+256;
 static uint8_t* ring;static size_t ringHead=0,ringTail=0,ringUsed=0;
-struct State{bool detected=false,simReady=false,registered=false,tlsVerified=false;int signal=-1,tlsError=0,socketError=0;uint32_t rxBytes=0,txBytes=0,overflows=0,largestPacket=0,largestLine=0,ringPeak=0,pollFailures=0,dropAt=0,redials=0;char dropReason[64]={};char model[48]={},status[48]="probing",lastAt[20]={};};
+struct State{bool detected=false,simReady=false,registered=false,tlsVerified=false;int signal=-1,tlsError=0,socketError=0;uint32_t rxBytes=0,txBytes=0,overflows=0,largestPacket=0,largestLine=0,ringPeak=0,pollFailures=0,dropAt=0,redials=0,reattaches=0;char dropReason[64]={};char model[48]={},status[48]="probing",lastAt[20]={};};
 static State state;
 static bool resourcesStarted=false;
 static void tcpFailed(const char* reason){socketUp=false;xSemaphoreTake(stateMutex,portMAX_DELAY);strlcpy(state.dropReason,reason,sizeof(state.dropReason));state.dropAt=millis();xSemaphoreGive(stateMutex);}
@@ -117,12 +117,21 @@ static void manager(void*){
  for(;;){
   if(stopping){minicamTcpClose();bool ok=command("AT+CFUN=0",5000);if(ok)modem.StopReceive();stopped=ok;vTaskSuspend(nullptr);}
   if(redialPending){
-   status("redialing 4G data");
-   xSemaphoreTake(stateMutex,portMAX_DELAY);state.redials++;xSemaphoreGive(stateMutex);
-   command("AT+MIPCALL=0,1",3000);
-   ipUp=false;
-   command(apn[0]?String("AT+MIPCALL=1,1,\"")+apn+"\"":String("AT+MIPCALL=1,1"),5000);
-   activationAttempted=true;activationAt=millis();
+   if(reattachPending.exchange(false)){
+    status("reattaching 4G radio");
+    xSemaphoreTake(stateMutex,portMAX_DELAY);state.reattaches++;xSemaphoreGive(stateMutex);
+    command("AT+CFUN=0",5000);
+    ipUp=false;
+    command("AT+CFUN=1",5000);
+    activationAttempted=false;
+   }else{
+    status("redialing 4G data");
+    xSemaphoreTake(stateMutex,portMAX_DELAY);state.redials++;xSemaphoreGive(stateMutex);
+    command("AT+MIPCALL=0,1",3000);
+    ipUp=false;
+    command(apn[0]?String("AT+MIPCALL=1,1,\"")+apn+"\"":String("AT+MIPCALL=1,1"),5000);
+    activationAttempted=true;activationAt=millis();
+   }
    redialPending=false;
   }
   if(!command("AT+CPIN?")){xSemaphoreTake(stateMutex,portMAX_DELAY);state.pollFailures++;xSemaphoreGive(stateMutex);}command("AT+CEREG?");command("AT+CSQ");
@@ -167,8 +176,8 @@ static void startModemResources(){
 }
 void minicamModemConfigure(bool enabled,const char* value){selected=enabled;strlcpy(apn,value,sizeof(apn));if(enabled)startModemResources();configured=true;}
 bool minicamModemReady(){return resourcesStarted&&selected&&ipUp&&!stopping&&!redialPending;}
-void minicamModemRequestRedial(){
- if(selected&&!stopping){redialPending=true;notifyManager();}
+void minicamModemRequestRedial(bool reattach){
+ if(selected&&!stopping){reattachPending=reattach;redialPending=true;notifyManager();}
 }
 int minicamSignal(){xSemaphoreTake(stateMutex,portMAX_DELAY);int v=state.signal;xSemaphoreGive(stateMutex);return v;}
 bool minicamTcpConnected(){return socketUp;}
@@ -193,7 +202,7 @@ int minicamTcpSend(const uint8_t* bytes,size_t length){
 int minicamTcpRead(uint8_t* bytes,size_t capacity){xSemaphoreTake(ringMutex,portMAX_DELAY);size_t n=min(capacity,ringUsed);for(size_t i=0;i<n;i++){bytes[i]=ring[ringTail];ringTail=(ringTail+1)%RING_SIZE;}ringUsed-=n;xSemaphoreGive(ringMutex);return n;}
 void minicamTlsStatus(bool verified,int error){xSemaphoreTake(stateMutex,portMAX_DELAY);state.tlsVerified=verified;state.tlsError=error;xSemaphoreGive(stateMutex);}
 void minicamModemDiagnostics(JsonDocument& out){State s;xSemaphoreTake(stateMutex,portMAX_DELAY);s=state;xSemaphoreGive(stateMutex);
- out["cellularDataRedials"]=s.redials;
+ out["cellularDataRedials"]=s.redials;out["cellularRadioReattaches"]=s.reattaches;
  out["cellularLastDropReason"]=s.dropReason;out["cellularLastDropAtMs"]=s.dropAt;out["cellularLargestPacket"]=s.largestPacket;out["cellularLargestLine"]=s.largestLine;out["cellularRingPeakBytes"]=s.ringPeak;out["cellularPollFailures"]=s.pollFailures;out["cellularResourcesActive"]=resourcesStarted;out["cellularUartDriver"]=resourcesStarted?"UHCI DMA":"not started";out["cellularDetected"]=s.detected;out["cellularModel"]=s.model;out["cellularBaud"]=921600;out["cellularSimReady"]=s.simReady;out["cellularRegistered"]=s.registered;out["cellularSignal"]=s.signal;out["cellularStatus"]=s.status;out["cellularTransportEnabled"]=(bool)selected;out["cellularDataReady"]=(bool)ipUp;out["cellularTcpConnected"]=(bool)socketUp;out["cellularTlsVerified"]=s.tlsVerified;out["cellularTlsError"]=s.tlsError;out["cellularSocketError"]=s.socketError;out["cellularLastAt"]=s.lastAt;out["cellularRxBytes"]=s.rxBytes;out["cellularTxBytes"]=s.txBytes;out["cellularRxOverflows"]=s.overflows;
  xSemaphoreTake(ringMutex,portMAX_DELAY);out["cellularTcpBufferedBytes"]=ringUsed;xSemaphoreGive(ringMutex);
 }

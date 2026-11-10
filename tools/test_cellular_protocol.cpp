@@ -31,13 +31,18 @@ int main(){
   assert(cellularStatusPollMs(true,false,true)==10000);
   assert(cellularStatusPollMs(true,true,false)==10000);
   CellularRecovery recovery;
-  assert(!recovery.noTlsResponse(5000));
-  assert(recovery.noTlsResponse(12000));
-  assert(!recovery.noTlsResponse(20000));
-  assert(!recovery.noTlsResponse(71000));
-  assert(recovery.noTlsResponse(72000));
-  assert(!recovery.noTlsResponse(80000));
+  assert(recovery.noTlsResponse(5000)==CellularRecovery::Retry);
+  assert(recovery.noTlsResponse(12000)==CellularRecovery::Redial);
+  assert(recovery.noTlsResponse(20000)==CellularRecovery::Retry);
+  assert(recovery.noTlsResponse(26000)==CellularRecovery::Retry);
+  assert(recovery.noTlsResponse(27000)==CellularRecovery::Reattach);
+  assert(recovery.noTlsResponse(80000)==CellularRecovery::Retry);
+  assert(recovery.noTlsResponse(87000)==CellularRecovery::Redial);
+  assert(recovery.noTlsResponse(95000)==CellularRecovery::Retry);
   recovery.received();
-  assert(!recovery.noTlsResponse(132000));
+  assert(recovery.noTlsResponse(147000)==CellularRecovery::Retry);
+  recovery.connected();
+  assert(recovery.noTlsResponse(150000)==CellularRecovery::Retry);
+  assert(recovery.noTlsResponse(157000)==CellularRecovery::Redial);
 }
 

@@ -69,14 +69,20 @@ inline uint32_t cellularStatusPollMs(bool screenOff,bool dataReady,bool socketCo
 }
 
 struct CellularRecovery {
- static constexpr uint32_t firstTlsByteMs=5000, tlsHandshakeMs=30000, redialCooldownMs=60000;
+ enum Action { Retry, Redial, Reattach };
+ static constexpr uint32_t firstTlsByteMs=5000, tlsHandshakeMs=30000;
  uint32_t lastRedial=0;
- uint8_t unanswered=0;
+ uint8_t unanswered=0, level=0;
  bool redialed=false;
  void received(){unanswered=0;}
- bool noTlsResponse(uint32_t now){
+ void connected(){received();level=0;}
+ Action noTlsResponse(uint32_t now){
   if(unanswered<2)++unanswered;
-  if(unanswered<2||(redialed&&uint32_t(now-lastRedial)<redialCooldownMs))return false;
-  unanswered=0;lastRedial=now;redialed=true;return true;
+  const uint32_t cooldown=level==1?15000:60000;
+  if(unanswered<2||(redialed&&uint32_t(now-lastRedial)<cooldown))return Retry;
+  unanswered=0;lastRedial=now;redialed=true;
+  if(level==1){level=2;return Reattach;}
+  if(level==0)level=1;
+  return Redial;
  }
 };

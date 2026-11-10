@@ -6,7 +6,7 @@ void minicamModemDiagnostics(JsonDocument& out);
 bool minicamModemStandby();
 void minicamModemSetScreenOff(bool off);
 bool minicamModemReady();
-void minicamModemRequestRedial();
+void minicamModemRequestRedial(bool reattach);
 int minicamSignal();
 bool minicamTcpConnect(const char* host,uint16_t port);
 void minicamTcpClose();

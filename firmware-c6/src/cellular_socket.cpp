@@ -48,9 +48,9 @@ bool CellularSocket::connect(){
    const uint32_t elapsed=millis()-began;
    if(!handshakeReceived&&elapsed>=CellularRecovery::firstTlsByteMs){
     waitingForTlsReply=true;
-    const bool redial=recovery.noTlsResponse(millis());
+    const auto action=recovery.noTlsResponse(millis());
     fail("TLS handshake received no reply");
-    if(redial)minicamModemRequestRedial();
+    if(action!=CellularRecovery::Retry)minicamModemRequestRedial(action==CellularRecovery::Reattach);
     return false;
    }
    if(elapsed>=CellularRecovery::tlsHandshakeMs){fail("TLS handshake timed out");return false;}
@@ -72,7 +72,7 @@ bool CellularSocket::connect(){
  bool accepted=false,upgrade=false,connection=false;int at=reply.indexOf("\r\n")+2;
  while(at>1&&at<(int)reply.length()-2){int end=reply.indexOf("\r\n",at),colon=reply.indexOf(':',at);if(end<0)break;if(colon>=at&&colon<end){String name=reply.substring(at,colon),value=reply.substring(colon+1,end);name.toLowerCase();value.trim();if(name=="sec-websocket-accept")accepted=value==accept;else{value.toLowerCase();if(name=="upgrade")upgrade=value=="websocket";if(name=="connection")connection=value.indexOf("upgrade")>=0;}}at=end+2;}
  if(!reply.startsWith("HTTP/1.1 101 ")||!accepted||!upgrade||!connection){int code=reply.substring(9,12).toInt();fail("WebSocket upgrade rejected",code);return false;}
- connected=true;buffered=messageLength=0;fragmented=false;heartbeat.reset(millis());
+ connected=true;recovery.connected();buffered=messageLength=0;fragmented=false;heartbeat.reset(millis());
  if(callback)callback(WStype_CONNECTED,(uint8_t*)path.c_str(),path.length());return true;
 }
 bool CellularSocket::frame(uint8_t opcode,const uint8_t* p,size_t n){
