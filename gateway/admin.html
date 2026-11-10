@@ -71,7 +71,12 @@
 <form id="resetUserPassword"><label class="field">新密码<input id="userResetPassword" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label><button>保存新密码</button></form></details>
 <p class="muted">停用或重置密码会撤销此账户的网页登录会话。</p></div>
 <form id="bindUserAccount" hidden><label class="field">登录名<input id="bindUsername" required minlength="3" maxlength="64" pattern="[A-Za-z0-9_.@-]+" autocomplete="off"></label><label class="field">初始密码<input id="bindPassword" required type="password" minlength="8" maxlength="128" autocomplete="new-password"></label><button>创建登录账户</button></form>
-</div></div></div>
+</div></div>
+<details class="settings-panel" id="deleteUserPanel"><summary>删除用户</summary>
+<p class="muted" id="deleteUserHelp"></p>
+<form id="deleteUserForm"><label class="field">输入上方显示的完整用户 ID 确认<input id="deleteUserId" required minlength="32" maxlength="32" pattern="[a-f0-9]{32}" autocomplete="off" spellcheck="false"></label>
+<button type="submit" id="deleteUser" class="danger" disabled>确认删除此用户</button></form></details>
+</div>
 <div id="userDevicesPanel" hidden><h3>绑定设备</h3><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>状态</th><th>操作</th></tr></thead><tbody id="userDevices"></tbody></table></div>
 <details class="settings-panel"><summary>将已有设备绑定到此用户</summary><p class="muted">变更会断开该设备的当前对话。原用户的记忆和任务仍归原用户。</p><div class="row"><select id="memoryDevice" aria-label="选择要绑定的设备"></select><button type="button" id="rebindDevice" class="secondary">确认绑定</button></div></details></div>
 <div id="memoryPanel" hidden><h3>网页任务记忆</h3><div id="webTaskMemory"></div>

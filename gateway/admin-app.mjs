@@ -5,7 +5,7 @@ async function api(path,body,{timeoutMs=12000,signal}={}){
  try{const response=await fetch('/api/admin/'+path,{method:body?'POST':'GET',credentials:'same-origin',signal:controller.signal,headers:{'X-CSRF-Token':token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store'});let data;try{data=await response.json();}catch{throw Error('服务返回了非 JSON 响应（HTTP '+response.status+'），请更新网关后重试');}if(!response.ok)throw Error(data.error||'请求失败（HTTP '+response.status+'）');return data;}catch(e){if(e.name==='AbortError')throw Error('请求超过'+Math.round(timeoutMs/1000)+'秒未完成，请检查云端服务后重试');throw e;}finally{clearTimeout(timeout);signal?.removeEventListener('abort',cancel);}
 }
 function cell(row,text){const td=document.createElement('td');td.textContent=text;row.append(td);return td;}
-const labels={user_account_changed:'用户账户已更新',unauthorized:'设备令牌被拒绝',device_opened:'设备接入',device_closed:'设备断开',admin_disconnected:'管理员断开连接',ai_config_changed:'AI 配置已保存',memory_changed:'用户记忆已更新'};
+const labels={user_account_changed:'用户账户已更新',user_deleted:'用户已删除',unauthorized:'设备令牌被拒绝',device_opened:'设备接入',device_closed:'设备断开',admin_disconnected:'管理员断开连接',ai_config_changed:'AI 配置已保存',memory_changed:'用户记忆已更新'};
 const integer=new Intl.NumberFormat('zh-CN');
 const shanghaiDate=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',dateStyle:'medium'});
 const count=value=>Number.isSafeInteger(value)&&value>=0?integer.format(value):'—';
@@ -200,8 +200,9 @@ function resetUserDetail(){
  for(const id of ['webTaskMemory','memoryFacts','memoryTurns','userDevices','agentTasks','agentTaskChannel','agentApproval','agentTaskActions','agentTaskEvents'])$(id).replaceChildren();
  for(const id of ['userDetailName','userDetailSummary','userDetailId','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
- $('userResetPanel').open=false;
+ $('userResetPanel').open=false;$('deleteUserPanel').open=false;resetDeleteUser();
 }
+function resetDeleteUser(){ $('deleteUserId').value='';$('deleteUser').disabled=true; }
 function renderUserDevices(){
  const target=$('userDevices');target.replaceChildren();
  for(const device of userDetailData.devices){
@@ -251,6 +252,10 @@ function renderUserProfile(data){
  $('userLoginStatus').textContent=account?account.username+' · '+(account.enabled?'可登录':'已停用'):'尚未开通网页登录账户';
  $('userAccountActions').hidden=!account;$('bindUserAccount').hidden=Boolean(account);
  $('toggleUserLogin').textContent=account?.enabled?'停用账户':'启用账户';
+ $('deleteUserForm').hidden=data.devices.length>0;
+ $('deleteUserHelp').textContent=data.devices.length?'请先将绑定设备转移到其他用户，再删除此用户。':
+  '删除后，此档案会从用户目录移除，网页登录及已有会话会失效。历史记录会归档保留，管理后台无法恢复此档案。请先结束或取消后台任务。';
+ resetDeleteUser();
 }
 async function loadWebTaskMemory(userId,current){
  const container=$('webTaskMemory');
@@ -323,6 +328,24 @@ $('clearMemory').onclick=()=>{if(confirm('永久清空此用户的设备端背�
 $('toggleUserLogin').onclick=()=>{
  const account=userDetailData?.account;
  if(account&&(!account.enabled||confirm('停用此用户的网页登录并撤销已有会话？')))return saveUserDetail('users',{action:'enabled',accountId:account.id,enabled:!account.enabled},'账户状态已保存。');
+};
+$('deleteUserPanel').ontoggle=()=>{if(!$('deleteUserPanel').open)resetDeleteUser();};
+$('deleteUserId').oninput=()=>{
+ $('deleteUser').disabled=userEditBusy||!userDetailData||$('deleteUserId').value.trim()!==userDetailData.profile.id;
+};
+$('deleteUserForm').onsubmit=async event=>{
+ event.preventDefault();
+ const page=currentPage(),userId=userDetailData?.profile.id,confirmUserId=$('deleteUserId').value.trim();
+ if(userEditBusy||!$('deleteUserPanel').open||page.userTab!=='profile'||!userId||userId!==page.userId||userDetailData.devices.length||confirmUserId!==userId)return;
+ const session=token,route=routeGeneration,current=()=>session===token&&route===routeGeneration;
+ userEditBusy=true;$('deleteUser').disabled=true;$('userDetailMessage').textContent='正在删除用户…';
+ try{
+  await api('users',{action:'delete',userId,confirmUserId},{timeoutMs:20000});
+  if(!current())return;
+  discardEdits();history.replaceState({},'','/admin/users');renderPage(true);
+  $('message').textContent='用户已删除。';
+ }catch(e){if(current())$('userDetailMessage').textContent='删除失败：'+e.message;}
+ finally{userEditBusy=false;if(current())$('deleteUserId').oninput();}
 };
 $('resetUserPassword').onsubmit=async event=>{
  event.preventDefault();const account=userDetailData?.account;if(!account)return;

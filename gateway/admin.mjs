@@ -63,7 +63,11 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
       try{return json(200,await userWebMemory(webMemoryPath[1],body));}catch(e){return json(400,{error:e.message});}
     }
     if(req.url==='/api/admin/users'){
-      try{const result=await userAccounts(body);record({event:'user_account_changed',action:body.action});return json(200,result);}catch(e){return json(400,{error:e.message});}
+      try{
+        const result=await userAccounts(body);
+        record(body.action==='delete'?{event:'user_deleted',userId:body.userId}:{event:'user_account_changed',action:body.action});
+        return json(200,result);
+      }catch(e){return json(400,{error:e.message});}
     }
     if(req.url==='/api/admin/voice-preview'){
       if(!voicePreview)return json(409,{error:'试听需要 Pocket Cloud 模式'});
