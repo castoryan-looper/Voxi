@@ -1,4 +1,5 @@
 import {createAdminAuth} from './admin-auth.mjs';
+import {isLoginForm} from './login-form.mjs';
 
 const globalAssistantFields = new Set(['enabled','model','maxConcurrent','maxTaskSeconds','instructions']);
 const agentTaskActions = new Set(['submit','detail','cancel','approve','decline','answer','continue']);
@@ -16,7 +17,7 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
     if(req.headers.origin){let origin;try{origin=new URL(req.headers.origin);}catch{return json(403,{error:'来源不允许'});}if(origin.host!==req.headers.host)return json(403,{error:'来源不允许'});}
     const authRoute=['/api/admin/login','/api/admin/logout','/api/admin/password','/api/admin/session'].includes(req.url);
     let body;
-    if(authRoute&&req.method==='POST'){
+    if(authRoute&&req.method==='POST'&&!isLoginForm(req,'/api/admin/login')){
       if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
       let raw='';try{for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2048)return json(413,{error:'请求过大'});}body=JSON.parse(raw);if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{return json(400,{error:'JSON 无效'});}
     }
@@ -111,5 +112,5 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
     }
     return json(404,{error:'接口不存在'});
   }
-  return {record,handle};
+  return {record,handle,close:auth.close};
 }

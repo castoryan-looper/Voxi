@@ -66,12 +66,13 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     const assets={'/shared/voice-preview.js':['voice-preview.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
     assets['/shared/web-memory.js']=['web-memory-ui.mjs','text/javascript; charset=utf-8'];
     assets['/shared/theme.css']=['theme.css','text/css; charset=utf-8'];
+    assets['/shared/login-page.js']=['login-page.mjs','text/javascript; charset=utf-8'];
     assets['/shared/radio-schematic.svg']=['radio-schematic.svg','image/svg+xml'];
     assets['/app/assets/context.js']=['user-context.mjs','text/javascript; charset=utf-8'];
     assets['/downloads/voxi-context-sync.py']=['voxi-context-sync.py','text/x-python; charset=utf-8'];
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
     if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/context','/app/tasks','/app/account'].includes(path)){
-      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
     }
     if(path==='/admin/ai/prompts'){
       res.writeHead(302,{'Location':'/admin/agent#assistant-behavior','Cache-Control':'no-store'});res.end();return;
@@ -83,7 +84,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       res.writeHead(302,{'Location':'/admin/agent','Cache-Control':'no-store'});res.end();return;
     }
     if(['/admin','/admin/','/admin/overview','/admin/devices','/admin/users','/admin/ai/voice','/admin/agent','/admin/agent/credentials','/admin/events','/admin/account'].includes(path)||/^\/admin\/devices\/esp32-[a-f0-9]{12}\/memory$/.test(path)||/^\/admin\/users\/[a-f0-9]{32}(?:\/(?:profile|devices|memory|tasks))?\/?$/.test(path)){
-      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});
+      res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'});
       res.end(readFileSync(new URL('./admin.html',import.meta.url)));return;
     }
     if(req.url==='/setup/'||req.url==='/setup'){
@@ -93,7 +94,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     if(req.url!=='/healthz'){res.writeHead(404);res.end();return;}
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision,downlinkFormat:OPUS_FORMAT,opusOnly:true,audioBitrate:OPUS_BITRATE}));
   });
-  server.once('close',()=>webMemory?.close());
+  server.once('close',()=>{webMemory?.close();users.close();admin.close();});
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
   let pendingAdmissions=0;

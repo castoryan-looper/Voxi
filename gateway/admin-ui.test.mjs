@@ -11,11 +11,11 @@ function page(){
   vm.runInContext(source,context);return {context,get};
 }
 const status={devices:[{connection:12,channel:2,busy:false,ageMs:10000,inputBytes:48000,lastPongAgoMs:5000}],events:[{at:'2026-11-03T00:00:00Z',event:'device_opened',connection:12}],mode:'pocket'};
-test('admin login renders device status and keeps secret out of storage',async()=>{
+test('restored admin session renders device status and supports logout',async()=>{
   const {context,get}=page();const requests=[];
-  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/login')?{csrf:'session-csrf'}:{devices:[]}};};
-  get('secret').value='admin-secret';await get('loginForm').onsubmit({preventDefault(){}});
-  assert.equal(get('secret').value,'');assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,'1');assert.equal(get('devices').children[0].children[0].textContent,'连接 #12');
+  context.fetch=async(path,options)=>{requests.push({path,options});return {ok:true,json:async()=>path.endsWith('/status')?status:path.endsWith('/session')?{csrf:'session-csrf'}:{devices:[]}};};
+  await vm.runInContext('restoreSession()',context);
+  assert.equal(get('dashboard').hidden,false);assert.equal(get('online').textContent,'1');assert.equal(get('devices').children[0].children[0].textContent,'连接 #12');
   assert.match(get('events').children[0].textContent,/设备接入/);
   assert.equal(requests.find(r=>r.path.endsWith('/status')).options.headers['X-CSRF-Token'],'session-csrf');
   await get('logout').onclick();assert.equal(get('dashboard').hidden,true);assert.equal(vm.runInContext('token',context),'');

@@ -9,7 +9,7 @@ import {createGateway} from './server.mjs';
 async function setup(t,options={}){
   const app=createGateway({token:'device-secret',adminToken:'admin-secret',...options});
   await new Promise(r=>app.server.listen(0,'127.0.0.1',r));
-  t.after(()=>{for(const c of app.wss.clients)c.terminate();app.wss.close();app.server.close();});
+  t.after(async()=>{for(const c of app.wss.clients)c.terminate();app.wss.close();await new Promise(r=>app.server.close(r));});
   const base=`http://127.0.0.1:${app.server.address().port}`;
   const api=(path,body,secret='admin-secret',extra={})=>fetch(base+'/api/admin/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+secret,...(body?{'Content-Type':'application/json'}:{}),...extra},...(body?{body:JSON.stringify(body)}:{})});
   const connect=index=>new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer device-secret','X-Voxi-Audio-Format':'opus-24000-v1','X-Voxi-Device-Id':'esp32-'+String(index).padStart(12,'0')}});
@@ -29,9 +29,10 @@ test('disabled admin fails closed',async t=>{
   const {api}=await setup(t,{adminToken:undefined});assert.equal((await api('status')).status,503);
 });
 test('six devices stay online despite an old saved limit and admin can disconnect one',{timeout:10000},async t=>{
-  const dir=mkdtempSync(join(tmpdir(),'voxi-admin-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const dir=mkdtempSync(join(tmpdir(),'voxi-admin-'));
   const stateFile=join(dir,'state.json');writeFileSync(stateFile,'{"maxConnections":1}');
   const {api,connect}=await setup(t,{adminStateFile:stateFile});
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
   const clients=Array.from({length:6},(_,index)=>connect(index));
   await Promise.all(clients.map(ws=>new Promise((resolve,reject)=>{
     const ready=data=>{if(JSON.parse(data).type==='ready'){ws.off('message',ready);resolve();}};
