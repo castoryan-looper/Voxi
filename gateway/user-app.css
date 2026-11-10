@@ -68,6 +68,13 @@ button { margin: 5px 0; }
 }
 .channel label { margin: 0 0 8px; font: 650 13px/1.5 var(--mono); color: var(--muted); }
 .channel input:not([type="checkbox"]), .channel select { width: 100%; margin-bottom: 10px; }
+.channel-personalization { margin: 8px 0 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.channel-personalization summary { font-weight: 650; }
+.channel-personalization label { font-family: inherit; margin-top: 12px; }
+.channel-personalization fieldset { min-width: 0; margin: 14px 0 0; padding: 10px 12px; border: 1px solid var(--border); }
+.channel-personalization legend { padding: 0 4px; color: var(--muted); }
+.channel-personalization .channel-tool { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 8px; }
+.channel-tool small { display: block; margin-top: 2px; }
 .notice { margin-bottom: 18px; }
 .notice h2 { margin-top: 0; }
 .item { padding: 13px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }

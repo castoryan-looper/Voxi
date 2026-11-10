@@ -18,6 +18,36 @@ const channelSlot=(channel,index)=>channel.slot??index;
 const targetFor=channel=>['model','openclaw'].includes(channel.mode)?channel.mode+':'+channel.connectionId:channel.mode;
 function readTarget(value){const [mode,connectionId]=value.split(':');return connectionId?{mode,connectionId}:{mode};}
 function channelEdited(){dirtyForms.add('channelForm');dirty=true;}
+function channelPersonalization(card,channel,target,catalog){
+ const settings=document.createElement('details'),summary=document.createElement('summary');
+ const label=document.createElement('label'),role=document.createElement('textarea'),hint=document.createElement('p');
+ const tools=document.createElement('div');
+ settings.className='channel-personalization';settings.append(summary,label,hint,tools);
+ role.rows=3;role.maxLength=catalog.roleLimit;role.value=channel.role||'';
+ role.dataset.channelRole='';label.append(document.createTextNode('角色与偏好'),role);
+ hint.className='muted';
+ for(const [field,title,items] of [['skills','Skill · 工作流程',catalog.skills],['mcp','MCP · 外部工具',catalog.mcp]]){
+  const group=document.createElement('fieldset'),legend=document.createElement('legend');
+  legend.textContent=title;group.append(legend);
+  for(const item of items){
+   const optionLabel=document.createElement('label'),check=document.createElement('input'),text=document.createElement('span');
+   const description=document.createElement('small');
+   optionLabel.className='channel-tool';check.type='checkbox';check.value=item.id;
+   check.dataset.channelTool=field;check.checked=Boolean(channel[field]?.includes(item.id));
+   text.textContent=item.name;description.textContent=item.description;text.append(description);
+   optionLabel.append(check,text);group.append(optionLabel);
+  }
+  tools.append(group);
+ }
+ function update(){
+  const agent=target.value==='agent';
+  settings.hidden=!agent&&target.value!=='fast';tools.hidden=!agent;
+  summary.textContent=agent?'角色、Skill 与 MCP':'角色配置';
+  role.placeholder=agent?'例如：担任项目助理，先查证再给结论，交付时列出已验证的结果。':'例如：像技术教练一样解释问题，先给结论，再举一个例子。';
+  hint.textContent=agent?'仅用于此频道的新任务或下一轮。Skill 提供工作步骤，MCP 提供外部工具。修改 MCP 后请发起新任务。':'仅用于此快问频道。留空则沿用快问通用偏好与系统默认设置。';
+ }
+ target.addEventListener('change',update);update();card.append(settings);
+}
 function renderChannels(channels=data.channels){
  const box=$('channels'),limit=data.channelLimit;
  box.replaceChildren();
@@ -42,6 +72,7 @@ function renderChannels(channels=data.channels){
    for(const v of data.voiceSettings?.options||[])voice.append(option(v.id,myVoiceLabel(v,myVoiceRow(data.voiceSettings,v.id))));
    voice.value=c.voice||'';card.append(voiceLabel,voice,button('试听',()=>previewChannelVoice(voice.value)));
   }
+  if(data.channelTools)channelPersonalization(card,c,target,data.channelTools);
   if(limit)card.append(button('移除 CH'+slot,()=>{channelEdited();renderChannels(readChannels().filter(row=>row.slot!==slot));},'danger'));
   box.append(card);
  });
@@ -53,7 +84,20 @@ function renderChannels(channels=data.channels){
 function readChannels(){
  return [...$('channels').querySelectorAll('[data-slot]')].map(card=>{
   const slot=Number(card.dataset.slot);
-  return {...(data.channelLimit?{slot}:{}),name:$('channelName'+slot).value.trim(),...readTarget($('channelTarget'+slot).value),...($('channelVoice'+slot)?.value?{voice:$('channelVoice'+slot).value}:{})};
+  const target=readTarget($('channelTarget'+slot).value);
+  const route={...(data.channelLimit?{slot}:{}),name:$('channelName'+slot).value.trim(),...target,
+   ...($('channelVoice'+slot)?.value?{voice:$('channelVoice'+slot).value}:{})};
+  if(['fast','agent'].includes(target.mode)){
+   const role=card.querySelector('[data-channel-role]')?.value.trim();
+   if(role)route.role=role;
+  }
+  if(target.mode==='agent'){
+   for(const field of ['skills','mcp']){
+    const ids=[...card.querySelectorAll('[data-channel-tool="'+field+'"]:checked')].map(input=>input.value);
+    if(ids.length)route[field]=ids;
+   }
+  }
+  return route;
  });
 }
 $('addChannel').onclick=()=>{
