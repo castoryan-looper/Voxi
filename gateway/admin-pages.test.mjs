@@ -21,6 +21,13 @@ test('admin child pages support direct navigation and assets without weakening A
  assert.doesNotMatch(assistantPage,/agentChannelUser|agentConnectionsSection|data-nav="agentConnections"/);
  const userPage=await(await fetch(base+'/app/connections')).text();
  assert.match(userPage,/id="modelForm"/);
+ const capabilityPage=await fetch(base+'/app/capabilities');
+ assert.equal(capabilityPage.status,200);
+ assert.match(await capabilityPage.text(),/id="githubTestForm"/);
+ const capabilityJs=await fetch(base+'/app/assets/capabilities.js');
+ assert.equal(capabilityJs.status,200);
+ assert.match(await capabilityJs.text(),/capability_skill_preview/);
+ assert.equal((await fetch(base+'/voxi/capability-mcp',{method:'POST'})).status,404);
  const marks=await fetch(base+'/shared/connection-marks.svg');
  assert.equal(marks.status,200);assert.match(marks.headers.get('content-type'),/image\/svg\+xml/);
  const sprite=await marks.text();
