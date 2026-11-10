@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220" fill="none">
+  <defs>
+    <linearGradient id="chassis" x1="297" y1="54" x2="521" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#303030"/>
+      <stop offset="1" stop-color="#111"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#383634" stroke-width="1">
+    <path d="M32 106H615M450 12V207M174 190H608M174 186V194M270 186V194M364 186V194M450 184V196M542 186V194M608 186V194"/>
+    <path d="M392 30H548M392 26V34M548 26V34M576 44V169M572 44H580M572 169H580"/>
+    <circle cx="450" cy="106" r="66"/>
+    <circle cx="450" cy="106" r="84" stroke-dasharray="2 7"/>
+    <circle cx="450" cy="106" r="103" stroke-dasharray="16 5 2 5"/>
+  </g>
+  <path d="M182 106h66l8-8 12 19 16-32 15 42 13-21h78" stroke="#ff674a" stroke-width="2"/>
+  <path d="M345 61a112 112 0 0 1 25-30m172 136a112 112 0 0 1-29 31" stroke="#ff674a" stroke-width="2"/>
+  <circle cx="174" cy="106" r="3" fill="#ff674a"/>
+  <path d="m403 71 23-20h75l18 18v72l-22 22h-76l-18-18z" fill="#0b0b0b" stroke="#85817e"/>
+  <path d="M403 71h89l16 16v64l-11 12m-5-92 9-20m7 36 11-18" stroke="#696562"/>
+  <path d="M411 78h77l12 13v54l-9 10h-67l-13-13z" fill="url(#chassis)" stroke="#777370"/>
+  <rect x="422" y="90" width="34" height="24" rx="1" fill="#101010" stroke="#686461"/>
+  <path d="M426 104h5l3-5 4 8 4-5h9" stroke="#ff674a"/>
+  <circle cx="478" cy="106" r="14" fill="#111" stroke="#898580"/>
+  <circle cx="478" cy="106" r="9" stroke="#494745"/>
+  <path d="M478 96v5m-52 22h53m-53 6h53m-53 6h53m-53 6h43" stroke="#75716d"/>
+  <path d="M389 152h-25l-15 15h-40m214-78h31l10-10h30" stroke="#686461"/>
+  <circle cx="596" cy="79" r="2" fill="#ff674a"/>
+</svg>

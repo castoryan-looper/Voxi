@@ -86,7 +86,13 @@ test('all web interfaces load the shared theme',async t=>{
  const theme=await fetch(base+'/shared/theme.css');
  assert.equal(theme.status,200);
  assert.match(theme.headers.get('content-type'),/^text\/css/);
- assert.match(await theme.text(),/color-scheme: dark/);
+ const css=await theme.text();
+ assert.match(css,/color-scheme: dark/);
+ assert.match(css,/\/shared\/radio-schematic\.svg/);
+ const schematic=await fetch(base+'/shared/radio-schematic.svg');
+ assert.equal(schematic.status,200);
+ assert.equal(schematic.headers.get('content-type'),'image/svg+xml');
+ assert.match(await schematic.text(),/^<svg\b/);
 });
 
 test('setup route returns HTML and malformed WebSocket frames do not crash gateway',async t=>{

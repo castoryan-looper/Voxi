@@ -1,11 +1,11 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voxi 设备管理</title>
-<meta name="theme-color" content="#0b1018">
+<meta name="theme-color" content="#0a0a0a">
 <link rel="stylesheet" href="/shared/theme.css">
 <style>
-body { max-width: 820px; margin: 0 auto; padding: 36px 24px 50px; }
-header { padding: 0 0 16px; border-bottom: 1px solid var(--border); }
-h1 { margin: 4px 0; font-size: clamp(24px, 4vw, 34px); line-height: 1.25; }
+body { max-width: 920px; margin: 0 auto; padding: 24px 24px 50px; }
+header { padding: clamp(26px, 5vw, 55px) 0; border-bottom: 1px solid var(--border); }
+h1 { margin: 4px 0; font-size: clamp(32px, 6vw, 54px); line-height: 1.13; letter-spacing: -.045em; }
 h2 { margin: 0 0 14px; font-size: 18px; }
 h3 { font-size: 16px; }
 header p, section > p:last-child { margin-bottom: 0; }
@@ -18,16 +18,15 @@ button { margin: 8px 8px 0 0; }
 .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(125px, auto); align-items: end; gap: 12px; }
 .row > button { margin: 0; }
 .check { display: flex; gap: 8px; align-items: baseline; }
-.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--line); background: var(--line); }
 .status-tile {
   padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  min-width: 0;
   background: var(--inset);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.status-tile b { display: block; margin-top: 4px; color: var(--accent); font: 650 14px/1.6 var(--mono); }
+.status-tile b { display: block; margin-top: 4px; color: #f0eeeb; font: 650 14px/1.6 var(--mono); }
 #message, #saveMessage { white-space: pre-wrap; overflow-wrap: anywhere; }
 #message:empty, #radioLog:empty { display: none; }
 #connectionNotice { color: var(--warning); font-weight: 650; overflow-wrap: anywhere; }
@@ -37,7 +36,8 @@ button { margin: 8px 8px 0 0; }
 #radioLog { max-height: 380px; overflow: auto; font-size: 13px; }
 #scan + select { margin-top: 8px; }
 details { margin-top: 22px; color: var(--muted); overflow-wrap: anywhere; }
-summary { color: var(--accent); }
+summary { color: #f0eeeb; }
+#usb > p { max-width: 62ch; }
 @media (max-width: 500px) {
   body { padding: 22px 14px 32px; }
   .row { grid-template-columns: minmax(0, 1fr); }
@@ -47,15 +47,15 @@ summary { color: var(--accent); }
   .cards { grid-template-columns: minmax(0, 1fr); }
 }
 </style></head><body class="setup-shell">
-<header><div class="tag">VOXI DEVICE</div><h1>设备管理</h1><p class="muted">设置一次，按下就能对讲。配置直接写入设备。</p></header>
+<header class="signal-panel"><div class="tag">VOXI / DEVICE</div><h1>设备管理</h1><p class="muted">检查连接状态，设置网络与对讲参数。</p></header>
 <section id="usb"><h2>通过 USB 连接</h2><p>用数据线连接 ESP32，在 Chrome 或 Edge 中打开此页。网页通过 USB 直接配置设备，Wi‑Fi 密码和设备令牌不会发送到云端。</p><button class="primary" id="connect">连接 USB 设备</button><button id="disconnect" disabled>断开连接</button><p><small>烧录前请先断开。首次设置不需要编辑 config.h。</small></p></section>
 <section id="ap" hidden><h2>设备热点登录</h2><p>填写墨水屏 KEY 行显示的配置密码。</p><input id="setupKey" type="password" autocomplete="current-password" aria-label="配置密码"><button id="login">打开设置</button></section>
 <p id="message" role="status" aria-live="polite"></p>
 <section id="audio" hidden><h2>扬声器音量 · <output id="volumeValue">—</output></h2><p id="volumeHint" class="muted">连接 USB 设备后，自动读取已保存音量。</p><label for="volumeSlider">拖动调节音量</label><input id="volumeSlider" type="range" min="0" max="100" step="1" value="45" disabled><label for="speakerVolume">音量数值（0 为静音，100 为最大）</label><div class="row"><input id="speakerVolume" type="number" min="0" max="100" step="1" value="45" disabled><button type="button" id="saveVolume" disabled>保存音量</button></div><button type="button" id="speakerTest" disabled>播放两声测试音</button><p id="volumeMessage" role="status" aria-live="polite"></p><small>点击保存后立即生效，设备断电后仍会记住；无需重新配置云端。</small></section>
 <section id="live" hidden><h2>当前状态</h2><div class="cards" id="status"></div><p id="connectionNotice" role="status"></p><p id="detail" class="muted"></p><pre id="radioLog"></pre><button type="button" id="showSetup">设备屏幕显示设置入口</button><button type="button" id="showRadio">设备屏幕返回对讲</button></section>
 <form id="form" hidden novalidate>
-<section><h2>1 · 联网方式</h2><label for="networkMode">设备连接模式</label><select id="networkMode"><option value="wifi">Wi-Fi</option><option id="cellularOption" value="cellular" disabled>4G · ML307R</option></select><p class="muted">4G 模式不连接 Wi-Fi；保存后重启切换，原有云端令牌和证书继续使用。</p><div id="cellularFields" hidden><label for="apn">运营商 APN（可选）</label><input id="apn" maxlength="63" pattern="[A-Za-z0-9.\-]*" autocomplete="off" placeholder="普通 SIM 通常留空，使用模组自动配置"><p class="muted">物联网专网卡请填写运营商提供的 APN。</p></div><div id="wifiFields"><h3>Wi-Fi 设置</h3><button type="button" id="scan">扫描附近网络</button><select id="networks" aria-label="附近 Wi-Fi"><option value="">扫描后选择，或在下方手动填写</option></select><label>已记住的 Wi-Fi（最多8个）</label><select id="savedWifi"></select><button type="button" id="forgetWifi">忘记所选网络</button><label for="ssid">2.4 GHz Wi‑Fi 名称</label><input id="ssid" maxlength="32" required autocomplete="off"><label for="password">Wi‑Fi 密码</label><input id="password" type="password" maxlength="63" autocomplete="new-password" placeholder="同一网络留空保留已有密码"><label class="check"><input id="clearWifiPassword" type="checkbox">这是开放网络，清除已存密码</label></div></section>
-<section><h2>2 · 云端连接</h2><label for="import">导入连接配置 JSON（可选）</label><input id="import" type="file" accept=".json,application/json"><div class="row"><div><label for="host">云端 IP 或域名</label><input id="host" value="43.160.215.253" maxlength="253" required></div><div><label for="port">端口</label><input id="port" type="number" min="1" max="65535" value="9443" required></div></div><label class="check"><input id="tls" type="checkbox" checked>使用 TLS 加密（云端保持开启）</label><p id="cloudSaved" class="muted"></p><label for="token">设备令牌</label><input id="token" type="password" autocomplete="new-password" placeholder="已有令牌时留空保留"><label for="ca">服务器根 CA 证书（PEM，已保存时留空保留）</label><textarea id="ca" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>填写设备令牌，不是 OpenAI API Key。Pocket 账户模式无需 OpenAI API Key。</small></section>
+<section><h2 class="section-title"><span class="section-index" aria-hidden="true">01</span>联网方式</h2><label for="networkMode">设备连接模式</label><select id="networkMode"><option value="wifi">Wi-Fi</option><option id="cellularOption" value="cellular" disabled>4G · ML307R</option></select><p class="muted">4G 模式不连接 Wi-Fi；保存后重启切换，原有云端令牌和证书继续使用。</p><div id="cellularFields" hidden><label for="apn">运营商 APN（可选）</label><input id="apn" maxlength="63" pattern="[A-Za-z0-9.\-]*" autocomplete="off" placeholder="普通 SIM 通常留空，使用模组自动配置"><p class="muted">物联网专网卡请填写运营商提供的 APN。</p></div><div id="wifiFields"><h3>Wi-Fi 设置</h3><button type="button" id="scan">扫描附近网络</button><select id="networks" aria-label="附近 Wi-Fi"><option value="">扫描后选择，或在下方手动填写</option></select><label>已记住的 Wi-Fi（最多8个）</label><select id="savedWifi"></select><button type="button" id="forgetWifi">忘记所选网络</button><label for="ssid">2.4 GHz Wi‑Fi 名称</label><input id="ssid" maxlength="32" required autocomplete="off"><label for="password">Wi‑Fi 密码</label><input id="password" type="password" maxlength="63" autocomplete="new-password" placeholder="同一网络留空保留已有密码"><label class="check"><input id="clearWifiPassword" type="checkbox">这是开放网络，清除已存密码</label></div></section>
+<section><h2 class="section-title"><span class="section-index" aria-hidden="true">02</span>云端连接</h2><label for="import">导入连接配置 JSON（可选）</label><input id="import" type="file" accept=".json,application/json"><div class="row"><div><label for="host">云端 IP 或域名</label><input id="host" value="43.160.215.253" maxlength="253" required></div><div><label for="port">端口</label><input id="port" type="number" min="1" max="65535" value="9443" required></div></div><label class="check"><input id="tls" type="checkbox" checked>使用 TLS 加密（云端保持开启）</label><p id="cloudSaved" class="muted"></p><label for="token">设备令牌</label><input id="token" type="password" autocomplete="new-password" placeholder="已有令牌时留空保留"><label for="ca">服务器根 CA 证书（PEM，已保存时留空保留）</label><textarea id="ca" spellcheck="false" placeholder="-----BEGIN CERTIFICATE-----"></textarea><small>填写设备令牌，不是 OpenAI API Key。Pocket 账户模式无需 OpenAI API Key。</small></section>
 <button id="save" class="primary" type="submit">保存并重启设备</button><p id="saveMessage" role="status" aria-live="polite"></p><p class="muted">保存后等待状态变为「云端就绪」，按住 BOOT 说话，松开听回复。服务器处于 mock 时会返回短测试音。</p>
 </form>
 <section id="standby" hidden><h2 id="standbyTitle">分级待机</h2><p id="standbyDescription">按空闲累计时间逐级进入。关屏保留连接；断开云端后保留网络；休眠最省电，唤醒需要重新联网。USB 管理页连接期间保持唤醒。</p><label for="standbyScreen">关屏并关闭音频（分钟）</label><input id="standbyScreen" type="number" min="1" max="1438" value="1"><div id="standbyLegacy"><label for="standbyLink">断开云端语音会话（分钟）</label><input id="standbyLink" type="number" min="2" max="1439" value="5"><label for="standbySleep">进入休眠（分钟）</label><input id="standbySleep" type="number" min="3" max="1440" value="15"></div><button type="button" id="saveStandby">保存待机设置</button><p id="standbyMessage" role="status" aria-live="polite"></p></section>

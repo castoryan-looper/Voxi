@@ -1,60 +1,49 @@
-body { max-width: 1100px; margin: 0 auto; padding: 28px 30px; }
+body { max-width: 1180px; margin: 0 auto; padding: 22px 32px; }
 header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding-bottom: 16px;
+  padding-bottom: 18px;
   border-bottom: 1px solid var(--border);
 }
 main { padding-top: 20px; }
 footer { margin-top: 20px; font-size: 12px; color: var(--muted); }
-.brand, .brand:hover {
-  color: #f4f8ff;
-  text-decoration: none;
-  font: 800 25px/1.15 var(--mono);
-  letter-spacing: .16em;
-}
+.brand { display: flex; align-items: baseline; gap: 14px; text-decoration: none; }
 .brand span {
-  display: block;
-  margin-top: 5px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
   color: var(--muted);
   font: 500 12px/1.4 system-ui, sans-serif;
   letter-spacing: .08em;
 }
 .account { min-width: 0; text-align: right; }
 #identity { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
-h1 { margin: 5px 0 16px; font-size: clamp(24px, 3vw, 30px); line-height: 1.25; }
+h1 { margin: 6px 0 20px; font-size: clamp(31px, 4.8vw, 52px); line-height: 1.12; letter-spacing: -.045em; }
 h2 { margin: 24px 0 10px; font-size: 18px; }
 h3 { font-size: 16px; }
 p { overflow-wrap: anywhere; }
 .eyebrow { margin: 0; }
-.card + .card { margin-top: 18px; }
 nav {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 18px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--grain), #141d2a;
+  margin-bottom: 26px;
+  border-bottom: 1px solid var(--border);
 }
 nav a {
-  padding: 8px 13px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  color: #c7d3e2;
+  padding: 8px 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
   text-decoration: none;
 }
-nav a:hover { background: #253449; color: #f1f6ff; }
+nav a:hover { background: var(--surface-raised); color: #f0eeeb; }
 nav a[aria-current="page"] {
-  border-color: #466681;
-  color: #d9f3ff;
-  background: linear-gradient(100deg, #274760, #1c2c40);
-  box-shadow: inset 0 -2px #86d5ff;
+  border-bottom-color: var(--accent);
+  color: #f0eeeb;
   font-weight: 650;
 }
+#workspace > .card { padding: 0; border: 0; background: transparent; }
 label { display: block; margin: 16px 0 6px; }
 label input:not([type="checkbox"]), label select, label textarea {
   display: block;
@@ -68,16 +57,16 @@ button { margin: 5px 0; }
 .channel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 10px;
   margin: 16px 0;
 }
 .channel {
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: linear-gradient(145deg, #202c3d, #172231);
+  border-top: 2px solid #5c5550;
+  background: var(--surface);
 }
-.channel label { margin: 0 0 6px; }
+.channel label { margin: 0 0 8px; font: 650 13px/1.5 var(--mono); color: var(--muted); }
 .channel input:not([type="checkbox"]), .channel select { width: 100%; margin-bottom: 10px; }
 .notice { margin-bottom: 18px; }
 .notice h2 { margin-top: 0; }
@@ -87,9 +76,19 @@ button { margin: 5px 0; }
 .item button + button { margin-inline-start: 8px; }
 pre { max-height: 480px; overflow: auto; }
 details { margin-top: 20px; }
-summary { color: var(--accent); }
+summary { color: #f0eeeb; }
 #message { white-space: pre-wrap; min-height: 24px; }
-#login { max-width: 480px; margin: clamp(0px, 4vh, 36px) auto; }
+#login {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: clamp(18px, 6vw, 84px);
+  align-items: start;
+  margin: clamp(0px, 6vh, 68px) 0;
+}
+.login-intro { min-height: 282px; padding: 6px 0 130px; }
+.login-intro::after { background-size: min(100%, 500px) auto; background-position: right bottom; }
+.login-fields { border-top: 2px solid var(--accent); }
+.login-fields h2 { margin-top: 0; }
 #login button { width: 100%; }
 #profileForm, #preferenceForm { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 form { max-width: 760px; }
@@ -97,7 +96,12 @@ form { max-width: 760px; }
 .web-memory-item { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 
 @media (max-width: 600px) {
-  body { padding: 20px 14px; }
+  body { padding: 16px 14px; }
+  .brand { gap: 8px; }
+  .brand span { padding-left: 8px; }
+  #login { grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 16px 0 26px; }
+  .login-intro { min-height: 134px; padding: 6px 0 12px; }
+  .login-intro::after { background-position: right -60px bottom; }
   .channel-grid { grid-template-columns: minmax(0, 1fr); }
   nav { gap: 4px; }
   nav a { font-size: 13px; padding: 7px 9px; }
