@@ -16,6 +16,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   t.mock.method(console,'log',line=>records.push(JSON.parse(line)));
   upstream.on('connection',(socket,req)=>{
     assert.equal(req.headers.authorization,'Bearer pocket-only');
+    assert.equal(req.headers['x-voxi-agent-reply'],'sent-v1');
     assert.equal(req.headers['x-voxi-device-id'],'esp32-111111111111');
     assert.equal(req.headers['x-voxi-channels'],batched?'blocks-v1':undefined);
     assert.equal(req.headers['x-voxi-link'],batched?'cellular-v1':undefined);
@@ -26,7 +27,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
       if(binary){seen.push({pcm:raw.length});return;}
       const e=JSON.parse(raw);seen.push(e);
       if(e.type==='ptt_up'){
-        socket.send(JSON.stringify({type:'audio_start'}));socket.send(Buffer.alloc(48000));socket.send(JSON.stringify({type:'audio_end'}));
+        socket.send(JSON.stringify({type:'audio_start'}));socket.send(Buffer.alloc(48000));socket.send(JSON.stringify({type:'audio_end',agentReply:'fixture-reply'}));
       }
     });
   });
@@ -46,6 +47,8 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
   if(batched)assert.deepEqual(blocks.map(e=>[e.offset,e.total]),[[0,16],[4,16],[8,16],[12,16]]);
   device.send(JSON.stringify({type:'ptt_down'}));device.send(Buffer.alloc(5760));device.send(JSON.stringify({type:'ptt_up'}));
   await until(()=>messages.some(e=>e.type==='audio_end'));
+  assert.equal(messages.find(e=>e.type==='audio_end').agentReply,undefined);
+  await until(()=>seen.some(e=>e.type==='agent_reply_sent'&&e.replyId==='fixture-reply'));
   const downlink=records.find(e=>e.event==='pocket_downlink');
   assert.equal(downlink.creditEnabled,true);assert(downlink.creditUpdates>=1);
   assert.equal(seen.some(e=>e.type==='playback_credit'),false);
