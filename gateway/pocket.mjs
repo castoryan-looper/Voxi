@@ -11,7 +11,7 @@ import {DownlinkProbe} from './downlink-probe.mjs';
 export function attachPocket(device,{url,token,ca,deviceId,ownerId,deviceProof,connection,audioFormat=OPUS_FORMAT,extendedChannels=false,cellular=false}) {
   if(![OPUS_FORMAT,OPUS_BATCH_FORMAT].includes(audioFormat))throw Error('Only Opus downlink is supported');
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
-    headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{}),
+    headers:{Authorization:`Bearer ${token}`,'X-Voxi-Agent-Reply':'sent-v1',...(deviceId?{'X-Voxi-Device-Id':deviceId}:{}),
       ...(ownerId?{'X-Voxi-Registered-Owner':ownerId,'X-Voxi-Device-Proof':deviceProof}:{}),
       ...(extendedChannels?{'X-Voxi-Channels':'blocks-v1'}:{}),...(cellular?{'X-Voxi-Link':'cellular-v1'}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false,lastReady=null;
@@ -31,9 +31,9 @@ export function attachPocket(device,{url,token,ca,deviceId,ownerId,deviceProof,c
     if(device.readyState===1){device.closeOrigin='pocket_error';device.send(JSON.stringify({type:'error',message}));device.close(1011,'Pocket backend unavailable');}
     upstream.close();
   };
-  const sendWire=(data,binary)=>{
+  const sendWire=(data,binary,onSent)=>{
     if(device.readyState!==1)return;
-    device.send(data,{binary});
+    device.send(data,{binary},onSent);
     if(binary&&reply){
       const now=performance.now();
       if(reply.lastSendAt!==null)reply.maxSendGapMs=Math.max(reply.maxSendGapMs,Math.round(now-reply.lastSendAt));
@@ -56,7 +56,11 @@ export function attachPocket(device,{url,token,ca,deviceId,ownerId,deviceProof,c
       if(['flush','connecting','offline','error'].includes(e.type)){batcher.clear();opus.close();}
       if(['busy','thinking','audio_start'].includes(e.type))device.radioBusy=true;
       if(['ready','audio_end','idle','error','offline'].includes(e.type))device.radioBusy=false;
-      sendWire(JSON.stringify(e),false);
+      const agentReply=e.type==='audio_end'?e.agentReply:null;
+      if(agentReply)delete e.agentReply;
+      sendWire(JSON.stringify(e),false,agentReply?error=>{
+        if(!error&&upstream.readyState===1)upstream.send(JSON.stringify({type:'agent_reply_sent',replyId:agentReply}));
+      }:undefined);
       if(e.type==='audio_end')finishReply('complete');
     }catch{error('Downlink audio encoding failed');}
   };
