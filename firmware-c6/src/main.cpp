@@ -192,6 +192,17 @@ void opusDiagnostics(JsonDocument& out){
  const auto& label=radioChannelLabel(channel);
  out["channelMode"]=label.mode;out["channelName"]=label.name;out["agentTaskState"]=agentTaskState;out["agentTaskId"]=agentTaskId;
  out["channelCatalogKnown"]=channelCatalogKnown;out["enabledChannelMask"]=enabledChannels;out["channelNameBitmap"]=label.hasBitmap;
+ out["channelLimit"]=channelLimit;
+ out["channelSlot"]=channel;
+ if(channelCatalogKnown){
+   JsonArray list=out["enabledChannels"].to<JsonArray>();
+   for(int slot=0;slot<channelLimit;slot++){
+     if(!(enabledChannels&(1u<<slot)))continue;
+     JsonObject entry=list.add<JsonObject>();
+     entry["slot"]=slot;
+     entry["name"]=channelLabels[slot].name;
+   }
+ }
 #ifdef VOXI_BOARD_MINICAM
  out["playbackCreditActive"]=playbackFlowId.length()>0;out["playbackResumeMs"]=playbackGate.threshold()/48;
 #endif
@@ -226,6 +237,7 @@ static void receiveChannelCatalog(JsonArrayConst rows,int offset,int total){
   if(offset==0){received=0;expected=total;mask=0;}
   if(total<4||total>channelLimit||offset!=received||total!=expected||
       offset<0||offset>=total||rows.size()!=size_t(min(4,total-offset)))return;
+  uint16_t blockMask=0;
   for(size_t rowIndex=0;rowIndex<rows.size();rowIndex++){
     const int i=offset+int(rowIndex);
     JsonArrayConst row=rows[rowIndex].as<JsonArrayConst>();
@@ -238,11 +250,12 @@ static void receiveChannelCatalog(JsonArrayConst rows,int offset,int total){
     if(!legacy&&!disabled&&strcmp(mode,"fast")&&strcmp(mode,"agent"))return;
     strlcpy(next[i].name,name,sizeof(next[i].name));
     strlcpy(next[i].mode,legacy?"":mode,sizeof(next[i].mode));
-    if(!disabled)mask|=1u<<i;
+    if(!disabled)blockMask|=1u<<i;
     size_t length=0;
     next[i].hasBitmap=*bitmap&&mbedtls_base64_decode(next[i].bitmap,sizeof(next[i].bitmap),&length,
         reinterpret_cast<const unsigned char*>(bitmap),strlen(bitmap))==0&&length==sizeof(next[i].bitmap);
   }
+  mask|=blockMask;
   received+=rows.size();
   if(received!=total)return;
   for(int i=0;i<channelLimit;i++)channelLabels[i]=i<total?next[i]:ChannelLabel{};
