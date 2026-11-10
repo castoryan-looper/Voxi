@@ -8,7 +8,7 @@ async function fixture(t){
  const seen=[],events=[],upstream=new WebSocketServer({port:0,host:'127.0.0.1'});
  await new Promise(r=>upstream.once('listening',r));
  upstream.on('connection',socket=>{socket.send(JSON.stringify({type:'ready',channel:0}));socket.on('message',(raw,binary)=>seen.push(binary?'binary':JSON.parse(raw)));});
- const {server,wss}=createGateway({mode:'pocket',token:'device',pocketToken:'backend',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
+ const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device',pocketToken:'backend',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device','X-Voxi-Audio-Format':'opus-24000-v1','X-Voxi-Downlink-Codecs':OPUS_BATCH_FORMAT}});

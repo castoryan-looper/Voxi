@@ -4,6 +4,8 @@ import http from 'node:http';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {createHash} from 'node:crypto';
+import {WebSocket,WebSocketServer} from 'ws';
 import {createGateway} from './server.mjs';
 import {passwordHash} from './admin-auth.mjs';
 const A='a'.repeat(32),B='b'.repeat(32);
@@ -124,4 +126,77 @@ test('user login rejects cross origin and user assets never serve administrative
  assert.equal((await fetch(base+'/api/user/state',{headers:{Authorization:'Bearer device'}})).status,401);
  for(let i=0;i<8;i++)assert.equal((await fetch(base+'/api/user/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'missing-user',password:'wrong'})})).status,401);
  assert.equal((await fetch(base+'/api/user/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'missing-user',password:'wrong'})})).status,429);
+});
+
+test('Pocket admission requires an enabled user and a registered device, and retirement revokes access',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'voxi-device-enrollment-'));
+ const id='esp32-111111111111',legacyId='esp32-222222222222';
+ const records=new Map([[legacyId,{userId:B,proof:'legacy'}]]);let archived=false,upstreams=0;
+ const backend=http.createServer(async(req,res)=>{
+  let raw='';for await(const part of req)raw+=part;
+  const body=raw?JSON.parse(raw):{};
+  const json=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
+  assert.equal(req.headers.authorization,'Bearer internal');
+  if(req.url==='/voxi/agent')return json(200,{users:[{id:A},{id:B}],runtime:{userPortalVersion:1}});
+  if(body.action==='directory')return json(200,{profiles:(archived?[B]:[A,B]).map(id=>({id}))});
+  if(body.action==='user_detail')return json(200,{profile:{id:body.userId}});
+  if(body.action==='register_device'){
+   records.set(body.deviceId,{userId:body.userId,proof:body.keyHash});return json(200,{ok:true,deviceId:body.deviceId});
+  }
+  if(body.action==='device_admission'){
+   const record=records.get(body.deviceId);
+   return record?.proof===body.proof?json(200,{userId:record.userId}):json(400,{error:'设备未登记'});
+  }
+  if(['check_delete_user','delete_user'].includes(body.action)){
+   if(body.retireDeviceIds?.length!==1||body.retireDeviceIds[0]!==id)return json(400,{error:'退役设备清单不匹配'});
+   if(body.action==='delete_user'){records.delete(id);archived=true;}
+   return json(200,{ok:true,userId:body.userId});
+  }
+  return json(404,{});
+ });
+ const ws=new WebSocketServer({server:backend});
+ ws.on('connection',(socket,req)=>{
+  upstreams++;
+  const record=records.get(req.headers['x-voxi-device-id']);
+  assert.equal(req.headers['x-voxi-registered-owner'],record.userId);
+  assert.equal(req.headers['x-voxi-device-proof'],record.proof);
+  socket.send(JSON.stringify({type:'ready'}));
+ });
+ await new Promise(resolve=>backend.listen(0,'127.0.0.1',resolve));
+ const app=createGateway({mode:'pocket',token:'shared',adminToken:'admin',adminStateFile:join(dir,'state'),
+  pocketToken:'internal',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{
+  for(const s of [...ws.clients,...app.wss.clients])s.terminate();
+  ws.close();app.wss.close();await Promise.all([new Promise(r=>backend.close(r)),new Promise(r=>app.server.close(r))]);rmSync(dir,{recursive:true,force:true});
+ });
+ const base=`http://127.0.0.1:${app.server.address().port}`;
+ const admin=body=>fetch(base+'/api/admin/users',{method:'POST',headers:{Authorization:'Bearer admin','Content-Type':'application/json'},body:JSON.stringify(body)});
+ function connect(deviceId,token){
+  const socket=new WebSocket(base.replace('http:','ws:')+'/radio',{headers:{Authorization:'Bearer '+token,'X-Voxi-Audio-Format':'opus-24000-v1','X-Voxi-Device-Id':deviceId}});
+  const event=new Promise((resolve,reject)=>{socket.once('message',raw=>resolve(JSON.parse(raw)));socket.once('error',reject);});
+  const closed=new Promise(resolve=>socket.once('close',resolve));
+  return {event,closed,socket};
+ }
+ for(const device of [id,legacyId]){
+  const rejected=connect(device,'shared');assert.equal((await rejected.event).code,'device_enrollment_required');await rejected.closed;
+ }
+ assert.equal(upstreams,0);
+ const register={action:'register_device',deviceId:id,userId:A,name:'Test radio'};
+ assert.equal((await admin(register)).status,400);
+ const account=await(await admin({action:'create',username:'alice',password:'long-test-password',userId:A})).json();
+ assert.equal((await admin({action:'create',username:'bob',password:'long-test-password',userId:B})).status,200);
+ const legacyDevice=connect(legacyId,'shared');assert.equal((await legacyDevice.event).type,'ready');legacyDevice.socket.close();await legacyDevice.closed;
+ const {deviceToken}=await(await admin(register)).json();assert.match(deviceToken,/^[\w-]{43}$/);
+ assert.equal(records.get(id).proof,createHash('sha256').update(deviceToken).digest('hex'));
+ const shared=connect(id,'shared');assert.equal((await shared.event).code,'device_enrollment_required');await shared.closed;
+ const other=connect(legacyId,deviceToken);assert.equal((await other.event).code,'device_enrollment_required');await other.closed;
+ const active=connect(id,deviceToken);assert.equal((await active.event).type,'ready');
+ assert.equal((await admin({action:'enabled',accountId:account.accounts[0].id,enabled:false})).status,200);await active.closed;
+ const disabled=connect(id,deviceToken);assert.match((await disabled.event).message,/停用/);await disabled.closed;
+ assert.equal((await admin({action:'enabled',accountId:account.accounts[0].id,enabled:true})).status,200);
+ const returned=connect(id,deviceToken);assert.equal((await returned.event).type,'ready');
+ assert.equal((await admin({action:'delete',userId:A,confirmUserId:A,retireDeviceIds:[id]})).status,200);await returned.closed;
+ const retired=connect(id,deviceToken);assert.equal((await retired.event).code,'device_enrollment_required');await retired.closed;
+ assert.equal(upstreams,3);
 });

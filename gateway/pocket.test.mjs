@@ -27,7 +27,7 @@ test(`Pocket proxy preserves PCM uplink and ordered ${batched?'batched':'legacy'
       }
     });
   });
-  const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
+  const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
   const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Device-Id':'esp32-111111111111','X-Voxi-Audio-Format':'opus-24000-v1',...(batched?{'X-Voxi-Downlink-Codecs':`${OPUS_BATCH_FORMAT},opus-24000-v1`,'X-Voxi-Channels':'blocks-v1','X-Voxi-Link':'cellular-v1'}:{})}});
@@ -75,7 +75,7 @@ test('Pocket flush drops an unsent partial batch and the next reply restarts at 
    },10);
   });
  });
- const {server,wss}=createGateway({mode:'pocket',token:'device',pocketToken:'pocket',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
+ const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device',pocketToken:'pocket',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device','X-Voxi-Audio-Format':'opus-24000-v1','X-Voxi-Downlink-Codecs':OPUS_BATCH_FORMAT}});
@@ -95,7 +95,7 @@ for(const [code,pattern] of [[403,/authentication rejected/],[404,/endpoint miss
  test(`Pocket HTTP ${code} produces actionable device error`,async t=>{
   const backend=http.createServer((req,res)=>{res.writeHead(code);res.end();});
   await new Promise(r=>backend.listen(0,'127.0.0.1',r));
-  const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
+  const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();wss.close();server.close();backend.close();});
   const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Audio-Format':'opus-24000-v1'}});
@@ -119,7 +119,7 @@ test('Pocket accepts exactly 20 seconds and rejects one extra PCM sample',async 
       }
     });
   });
-  const {server,wss}=createGateway({mode:'pocket',token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
+  const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device-only',pocketToken:'pocket-only',pocketUrl:`ws://127.0.0.1:${upstream.address().port}/voxi`});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));
   t.after(()=>{for(const c of wss.clients)c.terminate();for(const c of upstream.clients)c.terminate();wss.close();upstream.close();server.close();});
   const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device-only','X-Voxi-Audio-Format':'opus-24000-v1'}});

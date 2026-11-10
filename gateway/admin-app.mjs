@@ -136,6 +136,7 @@ $('voiceRuntimeForm').onsubmit=e=>{e.preventDefault();const patch=readVoiceRunti
  return submitAiPatch('saveVoiceRuntime','voiceRuntimeMessage',patch,()=>{voiceRuntimeDirty=JSON.stringify(readVoiceRuntime())!==JSON.stringify(patch);});
 };
 let deviceRegistryData=[],lastConnections=[],memoryDirty=false,userDetailData=null,userDetailRead=0,userEditBusy=false;
+let retireDeviceChoices=[];
 const userTabs={profile:'资料与账户',devices:'绑定设备',memory:'长期记忆',tasks:'后台任务'};
 const userPath=(id,tab='profile')=>'/admin/users/'+encodeURIComponent(id)+'/'+tab;
 function userLink(id,text,tab='profile'){
@@ -201,8 +202,15 @@ function resetUserDetail(){
  for(const id of ['userDetailName','userDetailSummary','userDetailId','userDetailMessage','agentTaskAvailability','agentTaskMessage','agentDetailPrompt','agentDetailResult'])$(id).textContent='';
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
  $('userResetPanel').open=false;$('deleteUserPanel').open=false;resetDeleteUser();
+ retireDeviceChoices=[];$('retireUserDevices').replaceChildren();
+ $('registerDevicePanel').open=false;$('registerDeviceForm').reset();clearDeviceToken();
 }
-function resetDeleteUser(){ $('deleteUserId').value='';$('deleteUser').disabled=true; }
+function resetDeleteUser(){
+ $('deleteUserId').value='';$('deleteUser').disabled=true;
+ for(const {input} of retireDeviceChoices)input.checked=false;
+}
+function clearDeviceToken(){ $('registeredDeviceToken').value='';$('registeredDeviceTokenField').hidden=true; }
+function retireSelection(){return retireDeviceChoices.filter(({input})=>input.checked).map(({id})=>id);}
 function renderUserDevices(){
  const target=$('userDevices');target.replaceChildren();
  for(const device of userDetailData.devices){
@@ -217,7 +225,7 @@ function renderUserDevices(){
 }
 function fillRebindDevices(devices){
  const select=$('memoryDevice'),previous=select.value,uid=userDetailData.profile.id;
- const choices=devices.filter(device=>device.user_id!==uid);
+ const choices=userDetailData.account?.enabled?devices.filter(device=>device.user_id!==uid):[];
  select.replaceChildren(option('',choices.length?'请选择设备':'暂无其他用户的设备'));
  for(const d of choices)select.append(option(d.id,(d.name?d.name+' · ':'')+d.id+' · 当前用户 '+(d.user_name||'—')));
  if(choices.some(d=>d.id===previous))select.value=previous;
@@ -252,9 +260,15 @@ function renderUserProfile(data){
  $('userLoginStatus').textContent=account?account.username+' · '+(account.enabled?'可登录':'已停用'):'尚未开通网页登录账户';
  $('userAccountActions').hidden=!account;$('bindUserAccount').hidden=Boolean(account);
  $('toggleUserLogin').textContent=account?.enabled?'停用账户':'启用账户';
- $('deleteUserForm').hidden=data.devices.length>0;
- $('deleteUserHelp').textContent=data.devices.length?'请先将绑定设备转移到其他用户，再删除此用户。':
-  '删除后，此档案会从用户目录移除，网页登录及已有会话会失效。历史记录会归档保留，管理后台无法恢复此档案。请先结束或取消后台任务。';
+ $('deleteUserHelp').textContent='删除后，用户会从目录移除，网页登录及已有会话失效，历史记录归档保留。请先结束或取消后台任务。'+
+  (data.devices.length?'继续使用的设备请先转移。要和用户一起移除的设备，请逐台勾选退役；退役设备再次使用时需要重新登记。':'');
+ const choices=$('retireUserDevices');choices.replaceChildren();
+ retireDeviceChoices=data.devices.map(device=>{
+  const label=document.createElement('label'),input=document.createElement('input');
+  label.className='field';input.type='checkbox';input.onchange=updateDeleteUser;
+  label.append(input,' 同时退役 '+(device.name?device.name+' · ':'')+device.id);choices.append(label);
+  return {id:device.id,input};
+ });
  resetDeleteUser();
 }
 async function loadWebTaskMemory(userId,current){
@@ -285,6 +299,8 @@ async function loadUserDetail(){
   if(page.userTab==='profile'){renderUserProfile(data);$('userProfilePanel').hidden=false;}
   if(page.userTab==='devices'){
    renderUserDevices();$('userDevicesPanel').hidden=false;fillRebindDevices([]);
+   $('registerDeviceForm').hidden=!data.account?.enabled;
+   $('registerDeviceHelp').textContent=data.account?.enabled?'从 USB 设备设置读取完整设备 ID。生成后，将此设备专用令牌填入 USB 设备设置并保存。':'请先在「资料与账户」开通并启用网页登录账户，再登记或接收设备。';
    try{const registry=await api('devices');if(!current())return;fillRebindDevices(registry.devices);}
    catch(e){if(current()){$('userDetailMessage').textContent='可绑定设备读取失败：'+e.message;return;}}
   }
@@ -330,22 +346,42 @@ $('toggleUserLogin').onclick=()=>{
  if(account&&(!account.enabled||confirm('停用此用户的网页登录并撤销已有会话？')))return saveUserDetail('users',{action:'enabled',accountId:account.id,enabled:!account.enabled},'账户状态已保存。');
 };
 $('deleteUserPanel').ontoggle=()=>{if(!$('deleteUserPanel').open)resetDeleteUser();};
-$('deleteUserId').oninput=()=>{
- $('deleteUser').disabled=userEditBusy||!userDetailData||$('deleteUserId').value.trim()!==userDetailData.profile.id;
-};
+function updateDeleteUser(){
+ $('deleteUser').disabled=userEditBusy||!userDetailData||$('deleteUserId').value.trim()!==userDetailData.profile.id||retireSelection().length!==userDetailData.devices.length;
+}
+$('deleteUserId').oninput=updateDeleteUser;
 $('deleteUserForm').onsubmit=async event=>{
  event.preventDefault();
  const page=currentPage(),userId=userDetailData?.profile.id,confirmUserId=$('deleteUserId').value.trim();
- if(userEditBusy||!$('deleteUserPanel').open||page.userTab!=='profile'||!userId||userId!==page.userId||userDetailData.devices.length||confirmUserId!==userId)return;
+ const retireDeviceIds=retireSelection();
+ if(userEditBusy||!$('deleteUserPanel').open||page.userTab!=='profile'||!userId||userId!==page.userId||retireDeviceIds.length!==userDetailData.devices.length||confirmUserId!==userId)return;
  const session=token,route=routeGeneration,current=()=>session===token&&route===routeGeneration;
  userEditBusy=true;$('deleteUser').disabled=true;$('userDetailMessage').textContent='正在删除用户…';
  try{
-  await api('users',{action:'delete',userId,confirmUserId},{timeoutMs:20000});
+  await api('users',{action:'delete',userId,confirmUserId,...(retireDeviceIds.length?{retireDeviceIds}:{})},{timeoutMs:20000});
   if(!current())return;
   discardEdits();history.replaceState({},'','/admin/users');renderPage(true);
   $('message').textContent='用户已删除。';
  }catch(e){if(current())$('userDetailMessage').textContent='删除失败：'+e.message;}
  finally{userEditBusy=false;if(current())$('deleteUserId').oninput();}
+};
+$('registerDevicePanel').ontoggle=()=>{if(!$('registerDevicePanel').open)clearDeviceToken();};
+$('registerDeviceForm').onsubmit=async event=>{
+ event.preventDefault();
+ const page=currentPage(),deviceId=$('registerDeviceId').value.trim(),userId=page.userId;
+ if(userEditBusy||page.userTab!=='devices'||userDetailData?.profile.id!==userId||!userDetailData.account?.enabled)return;
+ if(!/^esp32-[a-f0-9]{12}$/.test(deviceId))return;
+ if(userDetailData.devices.some(d=>d.id===deviceId)&&!confirm('重新生成此设备的令牌会使旧令牌失效并断开连接。继续吗？'))return;
+ const session=token,route=routeGeneration,current=()=>session===token&&route===routeGeneration;
+ userEditBusy=true;$('registerDevice').disabled=true;clearDeviceToken();
+ try{
+  const result=await api('users',{action:'register_device',userId,deviceId,name:$('registerDeviceName').value.trim()});
+  if(!current())return;
+  await loadUserDetail();if(!current())return;
+  $('registeredDeviceToken').value=result.deviceToken;$('registeredDeviceTokenField').hidden=false;
+  $('userDetailMessage').textContent='设备已登记。请将新令牌填入设备设置。';
+ }catch(e){if(current())$('userDetailMessage').textContent='设备登记失败：'+e.message;}
+ finally{userEditBusy=false;$('registerDevice').disabled=false;}
 };
 $('resetUserPassword').onsubmit=async event=>{
  event.preventDefault();const account=userDetailData?.account;if(!account)return;

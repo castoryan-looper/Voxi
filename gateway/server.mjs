@@ -3,6 +3,7 @@ import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 import {OPUS_BATCH_FORMAT} from './opus-batch.mjs';
 import {UplinkDecoder,UPLINK_FORMAT} from './uplink.mjs';
 import http from 'node:http';
+import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {readFileSync} from 'node:fs';
 import WebSocket,{WebSocketServer} from 'ws';
@@ -14,7 +15,7 @@ import {openClawRelay} from './openclaw-relay.mjs';
 import {createUserAccounts} from './user-accounts.mjs';
 import {createWebMemory} from './web-memory.mjs';
 
-export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash}={}) {
+export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1',voice='marin',revision='dev',pocketUrl,pocketToken,pocketCa,adminToken,adminStateFile,adminUsername,adminPasswordHash,requireDeviceEnrollment=mode==='pocket'}={}) {
   if(!token) throw Error('Set DEVICE_TOKEN');
   if(!['mock','openai','pocket'].includes(mode)) throw Error('MODE must be mock, openai or pocket');
   if(mode==='openai'&&!apiKey) throw Error('Set OPENAI_API_KEY');
@@ -27,6 +28,9 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   const pocketPortal=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'portal'):undefined;
   const users=createUserAccounts({file:adminStateFile?adminStateFile+'.users':undefined,administrator:adminUsername,
     memory:pocketMemory,webMemory,
+    disconnectUser:userId=>{
+      for(const {device,ownerId} of connected.values())if(ownerId===userId){device.closeOrigin='user_access_revoked';device.terminate();}
+    },
     voicePreview:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'voice-preview'):undefined,
     agent:pocketAgent,
     portal:pocketPortal});
@@ -87,6 +91,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
   server.once('close',()=>webMemory?.close());
   const wss=new WebSocketServer({server,maxPayload:8192});
   let connectionSequence=0;
+  let pendingAdmissions=0;
   const connected=new Map();
   const pocketOverview=mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'overview'):null;
   const admin=createAdmin({username:adminUsername,passwordHash:adminPasswordHash,accountFile:adminStateFile?adminStateFile+'.account':undefined,token:adminToken,
@@ -98,7 +103,10 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       return webMemory.manage(userId,body);
     }:undefined,
     deviceRegistry:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa},'devices'):undefined,
-    memoryConfiguration:webMemory?body=>webMemory.forward(pocketMemory,body,body?.userId):pocketMemory,
+    memoryConfiguration:pocketMemory?body=>{
+      if(body?.action==='rebind'&&!users.enabled(body.userId))throw Error('接收方必须先开通并启用网页登录账户');
+      return webMemory?webMemory.forward(pocketMemory,body,body?.userId):pocketMemory(body);
+    }:undefined,
     aiConfiguration:mode==='pocket'?pocketSettings({url:pocketUrl,token:pocketToken,ca:pocketCa}):undefined,
     agentConfiguration:webMemory?body=>webMemory.forward(pocketAgent,body,body?.userId):pocketAgent,
     snapshot:()=>({mode,revision,devices:[...connected.values()].filter(d=>d.device.readyState===WebSocket.OPEN).map(d=>d.snapshot())}),
@@ -110,7 +118,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     },
     disconnect:id=>{const d=connected.get(id);if(!d||d.device.readyState!==WebSocket.OPEN)return false;d.device.closeOrigin='admin_disconnected';d.device.close(1000,'Disconnected by administrator');const timer=setTimeout(()=>d.device.terminate(),1500);timer.unref();d.device.once('close',()=>clearTimeout(timer));return true;}
   });
-  wss.on('connection',(device,req)=>{
+  wss.on('connection',async(device,req)=>{
     const codecs=String(req.headers['x-voxi-downlink-codecs']||'').split(',').map(s=>s.trim());
     const audioFormat=mode==='pocket'&&codecs.includes(OPUS_BATCH_FORMAT)?OPUS_BATCH_FORMAT:OPUS_FORMAT;
     const deviceId=/^esp32-[a-f0-9]{12}$/.test(req.headers['x-voxi-device-id']||'')?req.headers['x-voxi-device-id']:null;
@@ -122,7 +130,8 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     // so one bad/disconnected client cannot terminate the whole gateway.
     device.on('error',error=>console.error(JSON.stringify({event:'device_ws_error',connection,code:/^[A-Z0-9_]+$/.test(error.code||'')?error.code:'OTHER'})));
     device.on('message',(raw,binary)=>{
-      if(device.authenticated)device.isAlive=true;
+      if(!device.authenticated)return;
+      device.isAlive=true;
       if(binary){inputBytes+=raw.length;return;}
       let control;try{control=JSON.parse(raw);}catch{return;}
       if(control?.type==='channel'&&Number.isInteger(control.channel)&&control.channel>=0&&control.channel<(mode==='pocket'?16:channels.length))observedChannel=control.channel;
@@ -131,15 +140,35 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     });
     device.on('close',(code)=>{connected.delete(connection);const event={event:'device_closed',connection,code,inputBytes,origin:device.closeOrigin||'peer_or_transport',...connectionMetrics()};if(device.authenticated)admin.record(event);console.log(JSON.stringify(event));});
 
-    if(req.url!=='/radio'||req.headers.authorization!==`Bearer ${token}`){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
+    const authorization=req.headers.authorization||'',legacy=authorization===`Bearer ${token}`;
+    const deviceKey=requireDeviceEnrollment&&/^Bearer [A-Za-z0-9_-]{43}$/.test(authorization)?authorization.slice(7):null;
+    if(req.url!=='/radio'||(!legacy&&!deviceKey)){device.closeOrigin='auth_rejected';admin.record({event:'device_rejected',connection,reason:'unauthorized'});console.warn(JSON.stringify({event:'device_rejected',connection,reason:'unauthorized'}));device.send(JSON.stringify({type:'error',message:'Device token rejected; check saved gateway token'}));device.close(1008,'Unauthorized');return;}
     if(req.headers['x-voxi-audio-format']!==OPUS_FORMAT){
       device.closeOrigin='codec_required';
       device.send(JSON.stringify({type:'error',message:'Opus firmware required; update device firmware',code:'opus_required'}));
       device.close(1008,'Opus firmware required');return;
     }
+    let ownerId,deviceProof;
+    if(requireDeviceEnrollment){
+      const reject=(code,message)=>{
+        if(device.readyState!==WebSocket.OPEN)return;
+        device.closeOrigin='enrollment_rejected';device.send(JSON.stringify({type:'error',code:'device_enrollment_required',message}));
+        device.close(code,'Device enrollment required');
+      };
+      if(!deviceId){reject(1008,'设备需要唯一 ID，请升级固件并联系管理员登记');return;}
+      if(pendingAdmissions>=32){reject(1013,'设备登记服务繁忙，请稍后重试');return;}
+      deviceProof=legacy?'legacy':createHash('sha256').update(deviceKey).digest('hex');
+      const controller=new AbortController();const cancel=()=>controller.abort();device.once('close',cancel);
+      pendingAdmissions++;
+      try{({userId:ownerId}=await pocketMemory({action:'device_admission',deviceId,proof:deviceProof},{signal:controller.signal}));}
+      catch{reject(1008,'设备未登记、已退役或设备令牌不匹配');return;}
+      finally{pendingAdmissions--;device.off('close',cancel);}
+      if(device.readyState!==WebSocket.OPEN)return;
+      if(!users.enabled(ownerId)){reject(1008,'设备所属用户尚未注册或账户已停用');return;}
+    }
     device.authenticated=true;
     const cellular=req.headers['x-voxi-link']==='cellular-v1';
-    connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channelName:device.voxiChannelName||null,channelMode:device.voxiChannelMode||null,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
+    connected.set(connection,{device,ownerId,snapshot:()=>({connection,deviceId,audioFormat,channelName:device.voxiChannelName||null,channelMode:device.voxiChannelMode||null,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{device.isAlive=true;pings++;lastPingAt=Date.now();});
     if(cellular)device.on('message',()=>{device.isAlive=true;});
@@ -156,7 +185,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.closeOrigin='session_rotation';device.close(1000,'Session rotation');
     },30*60*1000);
     if(mode==='pocket'){
-      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,connection,audioFormat,
+      attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,ownerId,deviceProof,connection,audioFormat,
         extendedChannels:req.headers['x-voxi-channels']==='blocks-v1',cellular});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
