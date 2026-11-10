@@ -79,6 +79,7 @@ function renderChannels(channels=data.channels){
  if(!channels.length)box.textContent='还没有频道。添加后保存，即可在设备上切换。';
  $('addChannel').hidden=!limit;$('addChannel').disabled=channels.length>=limit;
  $('channelSource').textContent=data.inheritsChannels?'当前使用默认频道。修改并保存后，只应用到你的设备。':'当前使用你的个人频道。';
+ if(limit)$('channelSource').textContent+=' 最多 '+limit+' 个频道。';
  $('restoreChannels').hidden=data.inheritsChannels;
 }
 function readChannels(){

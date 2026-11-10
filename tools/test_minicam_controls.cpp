@@ -2,6 +2,7 @@
 #include "../firmware-c6/include/channel_catalog.h"
 #include "../firmware-c6/include/ptt_hold.h"
 #include <cassert>
+#include <initializer_list>
 int main(){
  assert(nextEnabledChannel(0,-1,0b0011)==1);
  assert(nextEnabledChannel(1,1,0b0011)==0);
@@ -13,6 +14,16 @@ int main(){
  assert(nextEnabledChannel(0,-1,0x8001)==15);
  assert(nextEnabledChannel(15,1,0x8001)==0);
  assert(nextEnabledChannel(4,1,0x8080)==7);
+ const uint16_t cloudChannels=0x842b; // CH0, CH1, CH3, CH5, CH10, CH15
+ int selected=0;
+ for(const int next:{1,3,5,10,15,0}){
+  selected=nextEnabledChannel(selected,1,cloudChannels);
+  assert(selected==next);
+ }
+ for(const int next:{15,10,5,3,1,0}){
+  selected=nextEnabledChannel(selected,-1,cloudChannels);
+  assert(selected==next);
+ }
  assert(MiniCamControls::volumeKey(0)==-1);assert(MiniCamControls::volumeKey(700)==-1);assert(MiniCamControls::volumeKey(701)==0);assert(MiniCamControls::volumeKey(899)==0);assert(MiniCamControls::volumeKey(900)==1);assert(MiniCamControls::volumeKey(3000)==1);assert(MiniCamControls::volumeKey(3001)==0);
  MiniCamControls c;
  c.sample(0,100,false);c.sample(20,100,false);assert(!c.sample(40,100,false).volumeDelta);
