@@ -29,6 +29,14 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  const base=`http://127.0.0.1:${server.address().port}`;
  for(const path of ['/admin/agent','/admin/agent/tasks','/admin/agent/credentials'])assert.equal((await fetch(base+path)).status,200);
  const download=await fetch(base+'/downloads/voxi-openclaw.py');assert.equal(download.status,200);assert.match(await download.text(),/def execute/);
+ const muse=await fetch(base+'/downloads/voxi-muse-code.mjs');assert.equal(muse.status,200);assert.match(await muse.text(),/MuseClient\.spawn/);
+ const relayHeaders={'Content-Type':'application/json',Authorization:'Bearer '+'m'.repeat(43)};
+ const relayBody=JSON.stringify({action:'settings',relayEngine:'openclaw',op:'poll',connectionId:'a'.repeat(32),status:'ready'});
+ assert.equal((await fetch(base+'/api/muse-code/relay',{method:'POST',headers:relayHeaders,body:relayBody})).status,200);
+ assert.equal(requests.at(-1).path,'/voxi/agent');
+ assert.equal(requests.at(-1).body.action,'relay');
+ assert.equal(requests.at(-1).body.relayEngine,'muse');
+ requests.length=0;
  assert.equal((await fetch(base+'/api/admin/agent',{headers:{Authorization:'Bearer device-only'}})).status,401);
  assert.equal(requests.length,0);
  const login=await fetch(base+'/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'admin',password:'fixture-password-123'})});
@@ -45,6 +53,7 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  const before=requests.length;
  for(const payload of [
   {action:'connect_model',userId:'owner'},
+  {action:'connect_muse',userId:'owner'},
   {action:'test_openclaw',userId:'owner'},
   {action:'channels',userId:'owner',channels:[]},
   {action:'reset_channels',userId:'owner'},

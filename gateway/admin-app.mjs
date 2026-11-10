@@ -466,7 +466,7 @@ function updateAgentDirty(){agentDirty=serviceDirty||behaviorDirty;}
 function agentTaskChannels(){
  const config=userDetailData?.agent,select=$('agentTaskChannel'),selected=select.value;
  select.replaceChildren();
- for(const [index,c] of (config?.channels||[]).entries())if(['agent','openclaw','model'].includes(c.mode)){const slot=c.slot??index;select.append(option(String(slot),'CH'+slot+' · '+c.name));}
+ for(const [index,c] of (config?.channels||[]).entries())if(['agent','openclaw','muse','model'].includes(c.mode)){const slot=c.slot??index;select.append(option(String(slot),'CH'+slot+' · '+c.name));}
  if([...select.options].some(o=>o.value===selected))select.value=selected;
  $('agentSubmitForm').hidden=!config?.enabled||!select.options.length;
  $('submitAgentTask').disabled=$('agentSubmitForm').hidden;
@@ -587,7 +587,7 @@ async function openAgentTask(id,user,poll=false){
  if(poll&&$('agentApproval').contains(document.activeElement))return;
  $('agentTaskActions').replaceChildren();$('agentApproval').replaceChildren();
  const button=(label,action,cls='secondary')=>{const b=document.createElement('button');b.type='button';b.textContent=label;b.className=cls;b.onclick=action;$('agentTaskActions').append(b);};
- if(['queued','running','awaiting_approval','needs_input'].includes(task.state)||(task.engine==='openclaw'&&task.state==='submitting'))button(['openclaw','model'].includes(task.engine)?'停止等待':'取消任务',()=>{if(confirm(task.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':task.engine==='model'?'停止等待后，服务端可能仍在执行并计费。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))agentTaskAction('cancel');},'danger');
+ if(['queued','running','awaiting_approval','needs_input'].includes(task.state)||(['openclaw','muse'].includes(task.engine)&&task.state==='submitting'))button(['openclaw','model'].includes(task.engine)?'停止等待':'取消任务',()=>{if(confirm(task.engine==='muse'?'向 Muse Code 请求停止？已产生的修改不会撤销。':task.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':task.engine==='model'?'停止等待后，服务端可能仍在执行并计费。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))agentTaskAction('cancel');},'danger');
  if(task.state==='awaiting_approval'){const pre=document.createElement('pre');pre.textContent=JSON.stringify(task.approval,null,2);$('agentApproval').append(pre);button('批准本次操作',()=>agentTaskAction('approve'));button('拒绝本次操作',()=>agentTaskAction('decline'),'danger');}
  if(task.state==='needs_input'){const form=document.createElement('form');for(const q of task.approval?.questions||[]){const label=document.createElement('label'),input=document.createElement('textarea');label.className='field';label.textContent=q.question||q.header||q.id;input.name=q.id;input.required=true;input.maxLength=4000;label.append(input);form.append(label);}const submit=document.createElement('button');submit.textContent='提交答案';form.append(submit);form.onsubmit=e=>{e.preventDefault();const answers={};for(const [key,value] of new FormData(form))answers[key]={answers:[value]};agentTaskAction('answer',{answers});};$('agentApproval').append(form);}
  if(['completed','failed','cancelled','interrupted','delivery_unknown'].includes(task.state)&&task.threadId)button('继续此任务',()=>{const text=prompt('补充要求（会先核对已有结果，避免重复执行）');if(text?.trim())agentTaskAction('continue',{text,requestId:crypto.randomUUID()});});
