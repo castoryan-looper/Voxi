@@ -16,7 +16,7 @@ export function pocketSettings({url,token,ca},endpoint='config') {
         try{resolve(JSON.parse(raw));}catch{reject(Error('Pocket 配置响应无效'));}
       });
     });
-    const timeout=endpoint==='voice-preview'?90000:['portal','agent'].includes(endpoint)&&['connect_model','test_model'].includes(value?.action)?11000:8000;
+    const timeout=endpoint==='voice-preview'?90000:endpoint==='portal'&&typeof value?.action==='string'&&value.action.startsWith('capability_')?19000:['portal','agent'].includes(endpoint)&&['connect_model','test_model'].includes(value?.action)?11000:8000;
     const deadline=setTimeout(()=>request.destroy(Error('Pocket 配置请求超时')),timeout);deadline.unref();
     const abort=()=>request.destroy(Error('请求已取消'));
     if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});

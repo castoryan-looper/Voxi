@@ -97,6 +97,12 @@ label .connection-select > select { margin-top: 0; }
 .connection-check-guide { margin: 12px 0 20px; color: var(--muted); }
 .connection-check-guide li { margin-bottom: 6px; }
 .connection-check-guide strong { display: block; color: #f0eeeb; }
+.capability-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; align-items: start; }
+.capability-grid h2 { margin-top: 0; }
+.capability-grid pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .capability-grid { grid-template-columns: minmax(0,1fr); }
+}
 
 @supports (appearance: base-select) and selector(::picker(select)) {
   .connection-select > select,

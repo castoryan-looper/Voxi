@@ -69,11 +69,12 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     assets['/shared/theme.css']=['theme.css','text/css; charset=utf-8'];
     assets['/shared/login-page.js']=['login-page.mjs','text/javascript; charset=utf-8'];
     assets['/shared/radio-schematic.svg']=['radio-schematic.svg','image/svg+xml'];
+    assets['/app/assets/capabilities.js']=['user-capabilities.mjs','text/javascript; charset=utf-8'];
     assets['/app/assets/context.js']=['user-context.mjs','text/javascript; charset=utf-8'];
     assets['/downloads/voxi-context-sync.py']=['voxi-context-sync.py','text/x-python; charset=utf-8'];
     assets['/downloads/voxi-muse-code.mjs']=['voxi-muse-code.mjs','text/javascript; charset=utf-8'];
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
-    if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/context','/app/tasks','/app/account'].includes(path)){
+    if(['/app','/app/','/app/profile','/app/channels','/app/connections','/app/capabilities','/app/context','/app/tasks','/app/account'].includes(path)){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'});res.end(readFileSync(new URL('./user.html',import.meta.url)));return;
     }
     if(path==='/admin/ai/prompts'){
