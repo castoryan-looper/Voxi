@@ -1,28 +1,28 @@
 <!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Voxi · 运营总览</title>
-<meta name="theme-color" content="#0b1018">
+<meta name="theme-color" content="#0a0a0a">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/admin/assets/admin.css">
-<header><div><div class="tag">VOXI CLOUD</div><h1 id="pageTitle">运营总览</h1></div><button class="secondary" id="logout" hidden>退出管理</button></header>
-<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview">VOXI<span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与语音</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/connections" data-nav="agentConnections">模型与 Agent 接入</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
+<header class="signal-panel"><div><div class="tag">VOXI / CLOUD</div><h1 id="pageTitle">管理控制台</h1></div><button class="secondary" id="logout" hidden>退出管理</button></header>
+<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview"><strong class="brand-name">VOXI</strong><span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与语音</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/connections" data-nav="agentConnections">模型与 Agent 接入</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
 <div id="breadcrumb" class="breadcrumb" hidden></div><section class="card" id="login"><h2>管理员登录</h2><p class="muted">使用管理员用户名和密码登录网关。普通用户请使用 <a href="/app">我的 Voxi 用户入口</a>。</p><form id="loginForm" class="row"><input id="username" required autocomplete="username" placeholder="用户名" aria-label="用户名"><input id="secret" type="password" required autocomplete="current-password" placeholder="密码" aria-label="密码"><button id="loginButton">登录</button></form></section>
 <main id="dashboard" hidden>
 <section class="card" id="overviewSection" hidden>
-<div class="row"><h2>用户与设备</h2><button class="secondary" id="refreshOverview">刷新</button><small id="overviewUpdated" role="status"></small></div>
+<div class="row"><h2 class="section-title"><span class="section-index" aria-hidden="true">01</span>用户与设备</h2><button class="secondary" id="refreshOverview">刷新</button><small id="overviewUpdated" role="status"></small></div>
 <div class="stats overview-stats">
 <div class="stat">用户档案<b id="overviewUsers">—</b><small id="overviewAccounts">含设备自动建立的档案</small></div>
 <div class="stat">近 7 天设备上线用户<b id="overviewSeen">—</b><small>按设备绑定的用户去重</small></div>
 <div class="stat">在线设备<b id="online">—</b><small id="overviewRegistered">当前已认证连接</small></div>
 <div class="stat">交互中的设备<b id="overviewBusy">—</b><small>录音、等待或发送播报</small></div>
 </div>
-<h2>实时语音容量</h2>
+<h2 class="section-title"><span class="section-index" aria-hidden="true">02</span>实时语音容量</h2>
 <div class="stats overview-stats">
 <div class="stat">正在占用的语音席位<b id="overviewOccupied">—</b><small>含预热中、录音、回复和样音生成</small></div>
 <div class="stat">预计还能同时接待<b id="overviewAvailable">—</b><small id="overviewVoiceLimit">按可调度语音席位估算</small></div>
 </div>
 <p class="muted">空闲设备可保持在线。可接待数包含能重新分配的空闲语音席位，实际承载还取决于服务器与模型服务。注册用户容量需压测后评估。</p>
-<h2>语音使用 <small>今日按北京时间</small></h2>
+<h2 class="section-title"><span class="section-index" aria-hidden="true">03</span>语音使用 <small>今日按北京时间</small></h2>
 <div class="stats overview-stats">
 <div class="stat">今日语音轮次<b id="overviewTodayTurns">—</b></div>
 <div class="stat">今日说话时长<b id="overviewTodayDuration">—</b></div>
@@ -30,7 +30,7 @@
 <div class="stat">累计说话时长<b id="overviewDuration">—</b></div>
 </div>
 <p class="muted" id="overviewVoiceSince">仅统计设备已受理的有效语音输入。累计从新版采集开始。</p>
-<h2>后台任务与模型用量</h2>
+<h2 class="section-title"><span class="section-index" aria-hidden="true">04</span>后台任务与模型用量</h2>
 <div class="stats overview-stats">
 <div class="stat">累计任务<b id="overviewTasks">—</b><small id="overviewTaskStatus">含 Voxi Agent 与 OpenClaw</small></div>
 <div class="stat">已上报的累计 Token<b id="overviewTokens">—</b><small id="overviewTokenCoverage">按 Voxi Agent 会话汇总</small></div>
