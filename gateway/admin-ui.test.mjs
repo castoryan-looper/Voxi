@@ -51,78 +51,28 @@ test('quick answer settings save only the edited style, independent of voice',as
  assert.match(get('fastStyleMessage').textContent,/已保存/);
 });
 
-test('the channel editor saves defaults and personal overrides to separate scopes',async()=>{
- const {context,get}=page(),uid='owner';
- const channels=Array.from({length:4},(_,i)=>({name:'频道'+i,mode:i===0?'fast':'agent'}));
- const settings={enabled:true,channels,maxConcurrent:2,instructions:'任务规则'};
- const data={settings,users:[{id:uid,name:'用户'}],tasks:[],connections:[],channelOverrides:[],channelsByUser:{},credentials:{},runtime:{ready:true}};
- const requests=[];
+test('assistant settings load without personal channels and only save global fields',async()=>{
+ const {context,get}=page(),requests=[];
+ const settings={enabled:true,maxConcurrent:2,maxTaskSeconds:1800,model:'',instructions:'原规则'};
+ const data={settings,credentials:{},runtime:{ready:true}};
  context.fetch=async(path,options)=>{
   if(options.body){
-   const body=JSON.parse(options.body);requests.push(body);
-   if(body.action==='settings_patch')Object.assign(settings,body.settings);
-   if(body.action==='channels'){data.channelsByUser[uid]=body.channels;data.channelOverrides=[uid];}
-   if(body.action==='reset_channels'){delete data.channelsByUser[uid];data.channelOverrides=[];}
+   const body=JSON.parse(options.body);requests.push(body);Object.assign(settings,body.settings);
   }
   return {ok:true,json:async()=>data};
  };
+ context.location.pathname='/admin/agent';
  vm.runInContext("token='session'",context);
  await vm.runInContext('loadAgent()',context);
- assert.equal(get('agentChannelUser').value,'');assert.equal(get('saveAgentChannels').disabled,true);
- get('agentChannelsName0').value='公共快问';get('agentChannelsForm').oninput();
- await get('agentChannelsForm').onsubmit({preventDefault(){}});
- assert.deepEqual(Object.keys(requests[0].settings),['channels']);
- get('agentChannelUser').value=uid;get('agentChannelUser').onchange();
- assert.equal(get('agentChannelsName0').value,'公共快问');assert.equal(get('restoreAgentChannels').hidden,true);
- get('agentChannelsName0').value='个人快问';get('agentChannelsForm').oninput();
- await get('agentChannelsForm').onsubmit({preventDefault(){}});
- assert.equal(requests[1].action,'channels');assert.equal(requests[1].userId,uid);
- assert.equal(settings.channels[0].name,'公共快问');assert.equal(get('restoreAgentChannels').hidden,false);
- await get('restoreAgentChannels').onclick();
- assert.deepEqual(requests[2],{action:'reset_channels',userId:uid});
- assert.equal(get('agentChannelsName0').value,'公共快问');
+ assert.equal(get('agentBehaviorForm').hidden,false);
+ assert.equal(get('agentInstructions').value,'原规则');
+ get('agentInstructions').value='先总结结果';get('agentBehaviorForm').oninput();
+ await get('agentBehaviorForm').onsubmit({preventDefault(){}});
+ assert.deepEqual(requests,[{action:'settings_patch',settings:{instructions:'先总结结果'}}]);
+ assert.equal(settings.enabled,true);
+ assert.equal(get('agentBehaviorMessage').textContent,'已保存。');
 });
 
-test('admin connections are managed separately and appear only for the owning user in channels',async()=>{
- const {context,get}=page(),owner='a'.repeat(32),other='b'.repeat(32),requests=[];
- const data={settings:{enabled:true,channels:[{name:'快问',mode:'fast'}]},runtime:{ready:true},credentials:{},tasks:[],channelOverrides:[],
-  users:[{id:owner,name:'甲'},{id:other,name:'乙'}],connections:[],modelConnections:[],
-  modelProviders:{deepseek:{name:'DeepSeek',defaultModel:'deepseek-flash',docs:'https://example.test/'},qwen:{name:'千问',defaultModel:'qwen-plus',workspaceRequired:true}}};
- context.fetch=async(path,options)=>{
-  if(options.body){
-   const body=JSON.parse(options.body);requests.push(body);
-   if(body.action==='connect_model')data.modelConnections.push({id:'model-a',user_id:body.userId,name:body.name,model:body.model,provider:body.provider});
-   if(body.action==='connect_openclaw')return {ok:true,json:async()=>({connectionId:'claw-a',pairingToken:'fixture-pair-token'})};
-   return {ok:true,json:async()=>({connectionId:'model-a'})};
-  }
-  return {ok:true,json:async()=>data};
- };
- vm.runInContext("token='session';navigate('/admin/connections')",context);
- await vm.runInContext('loadAgent()',context);
- assert.equal(get('agentConnectionsSection').hidden,false);assert.equal(get('agentSection').hidden,true);
- assert.equal(get('connectionEditor').hidden,true);
- get('agentConnectionUser').value=owner;get('agentConnectionUser').onchange();
- assert.equal(get('connectionEditor').hidden,false);
- get('adminModelProvider').value='qwen';get('adminModelProvider').onchange();
- assert.equal(get('adminModelWorkspace').required,true);
- get('adminModelWorkspace').value='ws-fixture';get('adminModelKey').value='fixture-key';
- await get('adminModelForm').onsubmit({preventDefault(){}});
- assert.deepEqual(requests[0],{action:'connect_model',userId:owner,provider:'qwen',name:'千问',model:'qwen-plus',workspace:'ws-fixture',key:'fixture-key'});
- assert.equal(get('adminModelKey').value,'');assert.equal(get('adminModelConnections').children[0].children[0].textContent,'千问');
- get('openclawName').value='家庭助手';get('openclawTransport').value='relay';get('openclawAgent').value='main';
- await get('openclawForm').onsubmit({preventDefault(){}});
- assert.equal(requests[1].userId,owner);assert.equal(get('openclawPairToken').value,'fixture-pair-token');
- get('adminModelKey').value='unsaved';get('adminModelForm').oninput();
- get('agentConnectionUser').value=other;get('agentConnectionUser').onchange();
- assert.equal(get('adminModelKey').value,'');assert.equal(get('adminModelConnections').children.length,0);
- assert.equal(get('openclawPairToken').value,'');assert.equal(get('openclawPairing').hidden,true);
- vm.runInContext("navigate('/admin/agent')",context);await vm.runInContext('loadAgent()',context);
- assert.equal(get('agentConnectionsSection').hidden,true);
- get('agentChannelUser').value=owner;get('agentChannelUser').onchange();
- assert.equal(get('agentChannelsMode0').children.some(o=>o.value==='model:model-a'),true);
- get('agentChannelUser').value=other;get('agentChannelUser').onchange();
- assert.equal(get('agentChannelsMode0').children.some(o=>o.value==='model:model-a'),false);
-});
  test('read button immediately shows loading and recovers after backend failure',async()=>{
  const {context,get}=page();get('aiForm').hidden=true;let resolve;context.fetch=()=>new Promise(r=>resolve=r);vm.runInContext("token='session'",context);
  const pending=get('reloadAi').onclick();assert.equal(get('reloadAi').disabled,true);assert.match(get('aiMessage').textContent,/正在读取/);
