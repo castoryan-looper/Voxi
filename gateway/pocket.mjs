@@ -8,10 +8,10 @@ import {DownlinkProbe} from './downlink-probe.mjs';
 
 // Protocol-compatible proxy; only the Pocket device bearer crosses this link.
 // No ChatGPT login files, account tokens or Docker socket are mounted in Voxi.
-export function attachPocket(device,{url,token,ca,deviceId,connection,audioFormat=OPUS_FORMAT,extendedChannels=false}) {
+export function attachPocket(device,{url,token,ca,deviceId,connection,audioFormat=OPUS_FORMAT,extendedChannels=false,cellular=false}) {
   if(![OPUS_FORMAT,OPUS_BATCH_FORMAT].includes(audioFormat))throw Error('Only Opus downlink is supported');
   const upstream=new WebSocket(url,{handshakeTimeout:10000,maxPayload:65536,
-    headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{}),...(extendedChannels?{'X-Voxi-Channels':'blocks-v1'}:{})},...(ca?{ca}:{})});
+    headers:{Authorization:`Bearer ${token}`,...(deviceId?{'X-Voxi-Device-Id':deviceId}:{}),...(extendedChannels?{'X-Voxi-Channels':'blocks-v1'}:{}),...(cellular?{'X-Voxi-Link':'cellular-v1'}:{})},...(ca?{ca}:{})});
   let ready=false,recording=false,bytes=0,filter=new RadioFilter(),failed=false,lastReady=null;
   const uplink=new UplinkDecoder();uplink.reset();
   let replyNumber=0,reply=null;

@@ -138,12 +138,16 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
       device.close(1008,'Opus firmware required');return;
     }
     device.authenticated=true;
+    const cellular=req.headers['x-voxi-link']==='cellular-v1';
     connected.set(connection,{device,snapshot:()=>({connection,deviceId,audioFormat,channelName:device.voxiChannelName||null,channelMode:device.voxiChannelMode||null,channel:observedChannel,busy:Boolean(device.radioBusy||observedBusy),inputBytes,...connectionMetrics()})});
     admin.record({event:'device_opened',connection});
     device.isAlive=true;device.on('pong',()=>{device.isAlive=true;pongs++;lastPongAt=Date.now();});device.on('ping',()=>{device.isAlive=true;pings++;lastPingAt=Date.now();});
+    if(cellular)device.on('message',()=>{device.isAlive=true;});
     console.log(JSON.stringify({event:'device_opened',connection}));
+    let missedHeartbeats=0;
     const heartbeat=setInterval(()=>{
-      if(!device.isAlive){device.closeOrigin='heartbeat_timeout';console.warn(JSON.stringify({event:'device_heartbeat_timeout',connection,...connectionMetrics()}));device.terminate();return;}
+      missedHeartbeats=device.isAlive?0:missedHeartbeats+1;
+      if(missedHeartbeats>=(cellular?2:1)){device.closeOrigin='heartbeat_timeout';console.warn(JSON.stringify({event:'device_heartbeat_timeout',connection,...connectionMetrics()}));device.terminate();return;}
       device.isAlive=false;sentPings++;device.ping();
     },30000);
     // A stale idle session must not keep a paid model connection forever.
@@ -153,7 +157,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     },30*60*1000);
     if(mode==='pocket'){
       attachPocket(device,{url:pocketUrl,token:pocketToken,ca:pocketCa,deviceId,connection,audioFormat,
-        extendedChannels:req.headers['x-voxi-channels']==='blocks-v1'});
+        extendedChannels:req.headers['x-voxi-channels']==='blocks-v1',cellular});
       device.on('close',()=>{clearInterval(heartbeat);clearInterval(lifetime);});
       return;
     }

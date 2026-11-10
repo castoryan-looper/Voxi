@@ -67,3 +67,16 @@ struct CellularHeartbeat {
 inline uint32_t cellularStatusPollMs(bool screenOff,bool dataReady,bool socketConnected){
  return screenOff&&dataReady&&socketConnected?30000u:10000u;
 }
+
+struct CellularRecovery {
+ static constexpr uint32_t firstTlsByteMs=5000, tlsHandshakeMs=30000, redialCooldownMs=60000;
+ uint32_t lastRedial=0;
+ uint8_t unanswered=0;
+ bool redialed=false;
+ void received(){unanswered=0;}
+ bool noTlsResponse(uint32_t now){
+  if(unanswered<2)++unanswered;
+  if(unanswered<2||(redialed&&uint32_t(now-lastRedial)<redialCooldownMs))return false;
+  unanswered=0;lastRedial=now;redialed=true;return true;
+ }
+};

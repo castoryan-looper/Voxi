@@ -30,5 +30,14 @@ int main(){
   assert(cellularStatusPollMs(false,true,true)==10000);
   assert(cellularStatusPollMs(true,false,true)==10000);
   assert(cellularStatusPollMs(true,true,false)==10000);
+  CellularRecovery recovery;
+  assert(!recovery.noTlsResponse(5000));
+  assert(recovery.noTlsResponse(12000));
+  assert(!recovery.noTlsResponse(20000));
+  assert(!recovery.noTlsResponse(71000));
+  assert(recovery.noTlsResponse(72000));
+  assert(!recovery.noTlsResponse(80000));
+  recovery.received();
+  assert(!recovery.noTlsResponse(132000));
 }
 

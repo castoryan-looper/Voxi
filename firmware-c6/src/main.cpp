@@ -61,6 +61,13 @@ public:
   bool sendTXT(uint8_t* p,size_t n){return radioUsesCellular()?cell.sendTXT(p,n):WebSocketsClient::sendTXT(p,n);}
   void linkDiagnostics(JsonDocument& out){out["cellularLinkFailure"]=cell.lastFailure();out["cellularLinkFailureAtMs"]=cell.lastFailureTime();out["cellularRemoteCloseCode"]=cell.lastRemoteCloseCode();}
 #endif
+  bool tlsReplyMissing()const{
+#ifdef VOXI_BOARD_MINICAM
+    return radioUsesCellular()&&cell.tlsReplyMissing();
+#else
+    return false;
+#endif
+  }
   void enableHeartbeat(uint32_t i,uint32_t t,uint8_t n){
 #ifdef VOXI_BOARD_MINICAM
     if(radioUsesCellular()){cell.enableHeartbeat(i,t,n);return;}
@@ -361,6 +368,7 @@ static void networkTask(void*){
   authorizationHeader+="\r\nX-Voxi-Channels: blocks-v1";
 #ifdef VOXI_BOARD_MINICAM
   authorizationHeader+="\r\nX-Voxi-Standby: connected-v1";
+  if(radioUsesCellular())authorizationHeader+="\r\nX-Voxi-Link: cellular-v1";
 #endif
   ws.setExtraHeaders(authorizationHeader.c_str());ws.onEvent(socketEvent);ws.setReconnectInterval(RADIO_RECONNECT_MS);
 #ifdef VOXI_BOARD_MINICAM
@@ -528,7 +536,13 @@ void onWs(WStype_t t,uint8_t* data,size_t len){
   if(type=="thinking")radioDebug("WAIT AI","Gateway submitted audio");
   if(type=="busy"){ready=false;thinking=true;}
   if(type=="flush"){discardProbeAudio=false;flushAudio();}
-  if(type=="idle"){replyPending=false;ready=gatewayLinked;radioDebug("READY","Clip too short: not sent");thinking=false;}
+  if(type=="idle"){
+    replyPending=false;ready=gatewayLinked;thinking=false;
+    const char* reason=d["reason"]|"";
+    if(!strcmp(reason,"voice_unavailable")){radioDebug("VOICE RETRY","Cloud is connected; voice is temporarily unavailable");diagnosticError("Voice temporarily unavailable");}
+    else if(!strcmp(reason,"voice_capacity"))radioDebug("VOICE BUSY","Cloud is connected; voice capacity is busy");
+    else radioDebug("READY","Clip too short: not sent");
+  }
   if(type=="audio_start"){
     downlinkProbeWaiting=false;discardProbeAudio=false;replyIsProbe=String(d["source"]|"")=="transport_probe";
     if(!replyCodecReady||!opusReplyReset()){diagnosticError("Opus not confirmed or decoder reset failed");fault();return;}
@@ -582,6 +596,7 @@ const char* radioIdleDisplayPhase(){
   if(!radioNetworkConnected())return radioUsesCellular()?"4G CONNECT":"WIFI CONNECT";
   if(radioConfig.tls&&time(nullptr)<=1700000000)return "SYNC TIME";
   if(ready)return "READY";
+  if(!gatewayLinked&&ws.tlsReplyMissing())return "4G TLS RETRY";
   if(backendError)return "BACKEND ERROR";
   return gatewayLinked?"WAIT AI":"CLOUD CONNECT";
 }
@@ -785,7 +800,7 @@ void loop(){
   static uint32_t lastScreen=0;
   if(millis()-lastScreen>500){lastScreen=millis();
     bool wifi=radioNetworkConnected();
-    const char* label=!wifi?(radioUsesCellular()?"4G CONNECT":"WIFI CONNECT"):radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":uploading?"SENDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":backendError?"BACKEND ERROR":gatewayLinked?"AI CONNECTING":"CLOUD CONNECT";
+    const char* label=!wifi?(radioUsesCellular()?"4G CONNECT":"WIFI CONNECT"):radioConfig.tls&&time(nullptr)<=1700000000?"SYNC TIME":tx?"RECORDING":uploading?"SENDING":thinking?"THINKING":playing?"RECEIVING":ready?"READY":gatewayLinked?"AI CONNECTING":ws.tlsReplyMissing()?"4G TLS RETRY":backendError?"BACKEND ERROR":"CLOUD CONNECT";
     if(tx)diagnosticStage("recording");else if(uploading)diagnosticStage("sending");else if(thinking)diagnosticStage("thinking");else if(playing)diagnosticStage("receiving");else if(ready)diagnosticStage("ready");
     else diagnosticStage(!wifi?(radioUsesCellular()?"cellular_connecting":"wifi_connecting"):radioConfig.tls&&time(nullptr)<=1700000000?"sync_time":backendError?"backend_error":gatewayLinked?"ai_connecting":"gateway_connecting");
     // MiniCam keeps the live channel card visible above the setup footer.

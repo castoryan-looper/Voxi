@@ -6,6 +6,7 @@
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
+#include <atomic>
 #include "cellular_protocol.h"
 class CellularSocket {
  String host,path,ca,headers;uint16_t port=0;
@@ -14,6 +15,9 @@ class CellularSocket {
  mbedtls_ctr_drbg_context random;mbedtls_entropy_context entropy;
  bool connected=false,tlsReady=false,secure=true,fragmented=false;
  uint32_t attemptAt=0,retryMs=5000;uint8_t fragmentOpcode=0;CellularHeartbeat heartbeat;
+ CellularRecovery recovery;
+ bool handshakeReceived=false;
+ std::atomic<bool> waitingForTlsReply{false};
  int error=0;size_t buffered=0,messageLength=0;uint8_t wire[4096],message[2048];
  String lastFailureText;uint32_t lastFailureAt=0;uint16_t remoteCloseCode=0;
  void initTls();void freeTls();bool connect();void fail(const char*,int code=0);
@@ -24,6 +28,7 @@ public:
  String lastFailure()const{return lastFailureText;}
  uint32_t lastFailureTime()const{return lastFailureAt;}
  uint16_t lastRemoteCloseCode()const{return remoteCloseCode;}
+ bool tlsReplyMissing()const{return waitingForTlsReply.load();}
  CellularSocket();~CellularSocket();
  void begin(const char* h,uint16_t p,const char* url,const char* certificate);
  void onEvent(WebSocketsClient::WebSocketClientEvent f){callback=f;}

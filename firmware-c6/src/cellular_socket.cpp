@@ -15,7 +15,11 @@ void CellularSocket::freeTls(){mbedtls_ssl_free(&ssl);mbedtls_ssl_config_free(&c
 bool CellularSocket::minicamConnected(){return minicamTcpConnected();}
 void CellularSocket::begin(const char* h,uint16_t p,const char* url,const char* certificate){host=h;port=p;path=url;secure=certificate!=nullptr;ca=certificate?certificate:"";attemptAt=millis()-retryMs;}
 int CellularSocket::sendBio(void*,const unsigned char* p,size_t n){int sent=minicamTcpSend(p,n);return sent<0?MBEDTLS_ERR_NET_SEND_FAILED:sent;}
-int CellularSocket::readBio(void*,unsigned char* p,size_t n){int count=minicamTcpRead(p,n);if(count)return count;return minicamTcpConnected()?MBEDTLS_ERR_SSL_WANT_READ:MBEDTLS_ERR_NET_CONN_RESET;}
+int CellularSocket::readBio(void* context,unsigned char* p,size_t n){
+ int count=minicamTcpRead(p,n);
+ if(count){if(context)static_cast<CellularSocket*>(context)->handshakeReceived=true;return count;}
+ return minicamTcpConnected()?MBEDTLS_ERR_SSL_WANT_READ:MBEDTLS_ERR_NET_CONN_RESET;
+}
 void CellularSocket::fail(const char* reason,int code){error=code;char text[160];snprintf(text,sizeof(text),"4G %s (%d)",reason,code);lastFailureText=text;lastFailureAt=millis();remoteCloseCode=0;diagnosticError(text);disconnect();minicamTlsStatus(false,code);}
 void CellularSocket::disconnect(){bool was=connected;connected=false;buffered=messageLength=0;fragmented=false;heartbeat.reset(millis());minicamTcpClose();freeTls();initTls();attemptAt=millis();if(was&&callback)callback(WStype_DISCONNECTED,nullptr,0);}
 int CellularSocket::readSome(uint8_t* p,size_t n){return secure?mbedtls_ssl_read(&ssl,p,n):readBio(nullptr,p,n);}
@@ -36,11 +40,23 @@ bool CellularSocket::connect(){
   if(rc){fail("TLS setup failed",rc);return false;}
   mbedtls_ssl_conf_authmode(&config,MBEDTLS_SSL_VERIFY_REQUIRED);mbedtls_ssl_conf_ca_chain(&config,&trust,nullptr);mbedtls_ssl_conf_rng(&config,mbedtls_ctr_drbg_random,&random);
   if((rc=mbedtls_ssl_setup(&ssl,&config))||(rc=mbedtls_ssl_set_hostname(&ssl,host.c_str()))){fail("TLS initialization failed",rc);return false;}
-  mbedtls_ssl_set_bio(&ssl,nullptr,sendBio,readBio,nullptr);uint32_t began=millis();
+  handshakeReceived=false;
+  mbedtls_ssl_set_bio(&ssl,this,sendBio,readBio,nullptr);uint32_t began=millis();
   while((rc=mbedtls_ssl_handshake(&ssl))!=0){
+   if(handshakeReceived){recovery.received();waitingForTlsReply=false;}
    if(rc!=MBEDTLS_ERR_SSL_WANT_READ&&rc!=MBEDTLS_ERR_SSL_WANT_WRITE){fail("TLS handshake failed",rc);return false;}
-   if(millis()-began>30000){fail("TLS handshake timed out");return false;}vTaskDelay(pdMS_TO_TICKS(1));
+   const uint32_t elapsed=millis()-began;
+   if(!handshakeReceived&&elapsed>=CellularRecovery::firstTlsByteMs){
+    waitingForTlsReply=true;
+    const bool redial=recovery.noTlsResponse(millis());
+    fail("TLS handshake received no reply");
+    if(redial)minicamModemRequestRedial();
+    return false;
+   }
+   if(elapsed>=CellularRecovery::tlsHandshakeMs){fail("TLS handshake timed out");return false;}
+   vTaskDelay(pdMS_TO_TICKS(1));
   }
+  recovery.received();waitingForTlsReply=false;
   if(mbedtls_ssl_get_verify_result(&ssl)){fail("certificate verification failed");return false;}tlsReady=true;minicamTlsStatus(true);
  }
  uint8_t nonce[16];esp_fill_random(nonce,sizeof(nonce));String key=base64(nonce,sizeof(nonce));
