@@ -79,6 +79,48 @@ button { margin: 5px 0; }
 .notice h2 { margin-top: 0; }
 .item { padding: 13px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .item h3 { margin: 0; }
+.connection-title { display: flex; align-items: center; gap: 10px; }
+.connection-mark { width: 20px; height: 20px; flex: none; color: #f0eeeb; }
+.connection-select { display: block; position: relative; min-width: 0; }
+.connection-select > .connection-mark {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.connection-select > select { padding-inline-start: 42px; }
+label .connection-select { margin-top: 5px; }
+label .connection-select > select { margin-top: 0; }
+.channel .connection-select { margin-bottom: 10px; }
+.channel .connection-select > select { margin-bottom: 0; }
+.connection-check-guide { margin: 12px 0 20px; color: var(--muted); }
+.connection-check-guide li { margin-bottom: 6px; }
+.connection-check-guide strong { display: block; color: #f0eeeb; }
+
+@supports (appearance: base-select) and selector(::picker(select)) {
+  .connection-select > select,
+  .connection-select > select::picker(select) { appearance: base-select; }
+  .connection-select > select { display: flex; align-items: center; gap: 8px; }
+  .connection-select > select::picker-icon { margin-inline-start: auto; }
+  .connection-select > select::picker(select) {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: #f0eeeb;
+    max-height: min(440px, 60vh);
+  }
+  .connection-select option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    min-height: 38px;
+    overflow-wrap: anywhere;
+  }
+  .connection-select option:is(:focus, :hover, :checked) { background: var(--surface-raised); }
+  .connection-select option:disabled { opacity: .5; }
+  .connection-select option::checkmark { order: 1; margin-inline-start: auto; }
+}
 .item p { margin: 6px 0; }
 .item button + button { margin-inline-start: 8px; }
 pre { max-height: 480px; overflow: auto; }

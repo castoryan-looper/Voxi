@@ -65,6 +65,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     const path=new URL(req.url,'http://gateway').pathname;
     const assets={'/shared/voice-preview.js':['voice-preview.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
     assets['/shared/web-memory.js']=['web-memory-ui.mjs','text/javascript; charset=utf-8'];
+    assets['/shared/connection-marks.svg']=['connection-marks.svg','image/svg+xml'];
     assets['/shared/theme.css']=['theme.css','text/css; charset=utf-8'];
     assets['/shared/login-page.js']=['login-page.mjs','text/javascript; charset=utf-8'];
     assets['/shared/radio-schematic.svg']=['radio-schematic.svg','image/svg+xml'];
