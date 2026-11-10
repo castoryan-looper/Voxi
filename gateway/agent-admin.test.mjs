@@ -69,7 +69,7 @@ test('background task notice bypasses queued PCM without interrupting audio stat
  await new Promise(r=>backend.listen(0,'127.0.0.1',r));
  let upstream;
  upstreams.on('connection',socket=>{upstream=socket;socket.send(JSON.stringify({type:'ready',channel:0,name:'快问',channelMode:'fast',agentTasks:true}));});
- const {server,wss}=createGateway({mode:'pocket',token:'device',pocketToken:'internal',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
+ const {server,wss}=createGateway({mode:'pocket',requireDeviceEnrollment:false,token:'device',pocketToken:'internal',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const device=new WebSocket(`ws://127.0.0.1:${server.address().port}/radio`,{headers:{Authorization:'Bearer device','X-Voxi-Audio-Format':'opus-24000-v1'}});
  t.after(()=>{device.terminate();for(const c of wss.clients)c.terminate();for(const c of upstreams.clients)c.terminate();wss.close();upstreams.close();server.close();backend.close();});

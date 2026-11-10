@@ -74,10 +74,14 @@
 </div></div>
 <details class="settings-panel" id="deleteUserPanel"><summary>删除用户</summary>
 <p class="muted" id="deleteUserHelp"></p>
-<form id="deleteUserForm"><label class="field">输入上方显示的完整用户 ID 确认<input id="deleteUserId" required minlength="32" maxlength="32" pattern="[a-f0-9]{32}" autocomplete="off" spellcheck="false"></label>
+<form id="deleteUserForm"><div id="retireUserDevices"></div><label class="field">输入上方显示的完整用户 ID 确认<input id="deleteUserId" required minlength="32" maxlength="32" pattern="[a-f0-9]{32}" autocomplete="off" spellcheck="false"></label>
 <button type="submit" id="deleteUser" class="danger" disabled>确认删除此用户</button></form></details>
 </div>
 <div id="userDevicesPanel" hidden><h3>绑定设备</h3><div class="scroll"><table><thead><tr><th>设备名称</th><th>唯一 ID</th><th>状态</th><th>操作</th></tr></thead><tbody id="userDevices"></tbody></table></div>
+<details class="settings-panel" id="registerDevicePanel"><summary>登记设备或重置设备令牌</summary><p class="muted" id="registerDeviceHelp"></p>
+<form id="registerDeviceForm"><label class="field">设备唯一 ID<input id="registerDeviceId" required maxlength="18" pattern="esp32-[a-f0-9]{12}" placeholder="esp32-xxxxxxxxxxxx" autocomplete="off" spellcheck="false"></label>
+<label class="field">设备名称（选填）<input id="registerDeviceName" maxlength="80"></label><button id="registerDevice">登记并生成设备令牌</button></form>
+<label class="field" id="registeredDeviceTokenField" hidden>设备令牌（仅本次显示，填入 USB 设备设置）<input id="registeredDeviceToken" readonly autocomplete="off" spellcheck="false"></label></details>
 <details class="settings-panel"><summary>将已有设备绑定到此用户</summary><p class="muted">变更会断开该设备的当前对话。原用户的记忆和任务仍归原用户。</p><div class="row"><select id="memoryDevice" aria-label="选择要绑定的设备"></select><button type="button" id="rebindDevice" class="secondary">确认绑定</button></div></details></div>
 <div id="memoryPanel" hidden><h3>网页任务记忆</h3><div id="webTaskMemory"></div>
 <h3>设备端长期记忆</h3><p class="muted">自动记录来自明确表达的喜好。可编辑或删除，变更后设备重新连接以加载更新。</p>

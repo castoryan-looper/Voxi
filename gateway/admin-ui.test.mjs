@@ -134,6 +134,26 @@ test('user deletion requires opening the panel and typing the exact profile ID',
  assert.equal(context.location.pathname,'/admin/users');
 });
 
+test('deleting a user with devices requires explicit selection of every retired device',async()=>{
+ const {context,get}=page(),uid='a'.repeat(32),requests=[];
+ const devices=[{id:'esp32-111111111111'},{id:'esp32-222222222222'}];
+ const detail={profile:{id:uid,name:'测试用户',profile:'',enabled:1},devices};
+ context.location.pathname='/admin/users/'+uid+'/profile';
+ vm.runInContext("token='session'",context);
+ context.fetch=async(path,options)=>{
+  if(options.body)requests.push(JSON.parse(options.body));
+  return {ok:true,json:async()=>path.endsWith('/profile')?detail:path.endsWith('/devices')?{devices:[]}:{profiles:[],accounts:[],directoryAvailable:true}};
+ };
+ await vm.runInContext('loadUserDetail()',context);
+ get('deleteUserPanel').open=true;get('deleteUserId').value=uid;get('deleteUserId').oninput();
+ const [first,second]=get('retireUserDevices').children.map(label=>label.children[0]);
+ const submit=()=>get('deleteUserForm').onsubmit({preventDefault(){}});
+ first.checked=true;first.onchange();await submit();
+ assert.equal(get('deleteUser').disabled,true);assert.deepEqual(requests,[]);
+ second.checked=true;second.onchange();await submit();
+ assert.deepEqual(requests,[{action:'delete',userId:uid,confirmUserId:uid,retireDeviceIds:devices.map(d=>d.id)}]);
+});
+
  test('legacy device link resolves its owner and loads the unified memory tab',async()=>{
  const {context,get}=page(),uid='b'.repeat(32),deviceId='esp32-222222222222';
  const data={profile:{id:uid,name:'乙',profile:'',enabled:1},devices:[{id:deviceId}],memories:[],turns:[]};

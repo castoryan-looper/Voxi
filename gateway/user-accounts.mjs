@@ -1,4 +1,4 @@
-import {randomBytes,timingSafeEqual} from 'node:crypto';
+import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {passwordHash,verifyPassword} from './admin-auth.mjs';
 const encoded=/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/;
@@ -6,7 +6,7 @@ const usernameValid=value=>typeof value==='string'&&/^[A-Za-z0-9_.@-]{3,64}$/.te
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 const dummy='scrypt:'+'0'.repeat(32)+':'+'0'.repeat(128);
 
-export function createUserAccounts({file,administrator,agent,portal,memory,webMemory,voicePreview,secure=true}={}){
+export function createUserAccounts({file,administrator,agent,portal,memory,webMemory,voicePreview,disconnectUser,secure=true}={}){
  let accounts=[];const sessions=new Map();let editing=false,checking=false,failures=0,windowAt=0;
  if(file){try{const data=JSON.parse(readFileSync(file,'utf8'));if(data.version!==1||!Array.isArray(data.accounts))throw Error('Invalid user accounts file');accounts=data.accounts;}catch(e){if(e.code!=='ENOENT')throw e;}}
  const ids=new Set(),names=new Set(),owners=new Set();
@@ -17,12 +17,13 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
  function session(req){const id=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('voxi_user='))?.slice(10),s=sessions.get(id);if(!s)return null;const account=accounts.find(a=>a.id===s.accountId&&a.enabled);if(s.until<=Date.now()||!account){sessions.delete(id);return null;}return {id,...s,account};}
  const cookie=(id,age)=>`voxi_user=${id}; Path=/api/user/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
  const ready=()=>{if(!agent||!portal)throw Error('用户服务需要 Pocket Cloud 模式');};
+ const enabled=userId=>accounts.some(a=>a.userId===userId&&a.enabled);
 
- async function deleteUser({userId,confirmUserId}){
+ async function deleteUser({userId,confirmUserId,retireDeviceIds}){
   if(typeof userId!=='string'||!/^[a-f0-9]{32}$/.test(userId)||confirmUserId!==userId)throw Error('请输入完整用户 ID 确认删除');
   if(!memory)throw Error('用户删除需要 Pocket Cloud 模式');
   const request=async action=>{
-   const result=await memory({action,userId,confirmUserId});
+   const result=await memory({action,userId,confirmUserId,retireDeviceIds});
    if(result.ok!==true||result.userId!==userId)throw Error('Pocket Cloud 未确认此用户的删除操作');
   };
   await request('check_delete_user');
@@ -32,6 +33,7 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
    // cannot leave a deleted profile's account enabled.
    if(account.enabled)save(accounts.map(a=>a.id===account.id?{...a,enabled:false}:a));
    revoke(account.id);
+   disconnectUser?.(userId);
   }
   try{await request('delete_user');}
   catch(e){throw Error((account?'网页登录已停用。':'')+'尚未确认用户删除，可重试：'+e.message);}
@@ -59,12 +61,22 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
     save([...accounts,next]);
    }else if(action==='delete'){
     await deleteUser(body);
+   }else if(action==='register_device'){
+    if(!enabled(body.userId))throw Error('请先为此用户开通并启用网页登录账户');
+    if(typeof body.deviceId!=='string'||!/^esp32-[a-f0-9]{12}$/.test(body.deviceId))throw Error('设备 ID 无效');
+    if(!memory)throw Error('设备登记需要 Pocket Cloud 模式');
+    const deviceToken=randomBytes(32).toString('base64url');
+    const keyHash=createHash('sha256').update(deviceToken).digest('hex');
+    const result=await memory({action,userId:body.userId,deviceId:body.deviceId,name:body.name,keyHash});
+    if(result.ok!==true||result.deviceId!==body.deviceId)throw Error('Pocket Cloud 未确认设备登记');
+    return {deviceId:result.deviceId,deviceToken};
    }else{
     const a=accounts.find(a=>a.id===body.accountId);if(!a)throw Error('账户不存在');
     if(action==='enabled'){
      if(typeof body.enabled!=='boolean')throw Error('账户状态无效');
      if(body.enabled&&memory)await detail(a.userId,'profile');
      save(accounts.map(x=>x.id===a.id?{...x,enabled:body.enabled}:x));
+     if(!body.enabled)disconnectUser?.(a.userId);
     }
     else if(action==='password'){if(typeof body.password!=='string'||body.password.length<8||body.password.length>128)throw Error('新密码需要8–128字符');const hash=await passwordHash(body.password);save(accounts.map(x=>x.id===a.id?{...x,passwordHash:hash}:x));}
     else throw Error('账户操作无效');
@@ -137,6 +149,6 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   }
   return json(404,{error:'接口不存在'});
  }
- return {admin,detail,handle,accountCount:()=>accounts.length,
+ return {admin,detail,handle,enabled,accountCount:()=>accounts.length,
   enabledProfiles:()=>accounts.filter(account=>account.enabled).map(account=>account.userId)};
 }
