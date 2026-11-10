@@ -33,7 +33,7 @@ docker exec voxi-gateway-1 printenv ADMIN_INITIAL_PASSWORD
 
 账户密码使用带随机盐的scrypt哈希验证。修改后的哈希保存在网关持久卷 `/state/admin.json.account`，部署和重启保留，且优先于环境变量的初始哈希。修改密码后 `ADMIN_INITIAL_PASSWORD` 不再有效，只供首次登录；初始密码位于服务器root可读的 `/etc/voxi/gateway.env`。当前账户用户名可用 `ADMIN_USERNAME` 初始化，页面提供改密码，不提供多管理员管理。
 
-浏览器使用HttpOnly、Secure、SameSite=Strict Cookie，会话最长8小时。刷新页面可恢复会话；退出立即失效，修改密码使全部管理会话失效，网关重启后需重新登录。写操作校验CSRF令牌与请求来源。登录每分钟最多8次失败尝试。账户配置存在时旧ADMIN_TOKEN及设备令牌均无法登录管理接口，现有设备配置不受影响。
+登录使用标准表单，浏览器可按自身设置保存或自动填充凭据。会话使用 HttpOnly、Secure、SameSite=Strict Cookie，最长 8 小时。启用网关持久存储时，刷新和网关重启都可以恢复未过期的会话。退出立即失效，修改密码使该账户的全部会话失效。写操作校验 CSRF 令牌与请求来源。登录每分钟最多 8 次失败尝试。账户配置存在时旧 ADMIN_TOKEN 及设备令牌均无法登录管理接口。
 
 忘记修改后的密码时，可在服务器上先备份 `/state/admin.json.account`，再通过服务器维护流程重置账户；不要删除整个持久卷（其中还有设备数量配置）。
 

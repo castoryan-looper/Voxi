@@ -1,21 +1,27 @@
 import {createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {readFileSync,writeFileSync,renameSync} from 'node:fs';
 import {passwordHash,verifyPassword} from './admin-auth.mjs';
+import {createWebSessions,SESSION_SECONDS} from './web-sessions.mjs';
+import {handleLoginForm,isLoginForm} from './login-form.mjs';
 const encoded=/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/;
 const usernameValid=value=>typeof value==='string'&&/^[A-Za-z0-9_.@-]{3,64}$/.test(value);
 const equal=(a,b)=>{const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);};
 const dummy='scrypt:'+'0'.repeat(32)+':'+'0'.repeat(128);
 
 export function createUserAccounts({file,administrator,agent,portal,memory,webMemory,voicePreview,disconnectUser,secure=true}={}){
- let accounts=[];const sessions=new Map();let editing=false,checking=false,failures=0,windowAt=0;
+ let accounts=[];let editing=false,checking=false,failures=0,windowAt=0;
  if(file){try{const data=JSON.parse(readFileSync(file,'utf8'));if(data.version!==1||!Array.isArray(data.accounts))throw Error('Invalid user accounts file');accounts=data.accounts;}catch(e){if(e.code!=='ENOENT')throw e;}}
  const ids=new Set(),names=new Set(),owners=new Set();
  for(const a of accounts){if(!/^[a-f0-9]{32}$/.test(a.id)||!usernameValid(a.username)||!encoded.test(a.passwordHash)||!/^([a-f0-9]{32})$/.test(a.userId)||a.role!=='user'||typeof a.enabled!=='boolean'||ids.has(a.id)||names.has(a.username.toLowerCase())||owners.has(a.userId))throw Error('Invalid user account record');ids.add(a.id);names.add(a.username.toLowerCase());owners.add(a.userId);}
+ const sessions=createWebSessions({file:file&&file+'.sessions.sqlite',capacity:128,name:'voxi_user',path:'/api/user/',secure});
  function save(next){if(!file)throw Error('尚未启用普通账户持久存储');writeFileSync(file+'.tmp',JSON.stringify({version:1,accounts:next})+'\n',{mode:0o600});renameSync(file+'.tmp',file);accounts=next;}
  const publicAccount=a=>({id:a.id,username:a.username,userId:a.userId,role:'user',enabled:a.enabled});
- function revoke(id){for(const [key,s] of sessions)if(s.accountId===id)sessions.delete(key);}
- function session(req){const id=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('voxi_user='))?.slice(10),s=sessions.get(id);if(!s)return null;const account=accounts.find(a=>a.id===s.accountId&&a.enabled);if(s.until<=Date.now()||!account){sessions.delete(id);return null;}return {id,...s,account};}
- const cookie=(id,age)=>`voxi_user=${id}; Path=/api/user/; HttpOnly; SameSite=Strict; Max-Age=${age}${secure?'; Secure':''}`;
+ function session(req){
+   const value=sessions.get(req);
+   if(!value)return null;
+   const account=accounts.find(a=>a.id===value.owner&&a.enabled);
+   return account&&sessions.matches(value,account.passwordHash)?{...value,account}:null;
+ }
  const ready=()=>{if(!agent||!portal)throw Error('用户服务需要 Pocket Cloud 模式');};
  const enabled=userId=>accounts.some(a=>a.userId===userId&&a.enabled);
 
@@ -31,8 +37,8 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   if(account){
    // Persist the access revocation first so a timeout or process restart
    // cannot leave a deleted profile's account enabled.
+   sessions.revoke(account.id);
    if(account.enabled)save(accounts.map(a=>a.id===account.id?{...a,enabled:false}:a));
-   revoke(account.id);
    disconnectUser?.(userId);
   }
   try{await request('delete_user');}
@@ -75,12 +81,12 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
     if(action==='enabled'){
      if(typeof body.enabled!=='boolean')throw Error('账户状态无效');
      if(body.enabled&&memory)await detail(a.userId,'profile');
+     sessions.revoke(a.id);
      save(accounts.map(x=>x.id===a.id?{...x,enabled:body.enabled}:x));
      if(!body.enabled)disconnectUser?.(a.userId);
     }
-    else if(action==='password'){if(typeof body.password!=='string'||body.password.length<8||body.password.length>128)throw Error('新密码需要8–128字符');const hash=await passwordHash(body.password);save(accounts.map(x=>x.id===a.id?{...x,passwordHash:hash}:x));}
+    else if(action==='password'){if(typeof body.password!=='string'||body.password.length<8||body.password.length>128)throw Error('新密码需要8–128字符');const hash=await passwordHash(body.password);sessions.revoke(a.id);save(accounts.map(x=>x.id===a.id?{...x,passwordHash:hash}:x));}
     else throw Error('账户操作无效');
-    revoke(a.id);
    }
   }finally{editing=false;}}
   let profiles=[],directoryAvailable=true;
@@ -97,25 +103,31 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   return {...profile,account:account?publicAccount(account):null};
  }
 
+ async function login(res,respond,body){
+  const now=Date.now();if(now-windowAt>60000){failures=0;windowAt=now;}if(failures>=8||checking)return respond(429,{error:'登录尝试过多，请稍后重试'});
+  if(!usernameValid(body.username)||typeof body.password!=='string'||body.password.length>256)return respond(400,{error:'用户名或密码无效'});
+  failures++;checking=true;let valid=false,a=accounts.find(a=>a.username.toLowerCase()===body.username.toLowerCase());
+  try{valid=await verifyPassword(body.password,a?.passwordHash||dummy);}finally{checking=false;}
+  const latest=accounts.find(x=>x.id===a?.id);
+  if(!valid||!latest?.enabled||latest.passwordHash!==a?.passwordHash)return respond(401,{error:'用户名、密码不正确，或账户已停用'});
+  failures=0;
+  let id,csrf;
+  try{({id,csrf}=sessions.start(a.id,a.passwordHash));}
+  catch{return respond(503,{error:'登录会话无法保存，请稍后重试'});}
+  res.setHeader('Set-Cookie',sessions.cookie(id,SESSION_SECONDS));return respond(200,{username:a.username,role:'user',csrf});
+ }
+
  async function handle(req,res){
   const json=(status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
   if(req.headers.origin){try{if(new URL(req.headers.origin).host!==req.headers.host)return json(403,{error:'来源不允许'});}catch{return json(403,{error:'来源不允许'});}}
+  const path=req.url;
+  if(isLoginForm(req,'/api/user/login'))return handleLoginForm(req,res,json,'app',(form,respond)=>login(res,respond,form));
   let body;
   if(req.method==='POST'){
    if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
    const chunks=[];let bytes=0;try{for await(const part of req){bytes+=part.length;if(bytes>131072)return json(413,{error:'请求过大'});chunks.push(part);}body=JSON.parse(Buffer.concat(chunks).toString('utf8'));if(!body||typeof body!=='object'||Array.isArray(body))throw Error();}catch{return json(400,{error:'JSON 无效'});}
   }
-  const path=req.url;
-  if(path==='/api/user/login'&&req.method==='POST'){
-   const now=Date.now();if(now-windowAt>60000){failures=0;windowAt=now;}if(failures>=8||checking)return json(429,{error:'登录尝试过多，请稍后重试'});
-   if(!usernameValid(body.username)||typeof body.password!=='string'||body.password.length>256)return json(400,{error:'用户名或密码无效'});
-   failures++;checking=true;let valid=false,a=accounts.find(a=>a.username.toLowerCase()===body.username.toLowerCase());
-   try{valid=await verifyPassword(body.password,a?.passwordHash||dummy);}finally{checking=false;}
-   const latest=accounts.find(x=>x.id===a?.id);
-   if(!valid||!latest?.enabled||latest.passwordHash!==a?.passwordHash)return json(401,{error:'用户名、密码不正确，或账户已停用'});
-   failures=0;for(const [id,s] of sessions)if(s.until<=now)sessions.delete(id);if(sessions.size>=128)sessions.delete(sessions.keys().next().value);
-   const id=randomBytes(32).toString('hex'),csrf=randomBytes(32).toString('hex');sessions.set(id,{accountId:a.id,csrf,until:now+8*3600000});res.setHeader('Set-Cookie',cookie(id,28800));return json(200,{username:a.username,role:'user',csrf});
-  }
+  if(path==='/api/user/login'&&req.method==='POST')return login(res,json,body);
   const current=session(req);
   if(!current||(req.method!=='GET'&&!equal(req.headers['x-csrf-token'],current.csrf)))return json(401,{error:'请登录普通用户账户'});
   if(path==='/api/user/session'&&req.method==='GET')return json(200,{username:current.account.username,role:'user',csrf:current.csrf});
@@ -124,11 +136,11 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
    if(body&&('userId' in body||'actorUserId' in body))return json(403,{error:'不能指定其他身份'});
    try{return json(200,webMemory.manage(current.account.userId,body));}catch(e){return json(400,{error:e.message});}
   }
-  if(path==='/api/user/logout'&&req.method==='POST'){sessions.delete(current.id);res.setHeader('Set-Cookie',cookie('',0));return json(200,{ok:true});}
+  if(path==='/api/user/logout'&&req.method==='POST'){sessions.remove(current.key);res.setHeader('Set-Cookie',sessions.cookie('',0));return json(200,{ok:true});}
   if(path==='/api/user/password'&&req.method==='POST'){
    if(checking||editing)return json(429,{error:'请稍后重试'});
    if(typeof body.currentPassword!=='string'||body.currentPassword.length>256||typeof body.newPassword!=='string'||body.newPassword.length<8||body.newPassword.length>128)return json(400,{error:'新密码需要8–128字符'});
-   checking=editing=true;try{if(!await verifyPassword(body.currentPassword,current.account.passwordHash))return json(401,{error:'当前密码不正确'});const hash=await passwordHash(body.newPassword);save(accounts.map(a=>a.id===current.account.id?{...a,passwordHash:hash}:a));revoke(current.account.id);res.setHeader('Set-Cookie',cookie('',0));return json(200,{ok:true});}catch{return json(500,{error:'密码保存失败'});}finally{checking=editing=false;}
+   checking=editing=true;try{if(!await verifyPassword(body.currentPassword,current.account.passwordHash))return json(401,{error:'当前密码不正确'});const hash=await passwordHash(body.newPassword);sessions.revoke(current.account.id);save(accounts.map(a=>a.id===current.account.id?{...a,passwordHash:hash}:a));res.setHeader('Set-Cookie',sessions.cookie('',0));return json(200,{ok:true});}catch{return json(500,{error:'密码保存失败'});}finally{checking=editing=false;}
   }
   if(path==='/api/user/voice-preview'&&req.method==='POST'){
    if(!voicePreview)return json(409,{error:'试听服务尚未启用，请联系管理员更新'});
@@ -140,7 +152,7 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
    try{ready();const action=body||{action:'snapshot'};if('actorUserId' in action||'userId' in action||'role' in action)return json(403,{error:'不能指定其他身份'});
     const userId=current.account.userId,packet={...action,actorUserId:userId};
     const send=body=>{
-      if(session(req)?.id!==current.id)throw Error('账户会话已失效');
+      if(session(req)?.key!==current.key)throw Error('账户会话已失效');
       return portal(body);
     };
     const data=webMemory?await webMemory.forward(send,packet,userId):await send(packet);
@@ -149,6 +161,6 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
   }
   return json(404,{error:'接口不存在'});
  }
- return {admin,detail,handle,enabled,accountCount:()=>accounts.length,
+ return {admin,detail,handle,enabled,close:sessions.close,accountCount:()=>accounts.length,
   enabledProfiles:()=>accounts.filter(account=>account.enabled).map(account=>account.userId)};
 }
