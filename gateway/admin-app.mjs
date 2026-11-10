@@ -74,7 +74,7 @@ async function refresh(){
 }
 $('loginForm').onsubmit=async e=>{e.preventDefault();$('loginButton').disabled=true;try{const data=await api('login',{username:$('username').value.trim(),password:$('secret').value});token=data.csrf;$('secret').value='';await refresh();}catch(e){$('message').textContent=e.message;}finally{$('loginButton').disabled=false;}};
 $('refreshOverview').onclick=()=>{void refresh();return refreshOverview(true);};
-function showLogin(){adminVoicePlayer?.stop(null);voiceDescriptionDirty=false;userAccountsDirty=false;$('newUserPassword').value='';$('userAccounts').replaceChildren();agentGeneration++;agentData=null;agentDirty=false;agentDetail=null;$('credentialKey').value='';$('openclawToken').value='';$('openclawPairToken').value='';$('openclawPairing').hidden=true;channelDirty=false;serviceDirty=false;connectionDirty=false;$('agentTaskDetail').hidden=true;$('agentTasks').replaceChildren();$('agentDetailResult').textContent='';currentRoute='';$('navigation').hidden=true;$('breadcrumb').hidden=true;userDirectory=null;resetUserDetail();deviceRegistryData=[];lastConnections=[];token='';discardEdits();$('aiForm').hidden=true;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('message').textContent='';}
+function showLogin(){adminVoicePlayer?.stop(null);voiceDescriptionDirty=false;userAccountsDirty=false;$('newUserPassword').value='';$('userAccounts').replaceChildren();agentGeneration++;agentData=null;agentDirty=false;agentDetail=null;$('credentialKey').value='';$('agentTaskDetail').hidden=true;$('agentTasks').replaceChildren();$('agentDetailResult').textContent='';currentRoute='';$('navigation').hidden=true;$('breadcrumb').hidden=true;userDirectory=null;resetUserDetail();deviceRegistryData=[];lastConnections=[];token='';discardEdits();$('aiForm').hidden=true;$('dashboard').hidden=true;$('login').hidden=false;$('logout').hidden=true;$('message').textContent='';}
 $('refresh').onclick=refresh;$('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){$('message').textContent=e.message;}};setInterval(refresh,5000);
 $('passwordForm').onsubmit=async e=>{e.preventDefault();$('changePassword').disabled=true;try{await api('password',{currentPassword:$('currentPassword').value,newPassword:$('newPassword').value});$('currentPassword').value='';$('newPassword').value='';showLogin();$('message').textContent='密码已修改，请重新登录。';}catch(e){$('message').textContent=e.message;}finally{$('changePassword').disabled=false;}};
 async function restoreSession(){try{const data=await api('session');token=data.csrf;await refresh();}catch{showLogin();}}
@@ -399,8 +399,7 @@ $('bindUserAccount').onsubmit=async event=>{
 const pages=[
  {key:'overview',path:'/admin/overview',title:'运营总览',sections:['overviewSection']},
  {key:'users',path:'/admin/users',title:'用户账户',sections:['usersSection']},
- {key:'agent',path:'/admin/agent',title:'频道与助手',sections:['agentSection']},
- {key:'agentConnections',path:'/admin/connections',title:'模型与 Agent 接入',sections:['agentConnectionsSection']},
+ {key:'agent',path:'/admin/agent',title:'助手设置',sections:['agentSection']},
  {key:'agentCredentials',path:'/admin/agent/credentials',title:'模型密钥',sections:['agentCredentialsSection']},
  {key:'devices',path:'/admin/devices',title:'设备管理',sections:['devicesSection']},
  {key:'voice',path:'/admin/ai/voice',title:'语音与试听',sections:['aiSection']},
@@ -422,14 +421,14 @@ function currentPage(){
 function dirty(){return voiceDescriptionDirty||voiceDirty||voiceRuntimeDirty||fastStyleDirty||memoryDirty||agentDirty||userAccountsDirty;}
 function discardEdits(){
  voiceDescriptionDirty=voiceDirty=voiceRuntimeDirty=fastStyleDirty=memoryDirty=userAccountsDirty=false;
- channelDirty=serviceDirty=behaviorDirty=false;resetConnectionEditors();updateAgentDirty();
+ serviceDirty=behaviorDirty=false;updateAgentDirty();
 }
 function navigate(path){
  if(path===location.pathname)return true;
  if(dirty()&&!confirm('有未保存的修改，离开后将丢弃。继续吗？'))return false;
  discardEdits();history.pushState({},'',path);renderPage(true);return true;
 }
-function renderPage(force=false){if(!token)return;const page=currentPage();if(!force&&currentRoute===page.path)return;currentRoute=page.path;routeGeneration++;adminVoiceRequest++;adminVoicePlayer?.stop(null);for(const id of ['overviewSection','devicesSection','aiSection','legacyUserLink','userDetailSection','eventsSection','accountSection','agentSection','agentTasksSection','agentCredentialsSection','agentConnectionsSection'])$(id).hidden=!page.sections.includes(id);$('pageTitle').textContent=page.title;document.title=page.title+' · Voxi 管理后台';$('breadcrumb').textContent=page.userId?'用户账户 / '+userTabs[page.userTab]:'控制台 / '+page.title;for(const p of pages){const link=document.querySelector('[data-nav="'+p.key+'"]');if(link){if(p.key===page.key||(page.userId&&p.key==='users'))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}}
+function renderPage(force=false){if(!token)return;const page=currentPage();if(!force&&currentRoute===page.path)return;currentRoute=page.path;routeGeneration++;adminVoiceRequest++;adminVoicePlayer?.stop(null);for(const id of ['overviewSection','devicesSection','aiSection','legacyUserLink','userDetailSection','eventsSection','accountSection','agentSection','agentTasksSection','agentCredentialsSection'])$(id).hidden=!page.sections.includes(id);$('pageTitle').textContent=page.title;document.title=page.title+' · Voxi 管理后台';$('breadcrumb').textContent=page.userId?'用户账户 / '+userTabs[page.userTab]:'控制台 / '+page.title;for(const p of pages){const link=document.querySelector('[data-nav="'+p.key+'"]');if(link){if(p.key===page.key||(page.userId&&p.key==='users'))link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}}
  if(page.key==='voice'){$('aiForm').hidden=$('voiceRuntimeForm').hidden=true;loadAi();}
  if(page.key==='overview'){fillOverview(null);$('overviewUpdated').textContent='';overviewReadAt=0;void refreshOverview();}
  if(page.key==='devices'){renderDevices();void refresh();}
@@ -457,88 +456,14 @@ restoreSession();
 let agentData=null,agentDirty=false,agentReadDone=null,agentGeneration=0,agentDetail=null,agentSubmitId=null,agentTaskRead=0;
 const agentStates={queued:'已保存 · 等待执行',submitting:'正在提交',running:'执行中',needs_input:'需要补充信息',awaiting_approval:'等待确认',cancelling:'正在停止',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断',delivery_unknown:'结果未确认'};
 function option(value,text){const o=document.createElement('option');o.value=value;o.textContent=text;return o;}
-function agentChannelsEdited(){channelDirty=true;updateAgentDirty();channelControls();}
-function fillAgentChannels(channels){
- const editor=$('agentChannels'),uid=$('agentChannelUser').value,limit=agentData.channelLimit;
- editor.replaceChildren();
- channels.forEach((channel,index)=>{
-  const slot=channel.slot??index;
-  const box=document.createElement('div'),name=document.createElement('input'),mode=document.createElement('select');
-  const title=document.createElement('strong'),nameLabel=document.createElement('label'),modeLabel=document.createElement('label');
-  box.className='channel-card';box.dataset.slot=slot;title.textContent='CH'+slot;
-  name.id='agentChannelsName'+slot;name.value=channel.name;name.maxLength=32;name.required=true;
-  nameLabel.className='field';nameLabel.htmlFor=name.id;nameLabel.textContent='频道名称';
-  mode.id='agentChannelsMode'+slot;modeLabel.className='field';modeLabel.htmlFor=mode.id;modeLabel.textContent='选择助手';
-  for(const [value,text] of [['fast','快问 · 即问即答'],['agent','Voxi Agent · 后台执行'],['disabled','停用']])mode.append(option(value,text));
-  const target=channel.connectionId?channel.mode+':'+channel.connectionId:channel.mode;
-  if(uid){
-   for(const conn of agentData.connections)if(conn.user_id===uid&&(conn.status==='ready'||target==='openclaw:'+conn.id))
-    mode.append(option('openclaw:'+conn.id,conn.name+' · OpenClaw'));
-   for(const conn of agentData.modelConnections||[])if(conn.user_id===uid)
-    mode.append(option('model:'+conn.id,conn.name+' · '+conn.model));
-  }
-  if(![...mode.children].some(o=>o.value===target))mode.append(option(target,'连接已失效，请重新选择'));
-  mode.value=target;box.append(title,nameLabel,name,modeLabel,mode);
-  if(agentData.channelVoices){
-   const voice=document.createElement('select'),label=document.createElement('label');
-   voice.id='agentChannelsVoice'+slot;label.htmlFor=voice.id;label.textContent='播报音色';label.className='field';
-   voice.append(option('','跟随个人／系统音色'));
-   for(const id of agentData.channelVoices)voice.append(option(id,id));
-   voice.value=channel.voice||'';box.append(label,voice);
-  }
-  if(limit){
-   const remove=document.createElement('button');
-   remove.type='button';remove.className='danger';remove.textContent='移除 CH'+slot;
-   remove.onclick=()=>{fillAgentChannels(readAgentChannels().filter(row=>row.slot!==slot));agentChannelsEdited();};
-   box.append(remove);
-  }
-  editor.append(box);
- });
- if(!channels.length)editor.textContent='还没有频道。';
- $('addAgentChannel').hidden=!limit;$('addAgentChannel').disabled=channels.length>=limit;
-}
-function readAgentChannels(){
- return [...$('agentChannels').children].map((card,index)=>{
-  const slot=Number(card.dataset.slot??index);
-  const [mode,connectionId]=$('agentChannelsMode'+slot).value.split(':');
-  const voice=agentData.channelVoices&&$('agentChannelsVoice'+slot).value;
-  return {...(agentData.channelLimit?{slot}:{}),name:$('agentChannelsName'+slot).value.trim(),mode,...(connectionId?{connectionId}:{}),...(voice?{voice}:{})};
- });
-}
-$('addAgentChannel').onclick=()=>{
- const channels=readAgentChannels(),occupied=new Set(channels.map(row=>row.slot));
- const slot=Array.from({length:agentData.channelLimit},(_,i)=>i).find(i=>!occupied.has(i));
- if(slot===undefined)return;
- fillAgentChannels([...channels,{slot,name:'频道 '+slot,mode:'disabled'}].sort((a,b)=>a.slot-b.slot));
- agentChannelsEdited();$('agentChannelsName'+slot).focus();
-};
 function userChoiceLabels(profiles,devices){
  const names=profiles.map(profile=>[profile.id,profileDisplayName(profile,devices.get(profile.id))]);
  const counts=new Map();
  for(const [,name] of names)counts.set(name,(counts.get(name)||0)+1);
  return names.map(([id,name])=>[id,counts.get(name)>1?name+' · 用户 ID '+id:name]);
 }
-function fillAgentUsers(id){
- const select=$(id),selected=select.value;select.replaceChildren();
- if(id==='agentChannelUser')select.append(option('','默认频道（未自定义的用户）'));
- if(id==='agentConnectionUser')select.append(option('','请选择用户'));
- for(const [id,label] of userChoiceLabels(agentData.users,devicesByOwner(agentData.devices)))select.append(option(id,label));
- select.value=agentData.users.some(user=>user.id===selected)?selected:'';
-}
-let channelDirty=false,serviceDirty=false,behaviorDirty=false,connectionDirty=false,modelConnectionDirty=false,selectedChannelUser='',channelSaving=false;
-function updateAgentDirty(){agentDirty=channelDirty||serviceDirty||behaviorDirty||connectionDirty||modelConnectionDirty;}
-function channelControls(){
- $('agentChannelUser').disabled=channelSaving;$('agentChannelFields').disabled=channelSaving;
- $('saveAgentChannels').disabled=channelSaving||!channelDirty;$('restoreAgentChannels').disabled=channelSaving;
-}
-function renderChannelEditor(){
- const uid=$('agentChannelUser').value,custom=agentData.channelOverrides.includes(uid);
- selectedChannelUser=uid;
- fillAgentChannels(agentData.channelsByUser?.[uid]||agentData.settings.channels);
- $('channelScopeHint').textContent=!uid?'默认频道供未自定义的用户使用。设备会跳过停用的频道。':custom?'此用户使用个人频道，所有绑定设备共用。':'此用户跟随默认频道。修改并保存后，只应用到此用户。';
- $('saveAgentChannels').textContent=uid?'保存此用户的频道':'保存默认频道';
- $('restoreAgentChannels').hidden=!custom;channelControls();
-}
+let serviceDirty=false,behaviorDirty=false;
+function updateAgentDirty(){agentDirty=serviceDirty||behaviorDirty;}
 function agentTaskChannels(){
  const config=userDetailData?.agent,select=$('agentTaskChannel'),selected=select.value;
  select.replaceChildren();
@@ -560,10 +485,8 @@ function renderAgentTasks(tasks){
  if(!tasks.length){const row=document.createElement('tr');cell(row,'此用户暂无后台任务。').colSpan=5;target.append(row);}
 }
 function renderAgentSnapshot(data,refreshEditors){
-  if(!data.settings||!Array.isArray(data.tasks)||!Array.isArray(data.users)||!Array.isArray(data.connections)||!Array.isArray(data.channelOverrides))
-   throw Error('频道配置需要新版 Pocket Cloud。');
+  if(!data.settings||!data.runtime||!data.credentials)throw Error('无法读取全局助手设置。');
   agentData=data;
-  if(currentPage().key==='agentConnections'){renderConnectionEditor(refreshEditors);return;}
   const s=data.settings;
   $('channelServiceStatus').textContent=s.enabled?'频道服务已开启':'频道服务已关闭';
   $('toggleChannelService').textContent=s.enabled?'关闭频道服务':'开启频道服务';
@@ -571,8 +494,7 @@ function renderAgentSnapshot(data,refreshEditors){
   $('agentRuntime').textContent=(data.runtime.ready?'执行器已连接':data.runtime.lastError||'执行器会在首次任务时连接')+'。使用服务器的 Codex 登录。';
   if(refreshEditors){
    $('agentModel').value=s.model;$('agentConcurrency').value=s.maxConcurrent;$('agentTimeout').value=s.maxTaskSeconds;$('agentInstructions').value=s.instructions;
-   fillAgentUsers('agentChannelUser');renderChannelEditor();
-   $('channelEditor').hidden=$('agentSettingsForm').hidden=$('agentBehaviorForm').hidden=false;
+   $('agentSettingsForm').hidden=$('agentBehaviorForm').hidden=false;
   }
   credentialStatus();
 }
@@ -585,7 +507,7 @@ async function loadAgent(poll=false){
   const data=await api('agent');if(generation!==agentGeneration||session!==token||route!==routeGeneration)return;
   renderAgentSnapshot(data,!poll);
  }catch(error){if(session===token&&generation===agentGeneration&&route===routeGeneration){
-  const message={agentCredentials:'credentialMessage',agentConnections:'connectionsMessage'}[currentPage().key]||'agentMessage';
+  const message=currentPage().key==='agentCredentials'?'credentialMessage':'agentMessage';
   $(message).textContent=error.message;
  }}
  finally{agentReadDone=null;finishRead();}
@@ -593,12 +515,11 @@ async function loadAgent(poll=false){
 async function agentMutation(body){const requested=token,result=await api('agent',body);if(requested!==token)throw Error('会话已退出');return result;}
 $('reloadAgent').onclick=()=>{
  if((agentDirty||fastStyleDirty)&&!confirm('重新读取会丢弃尚未保存的修改，继续吗？'))return;
- channelDirty=serviceDirty=behaviorDirty=fastStyleDirty=false;updateAgentDirty();
+ serviceDirty=behaviorDirty=fastStyleDirty=false;updateAgentDirty();
  $('agentMessage').textContent='';loadAgent();loadFastStyle();
 };
 $('agentSettingsForm').oninput=()=>{serviceDirty=true;updateAgentDirty();};
 $('agentBehaviorForm').oninput=()=>{behaviorDirty=true;updateAgentDirty();};
-$('agentChannelsForm').oninput=agentChannelsEdited;
 
 async function submitAgentSettings(button,message,settings,onSaved){
  const session=token,route=routeGeneration;
@@ -625,34 +546,6 @@ $('agentSettingsForm').onsubmit=event=>{
 $('agentBehaviorForm').onsubmit=event=>{
  event.preventDefault();const instructions=$('agentInstructions').value;
  return submitAgentSettings('saveAgentBehavior','agentBehaviorMessage',{instructions},()=>{behaviorDirty=$('agentInstructions').value!==instructions;});
-};
-$('agentChannelUser').onchange=()=>{
- if(channelDirty&&!confirm('切换用户会丢弃尚未保存的频道编辑，继续吗？')){$('agentChannelUser').value=selectedChannelUser;return;}
- channelDirty=false;updateAgentDirty();$('agentMessage').textContent='';
- renderChannelEditor();
-};
-async function saveChannelScope(body,message){
- const session=token,route=routeGeneration;
- channelSaving=true;channelControls();
- try{
-  const data=await agentMutation(body);
-  if(agentReadDone)await agentReadDone;
-  if(token!==session||route!==routeGeneration)return;
-  renderAgentSnapshot(data,false);channelDirty=false;updateAgentDirty();
-  renderChannelEditor();$('agentMessage').textContent=message;
- }catch(error){if(token===session&&route===routeGeneration)$('agentMessage').textContent='保存失败：'+error.message;}
- finally{channelSaving=false;channelControls();}
-}
-$('agentChannelsForm').onsubmit=event=>{
- event.preventDefault();if(!channelDirty||channelSaving)return;
- const userId=$('agentChannelUser').value,channels=readAgentChannels();
- return saveChannelScope(userId?{action:'channels',userId,channels}:{action:'settings_patch',settings:{channels}},
-  userId?'已保存此用户的频道。':'已保存默认频道。');
-};
-$('restoreAgentChannels').onclick=()=>{
- const userId=$('agentChannelUser').value;
- if(userId&&!channelSaving&&confirm('恢复此用户的默认频道？现有个人频道设置会被替换。'))
-  return saveChannelScope({action:'reset_channels',userId},'已恢复默认频道。');
 };
 $('agentSubmitForm').oninput=()=>{agentSubmitId=null;memoryDirty=true;};
 $('agentSubmitForm').onsubmit=async event=>{
@@ -703,137 +596,7 @@ async function openAgentTask(id,user,poll=false){
 $('credentialProvider').onchange=()=>{$('credentialKey').value='';credentialStatus();};
 $('agentCredentialForm').onsubmit=async event=>{event.preventDefault();const key=$('credentialKey').value.trim();if(!key){$('credentialMessage').textContent='请填写新密钥，留空不会修改已有配置。';return;}$('saveCredential').disabled=true;try{await agentMutation({action:'credential',provider:$('credentialProvider').value,key});$('credentialKey').value='';await loadAgent(true);$('credentialMessage').textContent='已加密保存。当前仍使用 Codex 登录，尚未调用或验证该 API。';}catch(error){$('credentialMessage').textContent=error.message;}finally{$('saveCredential').disabled=false;}};
 $('deleteCredential').onclick=async()=>{if(!confirm('清除这个供应商已保存的密钥？'))return;try{await agentMutation({action:'credential',provider:$('credentialProvider').value,key:''});$('credentialKey').value='';await loadAgent(true);$('credentialMessage').textContent='已清除。';}catch(error){$('credentialMessage').textContent=error.message;}};
-setInterval(()=>{if(token&&currentPage().key==='agentTasks')loadAgent(true);},5000);
-
-const openclawStatuses={ready:'接口与认证正常',offline:'连接器离线',unverified:'尚未连接／检测',unreachable:'无法连接，请检查地址、证书与网络',unauthorized:'Gateway Token／密码错误',forbidden:'Gateway 拒绝访问',endpoint_disabled:'Responses 接口未启用或版本不兼容',http_error:'接口返回异常'};
-
-let selectedConnectionUser='',connectionBusy=false;
-function providerOption(provider){
- const group=provider.category==='app'?'应用':provider.category==='aggregator'?'模型聚合':'直连模型';
- return group+' / '+provider.name;
-}
-function modelConnectionFields(fill=false){
- const provider=agentData?.modelProviders?.[$('adminModelProvider').value];
- const app=provider?.category==='app';
- $('adminModelIdField').hidden=Boolean(provider?.fixedModel);
- $('adminModelId').required=!provider?.fixedModel;
- $('adminModelIdLabel').textContent=provider?.modelLabel||'模型 ID';
- $('adminModelWorkspaceLabel').textContent=provider?.workspaceLabel||'百炼北京业务空间 ID';
- $('adminModelKeyLabel').textContent=app?'应用 API Key':'平台 API Key';
- $('adminModelHint').textContent=app
-  ?'使用已发布的 Dify Cloud 应用密钥。验证只检查应用和输入设置。'+(provider.continuation?'已完成的对话可从任务详情继续。':'请配置一个文本输入和文本输出。')
-  :'使用服务商 API 账户。验证会发送一次短文本请求，费用计入该账户。';
- $('adminModelWorkspaceField').hidden=!provider?.workspaceRequired;
- $('adminModelWorkspace').required=Boolean(provider?.workspaceRequired);
- $('adminModelDocs').href=provider?.docs||'#';
- if(fill){
-  $('adminModelName').value=provider?.name||'';
-  $('adminModelId').value=provider?.defaultModel||'';
-  $('adminModelWorkspace').value=provider?.defaultWorkspace||'';
- }
-}
-function resetConnectionEditors(){
- $('openclawForm').reset();openclawTransport();
- $('openclawToken').value=$('openclawPairToken').value='';
- $('openclawPairToken').type='password';$('openclawPairing').hidden=true;
- $('adminModelForm').reset();$('adminModelKey').value='';
- $('adminModelProvider').value=Object.keys(agentData?.modelProviders||{})[0]||'';
- modelConnectionFields(true);
- $('openclawMessage').textContent=$('adminModelMessage').textContent='';
- connectionDirty=modelConnectionDirty=false;updateAgentDirty();
-}
-function renderConnectionEditor(refresh){
- const select=$('agentConnectionUser');
- if(refresh||!agentData.users.some(user=>user.id===select.value)){
-  fillAgentUsers('agentConnectionUser');
-  if(select.value!==selectedConnectionUser)resetConnectionEditors();
- }
- const uid=select.value,providers=agentData.modelProviders||{};
- selectedConnectionUser=uid;
- $('connectionEditor').hidden=!uid;
- $('modelConnectionPanel').hidden=!Object.keys(providers).length;
- if(refresh){
-  const provider=$('adminModelProvider'),previous=provider.value;
-  provider.replaceChildren(...Object.entries(providers).map(([id,p])=>option(id,providerOption(p))));
-  provider.value=Object.hasOwn(providers,previous)?previous:Object.keys(providers)[0]||'';
-  modelConnectionFields(!modelConnectionDirty);
- }
- renderConnections('openclawConnections','openclawMessage','openclaw',
-  (agentData.connections||[]).filter(c=>c.user_id===uid),
-  c=>(c.transport==='relay'?'家中／内网主动连接':'云端 HTTPS')+' · '+(openclawStatuses[c.status]||c.status)+' · Agent '+c.agent);
- renderConnections('adminModelConnections','adminModelMessage','model',
-  (agentData.modelConnections||[]).filter(c=>c.user_id===uid),
-  c=>(providers[c.provider]?.name||c.provider)+' · '+(providers[c.provider]?.fixedModel?'凭据已验证':c.model+' · 已验证'));
-}
-async function connectionAction(button,message,body,onSuccess){
- if(connectionBusy||currentPage().key!=='agentConnections'||!body.userId||$('agentConnectionUser').value!==body.userId)return;
- const session=token,route=routeGeneration;
- const current=()=>session===token&&route===routeGeneration&&$('agentConnectionUser').value===body.userId;
- connectionBusy=true;button.disabled=$('agentConnectionUser').disabled=true;
- $('connectionsMessage').textContent='';$(message).textContent='正在处理…';
- try{
-  const result=await agentMutation(body);
-  if(!current())return;
-  $(message).textContent=onSuccess(result);
-  await loadAgent(true);
- }catch(error){if(current())$(message).textContent=error.message;}
- finally{connectionBusy=false;button.disabled=$('agentConnectionUser').disabled=false;}
-}
-function renderConnections(container,message,kind,connections,describe){
- const list=$(container),uid=$('agentConnectionUser').value;
- list.replaceChildren();list.textContent=connections.length?'':'此用户暂无该类接入。';
- for(const conn of connections){
-  const card=document.createElement('div'),title=document.createElement('h4'),description=document.createElement('p');
-  const test=document.createElement('button'),remove=document.createElement('button');
-  card.className='card';title.textContent=conn.name;description.textContent=describe(conn);
-  test.type=remove.type='button';test.className='secondary';remove.className='danger';
-  test.textContent='检测连接';remove.textContent='删除连接';
-  const body={userId:uid,connectionId:conn.id};
-  test.onclick=()=>connectionAction(test,message,{...body,action:'test_'+kind},result=>
-   kind==='model'?'接入验证通过。':(result.ok?'检测通过：':'检测未通过：')+(openclawStatuses[result.status]||result.status)+'。');
-  remove.onclick=()=>{
-   if(confirm('删除该接入？请先解除频道绑定。'))
-    return connectionAction(remove,message,{...body,action:'delete_'+kind},()=> '接入已删除。');
-  };
-  card.append(title,description,test,remove);list.append(card);
- }
-}
-$('agentConnectionUser').onchange=()=>{
- if((connectionDirty||modelConnectionDirty)&&!confirm('切换用户会丢弃尚未保存的接入设置，继续吗？')){$('agentConnectionUser').value=selectedConnectionUser;return;}
- resetConnectionEditors();renderConnectionEditor(false);
-};
-$('reloadConnections').onclick=()=>{
- if((connectionDirty||modelConnectionDirty)&&!confirm('刷新会丢弃尚未保存的接入设置，继续吗？'))return;
- resetConnectionEditors();$('connectionsMessage').textContent='';return loadAgent();
-};
-function openclawTransport(){const direct=$('openclawTransport').value==='https';$('openclawDirect').hidden=!direct;$('openclawRelayHint').hidden=direct;$('openclawUrl').required=direct;$('openclawToken').required=direct;}
-$('openclawTransport').onchange=openclawTransport;
-$('openclawForm').oninput=()=>{connectionDirty=true;updateAgentDirty();};
-$('openclawForm').onsubmit=event=>{
- event.preventDefault();
- return connectionAction($('createOpenclaw'),'openclawMessage',{action:'connect_openclaw',userId:$('agentConnectionUser').value,
-  name:$('openclawName').value.trim(),transport:$('openclawTransport').value,url:$('openclawUrl').value.trim(),
-  agent:$('openclawAgent').value.trim(),token:$('openclawToken').value},data=>{
-  $('openclawToken').value='';connectionDirty=false;updateAgentDirty();
-  $('openclawPairing').hidden=!data.pairingToken;
-  $('openclawPairToken').value=data.pairingToken||'';$('openclawPairToken').type='password';
-  if(data.pairingToken)$('openclawCommand').textContent='python voxi-openclaw.py --server '+location.origin+' --connection '+data.connectionId;
-  return data.pairingToken?'连接已创建。在 OpenClaw 电脑启动连接器后，再检测并绑定频道。':'连接已加密保存。请检测连接，通过后绑定频道。';
- });
-};
-$('copyOpenclawPair').onclick=async()=>{try{await navigator.clipboard.writeText($('openclawPairToken').value);$('openclawMessage').textContent='已复制连接密钥，请粘贴到本机连接器提示中。';}catch{$('openclawPairToken').type='text';$('openclawPairToken').select();$('openclawMessage').textContent='请手动复制选中的连接密钥。';}};
-$('adminModelProvider').onchange=()=>{modelConnectionFields(true);modelConnectionDirty=true;updateAgentDirty();};
-$('adminModelForm').oninput=()=>{modelConnectionDirty=true;updateAgentDirty();};
-$('adminModelForm').onsubmit=event=>{
- event.preventDefault();
- return connectionAction($('saveAdminModel'),'adminModelMessage',{action:'connect_model',userId:$('agentConnectionUser').value,
-  provider:$('adminModelProvider').value,name:$('adminModelName').value.trim(),model:$('adminModelId').value.trim(),
-  workspace:$('adminModelWorkspace').value.trim(),key:$('adminModelKey').value.trim()},()=>{
-  $('adminModelKey').value='';modelConnectionDirty=false;updateAgentDirty();
-  return '模型已验证并保存。可在「频道与助手」为此用户绑定频道。';
- });
-};
-setInterval(()=>{if(token&&['agent','agentConnections'].includes(currentPage().key))loadAgent(true);},10000);
+setInterval(()=>{if(token&&currentPage().key==='agent')loadAgent(true);},10000);
 
 let userAccountsDirty=false,userDirectory=null;
 function renderUserDirectory(){

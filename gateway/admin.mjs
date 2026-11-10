@@ -1,4 +1,10 @@
 import {createAdminAuth} from './admin-auth.mjs';
+
+const globalAssistantFields = new Set(['enabled','model','maxConcurrent','maxTaskSeconds','instructions']);
+const agentTaskActions = new Set(['submit','detail','cancel','approve','decline','answer','continue']);
+function globalAssistantSnapshot({settings,runtime,credentials}){
+  return {settings,runtime,credentials};
+}
 import {timingSafeEqual} from 'node:crypto';
 
 export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,agentConfiguration,memoryConfiguration,deviceRegistry,userAccounts,userDetail,userWebMemory,voicePreview,username,passwordHash,accountFile,secureCookies=true}={}) {
@@ -49,7 +55,7 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
     }
     if(req.method==='GET'&&req.url==='/api/admin/agent'){
       if(!agentConfiguration)return json(409,{error:'Voxi Agent 需要 Pocket Cloud 模式'});
-      try{return json(200,await agentConfiguration());}catch(error){return json(502,{error:error.message});}
+      try{return json(200,globalAssistantSnapshot(await agentConfiguration()));}catch(error){return json(502,{error:error.message});}
     }
     if(req.method!=='POST')return json(405,{error:'不支持此请求'});
     if(req.headers['content-type']?.split(';')[0]!=='application/json')return json(415,{error:'需要 JSON 请求'});
@@ -85,7 +91,18 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
     }
     if(req.url==='/api/admin/agent'){
       if(!agentConfiguration)return json(409,{error:'Voxi Agent 需要 Pocket Cloud 模式'});
-      try{return json(200,await agentConfiguration(body));}catch(error){return json(502,{error:error.message});}
+      const {action,settings}=body;
+      if(action==='settings_patch'){
+        if(!settings||typeof settings!=='object'||Array.isArray(settings)||!Object.keys(settings).length
+          ||Object.keys(settings).some(field=>!globalAssistantFields.has(field)))
+          return json(400,{error:'这里只能修改全局助手设置'});
+      }else if(action!=='credential'&&!agentTaskActions.has(action)){
+        return json(400,{error:'接入和频道请在用户个人空间管理'});
+      }
+      try{
+        const result=await agentConfiguration(body);
+        return json(200,agentTaskActions.has(action)?result:globalAssistantSnapshot(result));
+      }catch(error){return json(502,{error:error.message});}
     }
     if(req.url==='/api/admin/disconnect'){
       if(!Number.isSafeInteger(body.connection)||body.connection<1)return json(400,{error:'连接编号无效'});

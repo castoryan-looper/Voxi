@@ -22,7 +22,7 @@ test('home connector has a fixed scoped relay path without admin or device crede
 
 test('Agent control plane inherits admin login, CSRF and fixed Pocket destination',async t=>{
  const requests=[];
- const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;requests.push({path:req.url,auth:req.headers.authorization,body:raw&&JSON.parse(raw)});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({settings:{enabled:false},tasks:[],credentials:{openai:{configured:Boolean(raw),active:false}},runtime:{engine:'codex-pocket-cloud'}}));});
+ const backend=http.createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;requests.push({path:req.url,auth:req.headers.authorization,body:raw&&JSON.parse(raw)});res.setHeader('Content-Type','application/json');res.end(JSON.stringify({settings:{enabled:false},tasks:[],modelConnections:[{name:'private-model'}],connections:[{name:'private-openclaw'}],channelsByUser:{owner:[]},credentials:{openai:{configured:Boolean(raw),active:false}},runtime:{engine:'codex-pocket-cloud'}}));});
  await new Promise(r=>backend.listen(0,'127.0.0.1',r));
  const {server,wss}=createGateway({mode:'pocket',token:'device-only',adminUsername:'admin',adminPasswordHash:await passwordHash('fixture-password-123'),pocketToken:'private-pocket',pocketUrl:`ws://127.0.0.1:${backend.address().port}/voxi`});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{wss.close();server.close();backend.close();});
@@ -39,6 +39,20 @@ test('Agent control plane inherits admin login, CSRF and fixed Pocket destinatio
  const response=await fetch(base+'/api/admin/agent',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify(body)});
  assert.equal(response.status,200);const result=await response.text();assert.ok(!result.includes(body.key));assert.ok(!result.includes('private-pocket'));
  assert.equal(requests[0].path,'/voxi/agent');assert.equal(requests[0].auth,'Bearer private-pocket');assert.equal(requests[0].body.provider,'openai');
+ const snapshot=await(await fetch(base+'/api/admin/agent',{headers:{Cookie:cookie}})).json();
+ assert.deepEqual(Object.keys(snapshot).sort(),['credentials','runtime','settings']);
+ const adminPost=payload=>fetch(base+'/api/admin/agent',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+ const before=requests.length;
+ for(const payload of [
+  {action:'connect_model',userId:'owner'},
+  {action:'test_openclaw',userId:'owner'},
+  {action:'channels',userId:'owner',channels:[]},
+  {action:'reset_channels',userId:'owner'},
+  {action:'settings_patch',settings:{channels:[]}},
+ ])assert.equal((await adminPost(payload)).status,400);
+ assert.equal(requests.length,before);
+ assert.equal((await adminPost({action:'settings_patch',settings:{instructions:'先给结论'}})).status,200);
+ assert.deepEqual(requests.at(-1).body,{action:'settings_patch',settings:{instructions:'先给结论'}});
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,401);
  assert.equal((await fetch(base+'/api/admin/voice-preview',{method:'POST',headers:{Cookie:cookie,'X-CSRF-Token':csrf,'Content-Type':'application/json'},body:JSON.stringify({voice:'ember'})})).status,200);
  assert.equal(requests.at(-1).path,'/voxi/voice-preview');assert.equal(requests.at(-1).body.voice,'ember');

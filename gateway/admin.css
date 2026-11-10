@@ -153,18 +153,14 @@ td button + button { margin-left: 6px; }
 .settings-heading { justify-content: space-between; }
 .settings-panel { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
 .settings-panel summary { font-weight: 650; }
-.settings-actions { margin-top: 16px; }
-#agentChannelFields { min-width: 0; margin: 0; padding: 0; border: 0; }
 
-.channel-grid, .assistant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.channel-card, .assistant-grid > div {
+.assistant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.assistant-grid > div {
   padding: 14px;
   border: 1px solid var(--border);
 
   background: var(--inset);
 }
-.channel-card input { width: 100%; }
-.channel-card .field { margin: 8px 0 3px; font-size: 13px; }
 .assistant-grid h3 { margin: 0; }
 .assistant-grid button { margin-top: 10px; }
 
@@ -222,7 +218,7 @@ td button + button { margin-left: 6px; }
 }
 
 @media (max-width: 650px) {
-  .channel-grid, .assistant-grid { grid-template-columns: 1fr; }
+  .assistant-grid { grid-template-columns: 1fr; }
   .user-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .user-tabs a { text-align: center; }
   .overview-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; }
