@@ -16,7 +16,7 @@ class CellularSocket {
  bool connected=false,tlsReady=false,secure=true,fragmented=false;
  uint32_t attemptAt=0,retryMs=5000;uint8_t fragmentOpcode=0;CellularHeartbeat heartbeat;
  CellularRecovery recovery;
- bool handshakeReceived=false;
+ bool handshakeReceived=false,preferStreamReceive=true;
  std::atomic<bool> waitingForTlsReply{false};
  int error=0;size_t buffered=0,messageLength=0;uint8_t wire[4096],message[2048];
  String lastFailureText;uint32_t lastFailureAt=0;uint16_t remoteCloseCode=0;

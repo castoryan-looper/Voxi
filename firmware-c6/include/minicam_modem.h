@@ -8,7 +8,7 @@ void minicamModemSetScreenOff(bool off);
 bool minicamModemReady();
 void minicamModemRequestRedial(bool reattach);
 int minicamSignal();
-bool minicamTcpConnect(const char* host,uint16_t port);
+bool minicamTcpConnect(const char* host,uint16_t port,bool streamReceive);
 void minicamTcpClose();
 bool minicamTcpConnected();
 int minicamTcpSend(const uint8_t* bytes,size_t length);

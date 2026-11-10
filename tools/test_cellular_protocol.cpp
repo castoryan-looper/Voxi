@@ -3,6 +3,12 @@
 int main(){
  std::string_view a[8];assert(cellularCsv(" \"rtcp\",0,3,\"000aFF\"",a,8)==4);assert(a[0]=="rtcp"&&a[3]=="000aFF");assert(!cellularCsv("\"unterminated",a,8));assert(!cellularCsv("1,2,3",a,2));
  assert(cellularHexDigit('F')==15&&cellularHexDigit('g')==-1);assert(cellularInteger("42")==42&&cellularInteger("4x")==-1);
+ CellularReadResult read;
+ assert(cellularCsv(" 0,5,3,\"000aFF\"",a,8)==4&&cellularReadResult(a,4,read));
+ assert(read.remaining==5&&read.length==3&&read.hex=="000aFF");
+ assert(cellularCsv(" 0,0,0",a,8)==3&&cellularReadResult(a,3,read)&&read.length==0);
+ assert(cellularCsv(" 0,1243,1243,1243",a,8)==4&&!cellularReadResult(a,4,read));
+ assert(cellularCsv(" 1,0,1,FF",a,8)==4&&!cellularReadResult(a,4,read));
  assert(cellularClock(" \"26/11/04,08:00:00+32\"\r\n")==1793750400);assert(cellularClock("\"26/11/04,00:00:00+00\"")==1793750400);
  assert(!cellularClock("\"26/02/30,00:00:00+00\""));assert(!cellularClock("\"00/01/01,00:00:00+00\""));
  bool quoted[8];assert(cellularCsv("1,\"0123\",\"ABCD\",7",a,8,quoted)==4);assert(quoted[1]);assert(cellularCsv("2,1,\"0123\",\"ABCD\",7",a,8,quoted)==5);assert(!quoted[1]);

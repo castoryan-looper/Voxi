@@ -22,6 +22,19 @@ inline size_t cellularCsv(std::string_view text,std::string_view* args,size_t ca
 inline int cellularInteger(std::string_view s){
  if(s.empty())return -1;int v=0;for(char c:s){if(c<'0'||c>'9'||v>10000000)return -1;v=v*10+c-'0';}return v;
 }
+struct CellularReadResult {
+ int remaining=0, length=0;
+ std::string_view hex;
+};
+inline bool cellularReadResult(const std::string_view* args,size_t count,CellularReadResult& result){
+ if((count!=3&&count!=4)||args[0]!="0")return false;
+ const int remaining=cellularInteger(args[1]),length=cellularInteger(args[2]);
+ if(remaining<0||length<0||length>4096)return false;
+ const std::string_view hex=count==4?args[3]:std::string_view{};
+ if(hex.size()!=size_t(length)*2)return false;
+ result={remaining,length,hex};
+ return true;
+}
 inline int64_t cellularClock(std::string_view s){
  int y,m,d,h,mi,se,tz=0;char sign='+';std::string_view a[2];
  if(cellularCsv(s,a,2)!=1)return 0;

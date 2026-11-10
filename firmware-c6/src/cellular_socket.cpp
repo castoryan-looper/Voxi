@@ -32,7 +32,10 @@ bool CellularSocket::writeAll(const uint8_t* p,size_t n){
 static String base64(const uint8_t* p,size_t n){unsigned char out[96];size_t len=0;if(mbedtls_base64_encode(out,sizeof(out),&len,p,n))return "";return String((char*)out,len);}
 bool CellularSocket::connect(){
  if(!minicamModemReady()||(secure&&time(nullptr)<1700000000))return false;
- if(!minicamTcpConnect(host.c_str(),port)){fail("TCP connection failed");return false;}
+ if(!minicamTcpConnect(host.c_str(),port,preferStreamReceive)){
+  preferStreamReceive=false;
+  fail("TCP connection failed");return false;
+ }
  if(secure){
   const unsigned char seed[]="voxi-cellular";int rc=mbedtls_ctr_drbg_seed(&random,mbedtls_entropy_func,&entropy,seed,sizeof(seed));
   if(!rc)rc=mbedtls_x509_crt_parse(&trust,(const unsigned char*)ca.c_str(),ca.length()+1);
@@ -48,6 +51,7 @@ bool CellularSocket::connect(){
    const uint32_t elapsed=millis()-began;
    if(!handshakeReceived&&elapsed>=CellularRecovery::firstTlsByteMs){
     waitingForTlsReply=true;
+    preferStreamReceive=!preferStreamReceive;
     const auto action=recovery.noTlsResponse(millis());
     fail("TLS handshake received no reply");
     if(action!=CellularRecovery::Retry)minicamModemRequestRedial(action==CellularRecovery::Reattach);

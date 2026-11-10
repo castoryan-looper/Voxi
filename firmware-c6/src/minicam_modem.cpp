@@ -21,6 +21,9 @@ static std::atomic<int> sentCount{-1};
 static std::atomic<bool> configured{false},selected{false},stopping{false},stopped{false},socketUp{false},ipUp{false};
 static std::atomic<bool> waiting{false};
 static std::atomic<bool> redialPending{false},reattachPending{false};
+static std::atomic<bool> streamReceive{false},readPending{false};
+static std::atomic<uint32_t> receiveNotices{0},streamReads{0},streamReplies{0},streamErrors{0};
+static uint32_t lastStreamRead=0;
 static std::atomic<bool> screenOff{false};
 static std::atomic<TaskHandle_t> managerTask{nullptr};
 static void notifyManager(){if(auto task=managerTask.load())xTaskNotifyGive(task);}
@@ -48,8 +51,9 @@ static void receiveHex(std::string_view hex,size_t bytes){
  xSemaphoreTake(ringMutex,portMAX_DELAY);
  if(bytes>RING_SIZE-ringUsed){xSemaphoreGive(ringMutex);tcpFailed("TCP receive ring overflow");xSemaphoreTake(stateMutex,portMAX_DELAY);state.overflows++;xSemaphoreGive(stateMutex);status("TCP receive overflow");return;}
  for(size_t i=0;i<bytes;i++){int a=cellularHexDigit(hex[i*2]),b=cellularHexDigit(hex[i*2+1]);if(a<0||b<0){xSemaphoreGive(ringMutex);tcpFailed("invalid modem TCP hex");status("invalid TCP hex");return;}}
- for(size_t i=0;i<bytes;i++){ring[ringHead]=(cellularHexDigit(hex[i*2])<<4)|cellularHexDigit(hex[i*2+1]);ringHead=(ringHead+1)%RING_SIZE;}ringUsed+=bytes;xSemaphoreGive(ringMutex);
- xSemaphoreTake(stateMutex,portMAX_DELAY);state.rxBytes+=bytes;state.largestPacket=max(state.largestPacket,(uint32_t)bytes);state.ringPeak=max(state.ringPeak,(uint32_t)ringUsed);xSemaphoreGive(stateMutex);
+ for(size_t i=0;i<bytes;i++){ring[ringHead]=(cellularHexDigit(hex[i*2])<<4)|cellularHexDigit(hex[i*2+1]);ringHead=(ringHead+1)%RING_SIZE;}
+ ringUsed+=bytes;const uint32_t buffered=ringUsed;xSemaphoreGive(ringMutex);
+ xSemaphoreTake(stateMutex,portMAX_DELAY);state.rxBytes+=bytes;state.largestPacket=max(state.largestPacket,(uint32_t)bytes);state.ringPeak=max(state.ringPeak,buffered);xSemaphoreGive(stateMutex);
 }
 static void parseLine(std::string_view line){
  if(line.empty())return;
@@ -60,8 +64,22 @@ static void parseLine(std::string_view line){
  if(colon!=line.npos)count=cellularCsv(line.substr(colon+1),args,8,quoted);
  auto name=line.substr(0,colon);
  if(name=="+MIPURC"&&count>=2){
-  if(args[1]=="0"&&args[0]=="rtcp"&&count==4){int bytes=cellularInteger(args[2]);if(bytes>=0)receiveHex(args[3],bytes);else tcpFailed("invalid MIPURC byte count");}
+  if(args[1]=="0"&&args[0]=="rtcp"){
+   receiveNotices++;
+   if(streamReceive)readPending=true;
+   else if(count==4){int bytes=cellularInteger(args[2]);if(bytes>=0)receiveHex(args[3],bytes);else tcpFailed("invalid MIPURC byte count");}
+  }
   else if(args[1]=="0"&&args[0]=="disconn"){int code=count>2?cellularInteger(args[2]):-1;char reason[64];snprintf(reason,sizeof(reason),"modem MIPURC disconnect: %d",code);tcpFailed(reason);notifyManager();}
+  return;
+ }
+ if(name=="+MIPRD"&&streamReceive){
+  CellularReadResult data;
+  if(cellularReadResult(args,count,data)){
+   if(data.length>0){streamReplies++;receiveHex(data.hex,data.length);}
+   if(data.remaining>0)readPending=true;
+  }else if(count>2){
+   streamErrors++;tcpFailed("invalid modem stream read");
+  }
   return;
  }
  if(name=="+MIPOPEN"&&count==2&&args[0]=="0"){
@@ -181,11 +199,12 @@ void minicamModemRequestRedial(bool reattach){
 }
 int minicamSignal(){xSemaphoreTake(stateMutex,portMAX_DELAY);int v=state.signal;xSemaphoreGive(stateMutex);return v;}
 bool minicamTcpConnected(){return socketUp;}
-void minicamTcpClose(){if(!resourcesStarted)return;socketUp=false;xEventGroupClearBits(events,CLOSED);if(command("AT+MIPCLOSE=0",2000))xEventGroupWaitBits(events,CLOSED,pdTRUE,pdFALSE,pdMS_TO_TICKS(1500));xSemaphoreTake(ringMutex,portMAX_DELAY);ringHead=ringTail=ringUsed=0;xSemaphoreGive(ringMutex);minicamTlsStatus(false);}
-bool minicamTcpConnect(const char* host,uint16_t port){
+void minicamTcpClose(){if(!resourcesStarted)return;socketUp=false;streamReceive=false;readPending=false;xEventGroupClearBits(events,CLOSED);if(command("AT+MIPCLOSE=0",2000))xEventGroupWaitBits(events,CLOSED,pdTRUE,pdFALSE,pdMS_TO_TICKS(1500));xSemaphoreTake(ringMutex,portMAX_DELAY);ringHead=ringTail=ringUsed=0;xSemaphoreGive(ringMutex);minicamTlsStatus(false);}
+bool minicamTcpConnect(const char* host,uint16_t port,bool bufferedReceive){
  if(!minicamModemReady())return false;minicamTcpClose();xEventGroupClearBits(events,OPENED|OPEN_FAILED);
  if(!command("AT+MIPCFG=\"ssl\",0,0,0")||!command("AT+MIPCFG=\"encoding\",0,1,1"))return false;
- if(!command(String("AT+MIPOPEN=0,\"TCP\",\"")+host+"\","+port+",,0",5000))return false;
+ streamReceive=bufferedReceive;lastStreamRead=millis();
+ if(!command(String("AT+MIPOPEN=0,\"TCP\",\"")+host+"\","+port+(bufferedReceive?",,2":",,0"),5000))return false;
  auto bits=xEventGroupWaitBits(events,OPENED|OPEN_FAILED,pdFALSE,pdFALSE,pdMS_TO_TICKS(20000));return (bits&OPENED)&&socketUp;
 }
 int minicamTcpSend(const uint8_t* bytes,size_t length){
@@ -199,10 +218,28 @@ int minicamTcpSend(const uint8_t* bytes,size_t length){
  }
  xSemaphoreTake(stateMutex,portMAX_DELAY);state.txBytes+=sent;xSemaphoreGive(stateMutex);return sent;
 }
-int minicamTcpRead(uint8_t* bytes,size_t capacity){xSemaphoreTake(ringMutex,portMAX_DELAY);size_t n=min(capacity,ringUsed);for(size_t i=0;i<n;i++){bytes[i]=ring[ringTail];ringTail=(ringTail+1)%RING_SIZE;}ringUsed-=n;xSemaphoreGive(ringMutex);return n;}
+static size_t readRing(uint8_t* bytes,size_t capacity){
+ xSemaphoreTake(ringMutex,portMAX_DELAY);
+ size_t n=min(capacity,ringUsed);
+ for(size_t i=0;i<n;i++){bytes[i]=ring[ringTail];ringTail=(ringTail+1)%RING_SIZE;}
+ ringUsed-=n;xSemaphoreGive(ringMutex);return n;
+}
+int minicamTcpRead(uint8_t* bytes,size_t capacity){
+ const size_t received=readRing(bytes,capacity);
+ if(received||!socketUp||!streamReceive)return received;
+ const uint32_t now=millis();
+ // Some modem builds miss the notice. A low-frequency read also checks
+ // for buffered data while still letting notices drain it immediately.
+ if(!readPending.exchange(false)&&now-lastStreamRead<(screenOff?2500u:750u))return 0;
+ lastStreamRead=now;streamReads++;
+ if(!command("AT+MIPRD=0,2048",1200))streamErrors++;
+ return readRing(bytes,capacity);
+}
 void minicamTlsStatus(bool verified,int error){xSemaphoreTake(stateMutex,portMAX_DELAY);state.tlsVerified=verified;state.tlsError=error;xSemaphoreGive(stateMutex);}
 void minicamModemDiagnostics(JsonDocument& out){State s;xSemaphoreTake(stateMutex,portMAX_DELAY);s=state;xSemaphoreGive(stateMutex);
  out["cellularDataRedials"]=s.redials;out["cellularRadioReattaches"]=s.reattaches;
+ out["cellularReceiveMode"]=streamReceive?"buffered":"direct";out["cellularReceiveNotices"]=receiveNotices.load();
+ out["cellularStreamReads"]=streamReads.load();out["cellularStreamReplies"]=streamReplies.load();out["cellularStreamErrors"]=streamErrors.load();
  out["cellularLastDropReason"]=s.dropReason;out["cellularLastDropAtMs"]=s.dropAt;out["cellularLargestPacket"]=s.largestPacket;out["cellularLargestLine"]=s.largestLine;out["cellularRingPeakBytes"]=s.ringPeak;out["cellularPollFailures"]=s.pollFailures;out["cellularResourcesActive"]=resourcesStarted;out["cellularUartDriver"]=resourcesStarted?"UHCI DMA":"not started";out["cellularDetected"]=s.detected;out["cellularModel"]=s.model;out["cellularBaud"]=921600;out["cellularSimReady"]=s.simReady;out["cellularRegistered"]=s.registered;out["cellularSignal"]=s.signal;out["cellularStatus"]=s.status;out["cellularTransportEnabled"]=(bool)selected;out["cellularDataReady"]=(bool)ipUp;out["cellularTcpConnected"]=(bool)socketUp;out["cellularTlsVerified"]=s.tlsVerified;out["cellularTlsError"]=s.tlsError;out["cellularSocketError"]=s.socketError;out["cellularLastAt"]=s.lastAt;out["cellularRxBytes"]=s.rxBytes;out["cellularTxBytes"]=s.txBytes;out["cellularRxOverflows"]=s.overflows;
  xSemaphoreTake(ringMutex,portMAX_DELAY);out["cellularTcpBufferedBytes"]=ringUsed;xSemaphoreGive(ringMutex);
 }
