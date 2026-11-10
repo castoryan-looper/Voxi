@@ -82,6 +82,47 @@ test('the channel editor saves defaults and personal overrides to separate scope
  assert.deepEqual(requests[2],{action:'reset_channels',userId:uid});
  assert.equal(get('agentChannelsName0').value,'公共快问');
 });
+
+test('admin connections are managed separately and appear only for the owning user in channels',async()=>{
+ const {context,get}=page(),owner='a'.repeat(32),other='b'.repeat(32),requests=[];
+ const data={settings:{enabled:true,channels:[{name:'快问',mode:'fast'}]},runtime:{ready:true},credentials:{},tasks:[],channelOverrides:[],
+  users:[{id:owner,name:'甲'},{id:other,name:'乙'}],connections:[],modelConnections:[],
+  modelProviders:{deepseek:{name:'DeepSeek',defaultModel:'deepseek-flash',docs:'https://example.test/'},qwen:{name:'千问',defaultModel:'qwen-plus',workspaceRequired:true}}};
+ context.fetch=async(path,options)=>{
+  if(options.body){
+   const body=JSON.parse(options.body);requests.push(body);
+   if(body.action==='connect_model')data.modelConnections.push({id:'model-a',user_id:body.userId,name:body.name,model:body.model,provider:body.provider});
+   if(body.action==='connect_openclaw')return {ok:true,json:async()=>({connectionId:'claw-a',pairingToken:'fixture-pair-token'})};
+   return {ok:true,json:async()=>({connectionId:'model-a'})};
+  }
+  return {ok:true,json:async()=>data};
+ };
+ vm.runInContext("token='session';navigate('/admin/connections')",context);
+ await vm.runInContext('loadAgent()',context);
+ assert.equal(get('agentConnectionsSection').hidden,false);assert.equal(get('agentSection').hidden,true);
+ assert.equal(get('connectionEditor').hidden,true);
+ get('agentConnectionUser').value=owner;get('agentConnectionUser').onchange();
+ assert.equal(get('connectionEditor').hidden,false);
+ get('adminModelProvider').value='qwen';get('adminModelProvider').onchange();
+ assert.equal(get('adminModelWorkspace').required,true);
+ get('adminModelWorkspace').value='ws-fixture';get('adminModelKey').value='fixture-key';
+ await get('adminModelForm').onsubmit({preventDefault(){}});
+ assert.deepEqual(requests[0],{action:'connect_model',userId:owner,provider:'qwen',name:'千问',model:'qwen-plus',workspace:'ws-fixture',key:'fixture-key'});
+ assert.equal(get('adminModelKey').value,'');assert.equal(get('adminModelConnections').children[0].children[0].textContent,'千问');
+ get('openclawName').value='家庭助手';get('openclawTransport').value='relay';get('openclawAgent').value='main';
+ await get('openclawForm').onsubmit({preventDefault(){}});
+ assert.equal(requests[1].userId,owner);assert.equal(get('openclawPairToken').value,'fixture-pair-token');
+ get('adminModelKey').value='unsaved';get('adminModelForm').oninput();
+ get('agentConnectionUser').value=other;get('agentConnectionUser').onchange();
+ assert.equal(get('adminModelKey').value,'');assert.equal(get('adminModelConnections').children.length,0);
+ assert.equal(get('openclawPairToken').value,'');assert.equal(get('openclawPairing').hidden,true);
+ vm.runInContext("navigate('/admin/agent')",context);await vm.runInContext('loadAgent()',context);
+ assert.equal(get('agentConnectionsSection').hidden,true);
+ get('agentChannelUser').value=owner;get('agentChannelUser').onchange();
+ assert.equal(get('agentChannelsMode0').children.some(o=>o.value==='model:model-a'),true);
+ get('agentChannelUser').value=other;get('agentChannelUser').onchange();
+ assert.equal(get('agentChannelsMode0').children.some(o=>o.value==='model:model-a'),false);
+});
  test('read button immediately shows loading and recovers after backend failure',async()=>{
  const {context,get}=page();get('aiForm').hidden=true;let resolve;context.fetch=()=>new Promise(r=>resolve=r);vm.runInContext("token='session'",context);
  const pending=get('reloadAi').onclick();assert.equal(get('reloadAi').disabled,true);assert.match(get('aiMessage').textContent,/正在读取/);

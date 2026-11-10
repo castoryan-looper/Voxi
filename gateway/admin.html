@@ -4,7 +4,7 @@
 <meta name="theme-color" content="#0b1018">
 <link rel="stylesheet" href="/admin/assets/admin.css">
 <header><div><div class="tag">VOXI CLOUD</div><h1 id="pageTitle">运营总览</h1></div><button class="secondary" id="logout" hidden>退出管理</button></header>
-<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview">VOXI<span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与语音</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
+<nav id="navigation" hidden aria-label="后台导航"><a class="brand" href="/admin/overview">VOXI<span>管理员控制台</span></a><a href="/admin/overview" data-nav="overview">运营总览</a><div class="nav-label">设备与用户</div><a href="/admin/devices" data-nav="devices">设备管理</a><a href="/admin/users" data-nav="users">用户账户</a><div class="nav-label">助手与语音</div><a href="/admin/agent" data-nav="agent">频道与助手</a><a href="/admin/connections" data-nav="agentConnections">模型与 Agent 接入</a><a href="/admin/ai/voice" data-nav="voice">语音与试听</a><div class="nav-label">系统</div><a href="/admin/events" data-nav="events">连接事件</a><a href="/admin/account" data-nav="account">管理员账户</a><a href="/app" target="_blank" rel="noopener">普通用户入口 ↗</a></nav>
 <div id="breadcrumb" class="breadcrumb" hidden></div><section class="card" id="login"><h2>管理员登录</h2><p class="muted">使用管理员用户名和密码登录网关。普通用户请使用 <a href="/app">我的 Voxi 用户入口</a>。</p><form id="loginForm" class="row"><input id="username" required autocomplete="username" placeholder="用户名" aria-label="用户名"><input id="secret" type="password" required autocomplete="current-password" placeholder="密码" aria-label="密码"><button id="loginButton">登录</button></form></section>
 <main id="dashboard" hidden>
 <section class="card" id="overviewSection" hidden>
@@ -100,15 +100,7 @@
 <form id="agentChannelsForm"><fieldset id="agentChannelFields"><div class="channel-grid" id="agentChannels"></div><button type="button" id="addAgentChannel" class="secondary" hidden>添加频道</button></fieldset>
 <div class="row settings-actions"><button id="saveAgentChannels" disabled>保存默认频道</button><button type="button" id="restoreAgentChannels" class="secondary" hidden>恢复默认频道</button></div></form>
 </div>
-<details class="settings-panel" id="agentConnections" hidden><summary>此用户的 OpenClaw 连接</summary>
-<p class="muted">创建并检测连接后，在上方频道的“选择助手”中绑定。已有连接可直接选择。</p>
-<form id="openclawForm"><div class="row"><label class="field">连接名称<input id="openclawName" required maxlength="64" placeholder="例如：家里的工作助手"></label><label class="field">部署位置<select id="openclawTransport"><option value="relay">家中电脑／内网 · 主动连接</option><option value="https">云服务器 · HTTPS 直连</option></select></label><label class="field">OpenClaw Agent ID<input id="openclawAgent" value="main" required maxlength="64"></label></div>
-<div id="openclawDirect" hidden><label class="field">Gateway HTTPS 根地址<input id="openclawUrl" type="url" placeholder="https://claw.example.com"></label><label class="field">Gateway Token／密码<input id="openclawToken" type="password" autocomplete="new-password" maxlength="4096"></label><p class="muted">从 Voxi 云端访问此地址，凭据加密保存、不回显。内网、自签证书或没有公网入口时，使用“主动连接”。Gateway 凭据具有该实例的操作权限，仅接入你信任的 Voxi 服务。</p></div>
-<p id="openclawRelayHint" class="muted">不需要公网 IP、端口映射或修改家中路由器。在运行 OpenClaw 的电脑上启动连接器并保持运行；电脑休眠后连接会离线，本机 Gateway Token 不上传。</p>
-<button id="createOpenclaw">创建连接</button></form><p id="openclawMessage" role="status" aria-live="polite"></p><div id="openclawPairing" hidden><h4>在 OpenClaw 所在电脑上连接</h4><p>1. <a href="/downloads/voxi-openclaw.py" download="voxi-openclaw.py">下载连接器</a>（Python 3.10+，无需安装额外依赖）。</p><p>2. 在下载目录运行以下命令，按提示输入连接密钥和本机 Gateway Token。</p><pre id="openclawCommand"></pre><label class="field">连接密钥 · 仅此次显示<input id="openclawPairToken" readonly type="password" autocomplete="off"></label><button type="button" class="secondary" id="copyOpenclawPair">复制连接密钥</button><p class="muted">关闭此页后无法读取连接密钥；丢失时删除未绑定的连接并重新创建。Voxi 使用自签证书时，启动命令另加 --ca 可信 CA 文件路径；请使用管理员已有的 CA，保持证书验证开启。</p></div>
-<div id="openclawConnections"></div>
-<details><summary>首次启用与常见问题</summary><p>在 OpenClaw 机器上启用 Responses HTTP 接口，再重启 Gateway：</p><pre>openclaw config set gateway.http.endpoints.responses.enabled true
-openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证和接口，不会启动模型任务。显示正常后，绑定频道，再到该用户详情的“后台任务”提交一个只读小任务验证完整流程。工具权限、批准请求请在 OpenClaw 自身界面处理。当前 HTTP 接入没有把 OpenClaw 的批准窗口同步到 Voxi；停止等待后仍需核对远端任务。</p><p><a href="https://docs.openclaw.ai/gateway/openresponses-http-api" target="_blank" rel="noopener noreferrer">OpenClaw 官方接口说明</a> · <a href="https://docs.openclaw.ai/gateway/remote" target="_blank" rel="noopener noreferrer">远程接入说明</a></p></details></details>
+<p class="muted">要新增可选模型或 Agent，请前往<a href="/admin/connections">模型与 Agent 接入</a>。</p>
 <section class="settings-panel" id="assistant-behavior">
 <h2>助手怎么工作</h2><p class="muted">这里设置全局默认行为。用户可自定义快问的回答偏好，OpenClaw 的角色和模型在自己的实例里管理。</p>
 <div class="assistant-grid">
@@ -136,6 +128,31 @@ openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证
 <div class="scroll"><table><thead><tr><th>任务</th><th>频道</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="agentTasks"></tbody></table></div>
 <article id="agentTaskDetail" hidden><h3 id="agentDetailTitle"></h3><p id="agentDetailState"></p><h4>任务内容与参考背景</h4><pre id="agentDetailPrompt"></pre><h4>结果</h4><pre id="agentDetailResult"></pre><p id="agentUsage"></p><div id="agentApproval"></div><div class="row" id="agentTaskActions"></div><details><summary>状态记录</summary><ol id="agentTaskEvents"></ol></details></article>
 </section>
+<section class="card" id="agentConnectionsSection" hidden>
+<div class="row settings-heading"><h2>模型与 Agent 接入</h2><button type="button" class="secondary" id="reloadConnections">刷新</button></div>
+<p class="muted">选择所属用户，再接入模型或已有 Agent。接入成功后，到<a href="/admin/agent">频道与助手</a>为同一用户绑定频道。</p>
+<label class="field" for="agentConnectionUser">所属用户</label><select id="agentConnectionUser"></select>
+<p id="connectionsMessage" role="status" aria-live="polite"></p>
+<p class="muted"><strong>Voxi Agent</strong> · 内置，沿用服务器的 Codex 登录，可直接绑定。<a href="/admin/agent/credentials">平台预留密钥</a></p>
+<div id="connectionEditor" hidden>
+<details class="settings-panel" id="modelConnectionPanel" hidden><summary>模型服务 · 使用自己的 API Key</summary>
+<p class="muted">供应商按账号计费。验证时会发起一次简短模型请求，密钥加密保存。</p>
+<form id="adminModelForm"><div class="row"><label class="field">服务商<select id="adminModelProvider" required></select></label><label class="field">接入名称<input id="adminModelName" required maxlength="64"></label><label class="field">模型 ID<input id="adminModelId" required maxlength="128"></label></div>
+<label class="field" id="adminModelWorkspaceField" hidden>百炼北京业务空间 ID<input id="adminModelWorkspace" maxlength="63" placeholder="ws-…"></label>
+<label class="field">API Key<input id="adminModelKey" type="password" required autocomplete="new-password" maxlength="512"></label>
+<div class="row"><button id="saveAdminModel">验证并接入</button><a id="adminModelDocs" target="_blank" rel="noopener noreferrer">供应商开通指南 ↗</a></div></form>
+<p id="adminModelMessage" role="status" aria-live="polite"></p><div id="adminModelConnections"></div></details>
+
+<details class="settings-panel" id="agentConnections"><summary>已有 Agent · OpenClaw</summary>
+<p class="muted">可接入在家中电脑或云服务器运行的 OpenClaw。</p>
+<form id="openclawForm"><div class="row"><label class="field">连接名称<input id="openclawName" required maxlength="64" placeholder="例如：家里的工作助手"></label><label class="field">部署位置<select id="openclawTransport"><option value="relay">家中电脑／内网 · 主动连接</option><option value="https">云服务器 · HTTPS 直连</option></select></label><label class="field">OpenClaw Agent ID<input id="openclawAgent" value="main" required maxlength="64"></label></div>
+<div id="openclawDirect" hidden><label class="field">Gateway HTTPS 根地址<input id="openclawUrl" type="url" placeholder="https://claw.example.com"></label><label class="field">Gateway Token／密码<input id="openclawToken" type="password" autocomplete="new-password" maxlength="4096"></label><p class="muted">从 Voxi 云端访问此地址，凭据加密保存、不回显。内网、自签证书或没有公网入口时，使用“主动连接”。Gateway 凭据具有该实例的操作权限，仅接入你信任的 Voxi 服务。</p></div>
+<p id="openclawRelayHint" class="muted">不需要公网 IP、端口映射或修改家中路由器。在运行 OpenClaw 的电脑上启动连接器并保持运行；电脑休眠后连接会离线，本机 Gateway Token 不上传。</p>
+<button id="createOpenclaw">创建连接</button></form><p id="openclawMessage" role="status" aria-live="polite"></p><div id="openclawPairing" hidden><h4>在 OpenClaw 所在电脑上连接</h4><p>1. <a href="/downloads/voxi-openclaw.py" download="voxi-openclaw.py">下载连接器</a>（Python 3.10+，无需安装额外依赖）。</p><p>2. 在下载目录运行以下命令，按提示输入连接密钥和本机 Gateway Token。</p><pre id="openclawCommand"></pre><label class="field">连接密钥 · 仅此次显示<input id="openclawPairToken" readonly type="password" autocomplete="off"></label><button type="button" class="secondary" id="copyOpenclawPair">复制连接密钥</button><p class="muted">关闭此页后无法读取连接密钥；丢失时删除未绑定的连接并重新创建。Voxi 使用自签证书时，启动命令另加 --ca 可信 CA 文件路径；请使用管理员已有的 CA，保持证书验证开启。</p></div>
+<div id="openclawConnections"></div>
+<details><summary>首次启用与常见问题</summary><p>在 OpenClaw 机器上启用 Responses HTTP 接口，再重启 Gateway：</p><pre>openclaw config set gateway.http.endpoints.responses.enabled true
+openclaw gateway restart</pre><p class="muted">“检测连接”只检查认证和接口，不会启动模型任务。显示正常后，绑定频道，再到该用户详情的“后台任务”提交一个只读小任务验证完整流程。工具权限、批准请求请在 OpenClaw 自身界面处理。当前 HTTP 接入没有把 OpenClaw 的批准窗口同步到 Voxi；停止等待后仍需核对远端任务。</p><p><a href="https://docs.openclaw.ai/gateway/openresponses-http-api" target="_blank" rel="noopener noreferrer">OpenClaw 官方接口说明</a> · <a href="https://docs.openclaw.ai/gateway/remote" target="_blank" rel="noopener noreferrer">远程接入说明</a></p></details></details>
+</div></section>
 <section class="card" id="agentCredentialsSection" hidden>
 <h2>模型密钥</h2><p class="muted">密钥写入服务器加密存储，保存后不会回显。当前执行器继续使用既有 Codex 登录；填写密钥不会切换执行器，也不代表已验证可用。</p>
 <p id="credentialMessage" role="status" aria-live="polite"></p>
