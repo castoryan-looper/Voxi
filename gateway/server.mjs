@@ -65,6 +65,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     const path=new URL(req.url,'http://gateway').pathname;
     const assets={'/shared/voice-preview.js':['voice-preview.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.js':['admin-app.mjs','text/javascript; charset=utf-8'],'/admin/assets/admin.css':['admin.css','text/css; charset=utf-8'],'/app/assets/app.js':['user-app.mjs','text/javascript; charset=utf-8'],'/app/assets/app.css':['user-app.css','text/css; charset=utf-8'],'/downloads/voxi-openclaw.py':['voxi-openclaw.py','text/x-python; charset=utf-8']};
     assets['/shared/web-memory.js']=['web-memory-ui.mjs','text/javascript; charset=utf-8'];
+    assets['/shared/theme.css']=['theme.css','text/css; charset=utf-8'];
     assets['/app/assets/context.js']=['user-context.mjs','text/javascript; charset=utf-8'];
     assets['/downloads/voxi-context-sync.py']=['voxi-context-sync.py','text/x-python; charset=utf-8'];
     if(assets[path]){const [file,type]=assets[path];res.writeHead(200,{'Content-Type':type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(readFileSync(new URL('./'+file,import.meta.url)));return;}
