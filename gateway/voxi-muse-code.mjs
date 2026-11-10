@@ -168,7 +168,7 @@ async function main() {
         try {
           const host = await MuseClient.spawn({
             museBin: values['muse-bin'] ? resolve(values['muse-bin']) : await windowsLauncherBinary(),
-            args: ['serve'], cwd: workspace, env,
+            args: ['serve', '--disable-request-user-input'], cwd: workspace, env,
             clientInfo: { name: 'voxi_muse_code', version: '1.0.0' },
           });
           client = host;
