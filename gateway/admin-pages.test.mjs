@@ -5,7 +5,7 @@ import {createGateway} from './server.mjs';
 test('admin child pages support direct navigation and assets without weakening API authentication',async t=>{
  const {server,wss}=createGateway({token:'device'});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{wss.close();server.close();});const base=`http://127.0.0.1:${server.address().port}`;
  const user='/admin/users/'+'a'.repeat(32);
- for(const path of ['/admin/','/admin/overview','/admin/devices','/admin/agent','/admin/ai/voice','/admin/events','/admin/account','/admin/devices/esp32-111111111111/memory',user,user+'/devices',user+'/memory',user+'/tasks']){
+ for(const path of ['/admin/','/admin/overview','/admin/devices','/admin/agent','/admin/connections','/admin/ai/voice','/admin/events','/admin/account','/admin/devices/esp32-111111111111/memory',user,user+'/devices',user+'/memory',user+'/tasks']){
   const response=await fetch(base+path);assert.equal(response.status,200,path);assert.match(await response.text(),/\/admin\/assets\/admin.js/);assert.equal(response.headers.get('cache-control'),'no-store');
  }
  const oldPromptPage=await fetch(base+'/admin/ai/prompts',{redirect:'manual'});
