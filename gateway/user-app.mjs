@@ -83,13 +83,26 @@ $('myMemoryPanel').ontoggle=()=>{
 };
 function renderConnections(){$('connections').replaceChildren();for(const conn of data.connections){const box=document.createElement('div'),title=document.createElement('h3'),status=document.createElement('p');box.className='item';title.textContent=conn.name;status.textContent=(conn.transport==='relay'?'主动连接':'HTTPS 直连')+' · '+(statuses[conn.status]||conn.status)+' · Agent '+conn.agent;box.append(title,status,button('检测连接',async()=>{try{const result=await api('action',{action:'test_openclaw',connectionId:conn.id});message((result.ok?'检测通过：':'检测未通过：')+(statuses[result.status]||result.status)+'。没有运行模型任务。');await load(false);}catch(e){message(e.message);}}),button('删除连接',async()=>{if(confirm('先解除频道绑定，再删除此连接；删除会撤销连接密钥。'))await change({action:'delete_openclaw',connectionId:conn.id});},'danger'));$('connections').append(box);}}
 let editingModel=null;
+function providerOption(provider){
+ const group=provider.category==='app'?'应用':provider.category==='aggregator'?'模型聚合':'直连模型';
+ return group+' / '+provider.name;
+}
 function modelFields(fill=false){
  const provider=data?.modelProviders?.[$('modelProvider').value];
  if(!provider)return;
+ const app=provider?.category==='app';
+ $('modelIdField').hidden=Boolean(provider?.fixedModel);
+ $('modelId').required=!provider?.fixedModel;
+ $('modelIdLabel').textContent=provider?.modelLabel||'模型 ID';
+ $('modelWorkspaceLabel').textContent=provider?.workspaceLabel||'百炼北京业务空间 ID';
+ $('modelKeyLabel').textContent=app?'应用 API Key':'平台 API Key';
+ $('modelHint').textContent=app
+  ?'使用已发布的 Dify Cloud 应用密钥。验证只检查应用和输入设置。'+(provider.continuation?'已完成的对话可从任务详情继续。':'请配置一个文本输入和文本输出。')
+  :'使用服务商 API 账户。验证会发送一次短文本请求，费用计入该账户。';
  $('modelWorkspaceField').hidden=!provider.workspaceRequired;
  $('modelWorkspace').required=provider.workspaceRequired;
  $('modelDocs').href=provider.docs;
- if(fill){$('modelId').value=provider.defaultModel;$('modelName').value=provider.name;}
+ if(fill){$('modelId').value=provider.defaultModel||'';$('modelWorkspace').value=provider.defaultWorkspace||'';$('modelName').value=provider.name;}
 }
 function resetModelForm(){
  editingModel=null;
@@ -105,18 +118,18 @@ function renderModelConnections(){
  if(!providers)return;
  const select=$('modelProvider');
  if(!select.options.length){
-  for(const [id,provider] of Object.entries(providers))select.append(option(id,provider.name));
+  for(const [id,provider] of Object.entries(providers))select.append(option(id,providerOption(provider)));
   modelFields(true);
  }
  const list=$('modelConnections');list.replaceChildren();
  for(const conn of data.modelConnections){
   const card=document.createElement('div'),title=document.createElement('h3'),description=document.createElement('p');
-  card.className='item';title.textContent=conn.name;description.textContent=providers[conn.provider].name+' · '+conn.model;
+  card.className='item';title.textContent=conn.name;description.textContent=(providers[conn.provider]?.name||conn.provider)+' · '+(providers[conn.provider]?.fixedModel?'凭据已验证':conn.model+' · 已验证');
   card.append(title,description,
    button('检测连接',async()=>{
     if(busy)return;
     busy=true;
-    try{await api('action',{action:'test_model',connectionId:conn.id});message('模型验证通过。');}
+    try{await api('action',{action:'test_model',connectionId:conn.id});message('接入验证通过。');}
     catch(e){message(e.message);}finally{busy=false;}
    }),
    button('编辑名称或密钥',()=>{
@@ -127,7 +140,7 @@ function renderModelConnections(){
     $('cancelModelEdit').hidden=false;$('saveModel').textContent='验证并保存';
     $('modelName').focus();
    }),
-   button('删除连接',()=>{if(confirm('删除该模型连接？请先解除频道绑定。'))change({action:'delete_model',connectionId:conn.id});},'danger'));
+   button('删除连接',()=>{if(confirm('删除该接入？请先解除频道绑定。'))change({action:'delete_model',connectionId:conn.id});},'danger'));
   list.append(card);
  }
 }
@@ -141,7 +154,7 @@ $('modelForm').onsubmit=async event=>{
    name:$('modelName').value.trim(),model:$('modelId').value.trim(),workspace:$('modelWorkspace').value.trim(),key:$('modelKey').value.trim()});
   if(run!==generation)return;
   resetModelForm();dirtyForms.delete('modelForm');dirty=dirtyForms.size>0;await load(false);
-  if(run===generation)message('模型已通过验证，可在「频道与助手」选择。');
+  if(run===generation)message('接入已通过验证，可在「频道与助手」选择。');
  }catch(e){if(run===generation)message(e.message);}
  finally{busy=false;$('saveModel').disabled=false;}
 };
@@ -163,7 +176,7 @@ $('copyPair').onclick=async()=>{try{await navigator.clipboard.writeText($('pairT
 $('taskForm').oninput=()=>{submitId=null;};
 $('taskForm').onsubmit=async e=>{e.preventDefault();if(busy)return;busy=true;$('submitTask').disabled=true;try{submitId||=crypto.randomUUID();const result=await api('action',{action:'submit',channel:Number($('taskChannel').value),requestId:submitId,text:$('taskText').value});submitId=null;$('taskText').value='';await load(false);await openTask(result.task.id);message('任务已保存，无需保持网页在线。'+(result.webMemoryUsed?.length?' 已带入参考记忆 '+result.webMemoryUsed.join('、')+'。':''));}catch(e){message(e.message+'。内容不变时重试使用同一编号，避免重复派发。');}finally{busy=false;if(data)renderTasks();}};
 async function taskAction(action,extra={}){if(!detail)return;try{const result=await api('action',{action,taskId:detail.id,...extra});await load(false);await openTask(result.task.id);message('操作已提交。');}catch(e){message(e.message);}}
-async function openTask(id,poll=false){const expected=csrf;try{const result=await api('action',{action:'detail',taskId:id});if(expected!==csrf)return;detail=result.task;$('taskDetail').hidden=false;$('detailTitle').textContent='任务 '+id.slice(0,8);$('detailState').textContent=(states[detail.state]||detail.state)+' · '+detail.summary;$('detailPrompt').textContent=detail.prompt;$('detailResult').textContent=detail.result||'尚无最终回复。';if(poll&&$('approval').contains(document.activeElement))return;$('approval').replaceChildren();$('taskActions').replaceChildren();if(['queued','running','awaiting_approval','needs_input'].includes(detail.state)||(detail.engine==='openclaw'&&detail.state==='submitting'))$('taskActions').append(button(['openclaw','model'].includes(detail.engine)?'停止等待':'取消任务',()=>{if(confirm(detail.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':detail.engine==='model'?'停止等待模型回复？供应商可能已处理请求并计费。':'请求停止此任务？已经产生的修改不会自动撤销。'))taskAction('cancel');},'danger'));
+async function openTask(id,poll=false){const expected=csrf;try{const result=await api('action',{action:'detail',taskId:id});if(expected!==csrf)return;detail=result.task;$('taskDetail').hidden=false;$('detailTitle').textContent='任务 '+id.slice(0,8);$('detailState').textContent=(states[detail.state]||detail.state)+' · '+detail.summary;$('detailPrompt').textContent=detail.prompt;$('detailResult').textContent=detail.result||'尚无最终回复。';if(poll&&$('approval').contains(document.activeElement))return;$('approval').replaceChildren();$('taskActions').replaceChildren();if(['queued','running','awaiting_approval','needs_input'].includes(detail.state)||(detail.engine==='openclaw'&&detail.state==='submitting'))$('taskActions').append(button(['openclaw','model'].includes(detail.engine)?'停止等待':'取消任务',()=>{if(confirm(detail.engine==='openclaw'?'停止等待后，请在 OpenClaw 核对或停止远端任务。继续吗？':detail.engine==='model'?'停止等待后，服务端可能仍在执行并计费。继续吗？':'请求停止此任务？已经产生的修改不会自动撤销。'))taskAction('cancel');},'danger'));
  if(detail.state==='awaiting_approval'){const pre=document.createElement('pre');pre.textContent=JSON.stringify(detail.approval,null,2);$('approval').append(pre);$('taskActions').append(button('批准本次操作',()=>taskAction('approve')),button('拒绝操作',()=>taskAction('decline'),'danger'));}
  if(detail.state==='needs_input'){const form=document.createElement('form');for(const q of detail.approval?.questions||[]){const label=document.createElement('label'),input=document.createElement('textarea');label.textContent=q.question||q.header||q.id;input.name=q.id;input.required=true;input.maxLength=4000;label.append(input);form.append(label);}const b=document.createElement('button');b.textContent='提交答案';form.append(b);form.onsubmit=e=>{e.preventDefault();const answers={};for(const [key,value] of new FormData(form))answers[key]={answers:[value]};taskAction('answer',{answers});};$('approval').append(form);}
  if(['completed','failed','interrupted','cancelled','delivery_unknown'].includes(detail.state)&&detail.threadId)$('taskActions').append(button('继续此任务',()=>{const text=prompt('补充要求；助手会先核对已有结果');if(text?.trim())taskAction('continue',{text,requestId:crypto.randomUUID()});}));
