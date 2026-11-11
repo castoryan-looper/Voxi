@@ -67,6 +67,17 @@ export function createUserAccounts({file,administrator,agent,portal,memory,webMe
     save([...accounts,next]);
    }else if(action==='delete'){
     await deleteUser(body);
+   }else if(action==='transfer_device'||action==='retire_device'){
+    if(typeof body.deviceId!=='string'||!/^esp32-[a-f0-9]{12}$/.test(body.deviceId)||body.confirmDeviceId!==body.deviceId)throw Error('请输入完整设备 ID 确认操作');
+    if(!memory)throw Error('设备管理需要 Pocket Cloud 模式');
+    if(action==='transfer_device'&&!enabled(body.userId))throw Error('接收设备的用户必须已开通并启用网页登录账户');
+    if(typeof body.userId!=='string'||!/^([a-f0-9]{32})$/.test(body.userId))throw Error('用户 ID 无效');
+    if(action==='transfer_device'&&(typeof body.sourceUserId!=='string'||!/^([a-f0-9]{32})$/.test(body.sourceUserId)||body.sourceUserId===body.userId))throw Error('来源用户无效，请刷新设备列表');
+    const deviceToken=action==='transfer_device'?randomBytes(32).toString('base64url'):undefined;
+    const result=await memory({action,userId:body.userId,deviceId:body.deviceId,confirmDeviceId:body.confirmDeviceId,
+      ...(deviceToken?{sourceUserId:body.sourceUserId,keyHash:createHash('sha256').update(deviceToken).digest('hex')}:{})});
+    if(result.ok!==true||result.deviceId!==body.deviceId)throw Error('Pocket Cloud 未确认设备操作，请刷新列表核对');
+    return {deviceId:body.deviceId,...(deviceToken?{deviceToken}:{})};
    }else if(action==='register_device'){
     if(!enabled(body.userId))throw Error('请先为此用户开通并启用网页登录账户');
     if(typeof body.deviceId!=='string'||!/^esp32-[a-f0-9]{12}$/.test(body.deviceId))throw Error('设备 ID 无效');

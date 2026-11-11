@@ -1,3 +1,4 @@
+let deviceRegistryRows=[],deviceLifecycleReady=false,pendingDeviceAction=null;
 
 const $=id=>document.getElementById(id);let token='',polling=false,voiceDescriptionDirty=false,voiceDirty=false,voiceRuntimeDirty=false,fastStyleDirty=false;
 async function api(path,body,{timeoutMs=12000,signal}={}){
@@ -202,13 +203,13 @@ function resetUserDetail(){
  for(const id of ['bindUsername','bindPassword','userResetPassword','memoryName','memoryProfile','factText','agentTaskText'])$(id).value='';
  $('userResetPanel').open=false;$('deleteUserPanel').open=false;resetDeleteUser();
  retireDeviceChoices=[];$('retireUserDevices').replaceChildren();
- $('registerDevicePanel').open=false;$('registerDeviceForm').reset();clearDeviceToken();
+ cancelDeviceAction();$('registerDevicePanel').open=false;$('deviceOwnerConflict').hidden=true;$('registerDeviceForm').reset();clearDeviceToken();
 }
 function resetDeleteUser(){
  $('deleteUserId').value='';$('deleteUser').disabled=true;
  for(const {input} of retireDeviceChoices)input.checked=false;
 }
-function clearDeviceToken(){ $('registeredDeviceToken').value='';$('registeredDeviceTokenField').hidden=true; }
+function clearDeviceToken(){ $('registeredDeviceTokenOwner').textContent='';$('registeredDeviceToken').value='';$('registeredDeviceTokenField').hidden=true; }
 function retireSelection(){return retireDeviceChoices.filter(({input})=>input.checked).map(({id})=>id);}
 function renderUserDevices(){
  const target=$('userDevices');target.replaceChildren();
@@ -218,17 +219,21 @@ function renderUserDevices(){
   cell(row,device.name||'未命名设备');cell(row,device.id);cell(row,online?(online.busy?'对话中':'在线'):'离线');
   const actions=cell(row,''),rename=document.createElement('button');rename.className='secondary';rename.textContent='改名';
   rename.onclick=()=>{const name=prompt('设备名称',device.name||'');if(name!==null)return memoryChange({action:'rename_device',deviceId:device.id,name});};
-  actions.append(rename);target.append(row);
+  const remove=document.createElement('button');remove.textContent='移除登记（停用）';remove.className='danger';remove.disabled=!deviceLifecycleReady;
+  remove.onclick=()=>openDeviceAction({action:'retire_device',deviceId:device.id});
+  actions.append(rename,remove);target.append(row);
  }
  if(!userDetailData.devices.length){const row=document.createElement('tr');cell(row,'暂无绑定设备').colSpan=4;target.append(row);}
 }
-function fillRebindDevices(devices){
+function fillRebindDevices(devices,version=0){
+ deviceRegistryRows=devices;deviceLifecycleReady=version>=1;
+ $('deviceLifecycleNotice').textContent=deviceLifecycleReady?'可安全转移或移除登记。':'转移／移除需要先升级 Pocket Cloud 后端；当前入口已停用，避免执行旧转移流程。';
  const select=$('memoryDevice'),previous=select.value,uid=userDetailData.profile.id;
  const choices=userDetailData.account?.enabled?devices.filter(device=>device.user_id!==uid):[];
  select.replaceChildren(option('',choices.length?'请选择设备':'暂无其他用户的设备'));
- for(const d of choices)select.append(option(d.id,(d.name?d.name+' · ':'')+d.id+' · 当前用户 '+(d.user_name||'—')));
+ for(const d of choices)select.append(option(d.id,(d.name?d.name+' · ':'')+d.id+' · 当前用户 '+(d.user_name||'—')+' · '+d.user_id));
  if(choices.some(d=>d.id===previous))select.value=previous;
- select.disabled=!choices.length;$('rebindDevice').disabled=!select.value;
+ select.disabled=!choices.length||!deviceLifecycleReady;$('rebindDevice').disabled=!select.value||!deviceLifecycleReady;renderUserDevices();
 }
 function renderUserMemory(data){
  $('memoryFacts').replaceChildren();
@@ -299,8 +304,8 @@ async function loadUserDetail(){
   if(page.userTab==='devices'){
    renderUserDevices();$('userDevicesPanel').hidden=false;fillRebindDevices([]);
    $('registerDeviceForm').hidden=!data.account?.enabled;
-   $('registerDeviceHelp').textContent=data.account?.enabled?'从 USB 设备设置读取完整设备 ID。生成后，将此设备专用令牌填入 USB 设备设置并保存。':'请先在「资料与账户」开通并启用网页登录账户，再登记或接收设备。';
-   try{const registry=await api('devices');if(!current())return;fillRebindDevices(registry.devices);}
+   $('registerDeviceHelp').textContent=data.account?.enabled?'按顺序操作：①连接实物并从USB页复制自动生成的唯一ID；②登记并生成专用令牌；③将令牌粘贴到同一台设备的USB页，保存并重启。已有其他用户归属时请用下方转移入口。':'请先在「资料与账户」开通并启用网页登录账户，再登记或接收设备。';
+   try{const registry=await api('devices');if(!current())return;fillRebindDevices(registry.devices,registry.deviceLifecycleVersion);}
    catch(e){if(current()){$('userDetailMessage').textContent='可绑定设备读取失败：'+e.message;return;}}
   }
   if(page.userTab==='memory'){
@@ -337,8 +342,24 @@ $('reloadUserDetail').onclick=async()=>{
 $('profileForm').oninput=$('factForm').oninput=$('bindUserAccount').oninput=$('resetUserPassword').oninput=()=>{memoryDirty=true;};
 $('profileForm').onsubmit=e=>{e.preventDefault();return memoryChange({action:'profile',name:$('memoryName').value,profile:$('memoryProfile').value,enabled:$('memoryEnabled').checked});};
 $('factForm').onsubmit=async e=>{e.preventDefault();if(await memoryChange({action:'memory',text:$('factText').value}))$('factText').value='';};
-$('memoryDevice').onchange=()=>{$('rebindDevice').disabled=!$('memoryDevice').value;};
-$('rebindDevice').onclick=()=>{const deviceId=$('memoryDevice').value;if(deviceId&&confirm('将这台设备绑定到当前用户并断开设备的当前对话？'))return memoryChange({action:'rebind',deviceId});};
+$('memoryDevice').onchange=()=>{$('rebindDevice').disabled=!$('memoryDevice').value||!deviceLifecycleReady;};
+function cancelDeviceAction(){pendingDeviceAction=null;$('deviceActionPanel').hidden=true;$('deviceActionConfirm').value='';$('confirmDeviceAction').disabled=true;}
+function openDeviceAction(fields){
+ pendingDeviceAction={...fields,userId:currentPage().userId,route:routeGeneration};clearDeviceToken();
+ const remove=fields.action==='retire_device';$('deviceActionTitle').textContent=remove?'确认移除设备登记':fields.action==='register_device'?'确认重置设备令牌':'确认转移设备';
+ $('deviceActionHelp').textContent=remove?'设备会断开并无法接入。只移除云端登记，用户的记忆和任务保留。误填的ID可在此清理；实物以后可重新登记。':fields.action==='register_device'?'归属保持当前用户，旧令牌立即失效。生成新令牌后，必须重新写入同一台设备的USB设置。':'从“'+(fields.sourceName||fields.sourceUserId)+'”转移到当前用户。旧令牌立即失效，设备会断开；新令牌必须写入USB设置。原用户的记忆和任务不会转移。';
+ $('deviceActionIdentity').textContent=fields.deviceId;$('deviceActionConfirm').value='';$('confirmDeviceAction').textContent=remove?'确认移除并停用':'确认并生成新令牌';$('confirmDeviceAction').disabled=true;$('deviceActionPanel').hidden=false;
+}
+$('deviceActionConfirm').oninput=()=>{$('confirmDeviceAction').disabled=userEditBusy||!pendingDeviceAction||$('deviceActionConfirm').value.trim()!==pendingDeviceAction.deviceId;};
+$('cancelDeviceAction').onclick=cancelDeviceAction;
+$('deviceActionForm').onsubmit=async event=>{
+ event.preventDefault();const packet=pendingDeviceAction;
+ if(userEditBusy||!packet||packet.route!==routeGeneration||packet.userId!==currentPage().userId||$('deviceActionConfirm').value.trim()!==packet.deviceId)return;
+ const {route,sourceName,...body}=packet;body.confirmDeviceId=packet.deviceId;$('confirmDeviceAction').disabled=true;
+ const ok=packet.action==='retire_device'?await saveUserDetail('users',body,'登记已移除，旧令牌已失效。以后请从实物USB页复制真实ID重新登记。'):await issueDeviceToken(body);
+ if(ok)cancelDeviceAction();else $('deviceActionConfirm').oninput();
+};
+$('rebindDevice').onclick=()=>{const source=deviceRegistryRows.find(d=>d.id===$('memoryDevice').value);if(userEditBusy||!deviceLifecycleReady||!source)return;openDeviceAction({action:'transfer_device',deviceId:source.id,sourceUserId:source.user_id,sourceName:source.user_name});};
 $('clearMemory').onclick=()=>{if(confirm('永久清空此用户的设备端背景、记忆和语音转写，并断开当前对话？'))return memoryChange({action:'clear'});};
 $('toggleUserLogin').onclick=()=>{
  const account=userDetailData?.account;
@@ -365,22 +386,37 @@ $('deleteUserForm').onsubmit=async event=>{
  finally{userEditBusy=false;if(current())$('deleteUserId').oninput();}
 };
 $('registerDevicePanel').ontoggle=()=>{if(!$('registerDevicePanel').open)clearDeviceToken();};
-$('registerDeviceForm').onsubmit=async event=>{
- event.preventDefault();
- const page=currentPage(),deviceId=$('registerDeviceId').value.trim(),userId=page.userId;
+async function issueDeviceToken(fields){
+ const page=currentPage(),userId=page.userId;
  if(userEditBusy||page.userTab!=='devices'||userDetailData?.profile.id!==userId||!userDetailData.account?.enabled)return;
- if(!/^esp32-[a-f0-9]{12}$/.test(deviceId))return;
- if(userDetailData.devices.some(d=>d.id===deviceId)&&!confirm('重新生成此设备的令牌会使旧令牌失效并断开连接。继续吗？'))return;
  const session=token,route=routeGeneration,current=()=>session===token&&route===routeGeneration;
- userEditBusy=true;$('registerDevice').disabled=true;clearDeviceToken();
+ userEditBusy=true;$('registerDevice').disabled=true;$('rebindDevice').disabled=true;clearDeviceToken();
  try{
-  const result=await api('users',{action:'register_device',userId,deviceId,name:$('registerDeviceName').value.trim()});
-  if(!current())return;
+  const result=await api('users',{...fields,userId});if(!current())return;
+  if(result.deviceId!==fields.deviceId||typeof result.deviceToken!=='string')throw Error('设备令牌返回不匹配，请重新读取设备状态');
   await loadUserDetail();if(!current())return;
-  $('registeredDeviceToken').value=result.deviceToken;$('registeredDeviceTokenField').hidden=false;
-  $('userDetailMessage').textContent='设备已登记。请将新令牌填入设备设置。';
- }catch(e){if(current())$('userDetailMessage').textContent='设备登记失败：'+e.message;}
- finally{userEditBusy=false;$('registerDevice').disabled=false;}
+  $('registerDevicePanel').open=true;$('registerDeviceId').value=fields.deviceId;$('registeredDeviceTokenOwner').textContent='此令牌仅适用 '+fields.deviceId+'。';$('registeredDeviceToken').value=result.deviceToken;$('registeredDeviceTokenField').hidden=false;
+  $('userDetailMessage').textContent='云端操作成功，但实物还未更新：将新令牌写入同一台设备的USB设置，保存重启，确认READY。旧令牌已失效。';return true;
+ }catch(e){if(current())$('userDetailMessage').textContent='设备操作失败：'+e.message;}
+ finally{userEditBusy=false;if(current()){$('registerDevice').disabled=false;$('memoryDevice').onchange();}}
+}
+$('registerDeviceForm').onsubmit=async event=>{
+ event.preventDefault();const page=currentPage(),deviceId=$('registerDeviceId').value.trim();
+ if(userEditBusy||page.userTab!=='devices'||!/^esp32-[a-f0-9]{12}$/.test(deviceId))return;
+ // Refresh before deciding: the same ID must not silently change owners or rotate another owner's key.
+ const session=token,route=routeGeneration;
+ try{
+  const registry=await api('devices');if(session!==token||route!==routeGeneration)return;$('deviceOwnerConflict').hidden=true;
+  fillRebindDevices(registry.devices,registry.deviceLifecycleVersion);
+  const existing=registry.devices.find(d=>d.id===deviceId);
+  if(existing&&existing.user_id!==page.userId){
+   $('deviceOwnerConflict').hidden=false;$('deviceOwnerLink').href='/admin/users/'+existing.user_id+'/devices';$('deviceOwnerLink').textContent='查看“'+(existing.user_name||existing.user_id)+'”的设备并处理误登记';
+   $('transferDevicePanel').open=true;$('memoryDevice').value=deviceId;$('memoryDevice').onchange();
+   $('userDetailMessage').textContent='此ID已登记在“'+(existing.user_name||existing.user_id)+'”名下。请核对是否为实物ID；若确需变更归属，使用下方“转移到当前用户并生成新令牌”，无需删除用户。';return;
+  }
+  if(existing){openDeviceAction({action:'register_device',deviceId,name:$('registerDeviceName').value.trim()});return;}
+  return issueDeviceToken({action:'register_device',deviceId,name:$('registerDeviceName').value.trim()});
+ }catch(e){if(session===token&&route===routeGeneration)$('userDetailMessage').textContent='登记前检查失败：'+e.message;}
 };
 $('resetUserPassword').onsubmit=async event=>{
  event.preventDefault();const account=userDetailData?.account;if(!account)return;

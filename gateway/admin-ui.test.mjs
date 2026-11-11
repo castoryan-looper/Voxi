@@ -185,3 +185,21 @@ test('matching device suffixes stay distinguishable and searchable by the full I
   assert.equal(get('userAccounts').children[0].children[4].children[0].href,'/admin/users/'+id+'/profile');
  }
 });
+
+test('other-owner registration explains conflict and selects transfer without rotating a token',async()=>{
+ const {context,get}=page(),A='a'.repeat(32),B='b'.repeat(32),id='esp32-111111111111',calls=[];
+ context.location.pathname='/admin/users/'+B+'/devices';
+ vm.runInContext("token='session';userDetailData={profile:{id:'"+B+"'},account:{enabled:true},devices:[]};",context);
+ get('registerDeviceId').value=id;
+ context.fetch=async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>({deviceLifecycleVersion:1,devices:[{id,user_id:A,user_name:'Alice'}]})};};
+ await get('registerDeviceForm').onsubmit({preventDefault(){}});
+ assert.equal(calls.length,1);assert.equal(calls[0].options.method,'GET');assert.match(get('userDetailMessage').textContent,/Alice/);assert.equal(get('transferDevicePanel').open,true);assert.equal(get('memoryDevice').value,id);assert.equal(get('rebindDevice').disabled,false);assert.equal(get('registeredDeviceToken').value,'');
+});
+test('device removal requires exact confirmation and older backends disable lifecycle controls',async()=>{
+ const {context,get}=page(),B='b'.repeat(32),id='esp32-111111111111';context.location.pathname='/admin/users/'+B+'/devices';
+ vm.runInContext("userDetailData={profile:{id:'"+B+"'},account:{enabled:true},devices:[{id:'"+id+"'}]};fillRebindDevices([],0);",context);
+ assert.equal(get('userDevices').children[0].children[3].children[1].disabled,true);
+ vm.runInContext('fillRebindDevices([],1)',context);const remove=get('userDevices').children[0].children[3].children[1];assert.equal(remove.disabled,false);
+ context.calls=[];vm.runInContext('saveUserDetail=async(...args)=>calls.push(args)',context);await remove.onclick();get('deviceActionConfirm').value='wrong';get('deviceActionConfirm').oninput();await get('deviceActionForm').onsubmit({preventDefault(){}});assert.equal(context.calls.length,0);
+ get('deviceActionConfirm').value=id;get('deviceActionConfirm').oninput();await get('deviceActionForm').onsubmit({preventDefault(){}});assert.equal(context.calls[0][1].action,'retire_device');assert.equal(context.calls[0][1].confirmDeviceId,id);
+});
