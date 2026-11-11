@@ -82,6 +82,7 @@ export function createAdmin({token,snapshot,overview,disconnect,aiConfiguration,
       try{return json(200,await voicePreview(body,{signal:controller.signal}));}catch(e){if(!res.destroyed)return json(502,{error:e.message});}finally{res.off('close',abort);}
     }
     if(req.url==='/api/admin/memory'){
+      if(body.action==='rebind')return json(409,{error:'设备转移流程已更新，请刷新页面，在用户的设备页执行“转移并生成新令牌”'});
       if(!memoryConfiguration)return json(409,{error:'当前模式未启用用户记忆'});
       try{const result=await memoryConfiguration(body);record({event:'memory_changed'});return json(200,result);}catch(error){return json(502,{error:error.message});}
     }
