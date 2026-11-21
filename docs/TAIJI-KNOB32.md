@@ -56,8 +56,11 @@ Main MCU detected on COM12: ESP32-S3 rev0.2, 16MB Flash/8MB PSRAM.
 Full flash backup saved privately outside version control and SHA256 recorded
 in local verification notes. Flash write hashes verified. USB reports LCD ready
 360x360, touch ready, live PDM samples, mounted LittleFS recording cache and
-successful remembered Wi-Fi association. Per-device cloud enrollment and real
-spoken/headphone listening are separate checks; do not infer them from I2S writes.
+successful remembered Wi-Fi association. After user enrollment, the live USB
+page confirmed saved revision, CH00/CH01 catalogue, 2.38-second microphone
+capture, upload, cloud reply and active PLAYING. At that observed point there
+were zero rebuffer events and zero speaker write errors. Actual headphone
+listening remains unverified; I2S writes do not prove audibility.
 
 The official trust source is `gateway/voxi-cloud-trust.json` (public certificate
 only, no private key). Both web renderer and firmware build consume this file.
