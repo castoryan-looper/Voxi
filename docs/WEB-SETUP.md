@@ -47,3 +47,11 @@ python -m platformio run --project-dir firmware-c6 --target upload --upload-port
 ```
 
 Windows 使用 Python 3.12 环境中的 PlatformIO。UTF-8 环境变量避免烧录进度条触发 GBK 编码错误。新固件在预构建步骤把 gateway/setup.html 嵌入设备，生成的 setup_page.h 不提交 Git。正常升级不主动清除 voxi-radio 配置；不要执行整片擦除，否则需重新设置。
+
+
+2026-11-21: Official Voxi cloud now supplies its public root CA automatically.
+Users enter only the device-specific token, with remembered Wi-Fi preserved.
+Manual PEM entry is under the self-hosted server details section. The packaged
+root is used only for the exact official host/port and TLS stays verified.
+Existing custom CA settings remain available. Root certificate rotation needs a
+verified software update; the page never fetches and trusts an arbitrary root.

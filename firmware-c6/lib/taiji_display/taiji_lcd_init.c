@@ -1,6 +1,6 @@
 // Waveshare official demo lcd_bsp.c initialization table.
 #include "esp_lcd_sh8601.h"
-const sh8601_lcd_init_cmd_t taiji_lcd_init_cmds[] = 
+const sh8601_lcd_init_cmd_t taiji_lcd_init_cmds[] =
 {
   {0xF0, (uint8_t[]){0x28}, 1, 0},
   {0xF2, (uint8_t[]){0x28}, 1, 0},

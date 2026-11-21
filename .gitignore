@@ -13,3 +13,5 @@ setup_page.h
 # Local device storage backups may contain private recordings.
 backups/
 .venv-pio/
+
+voxi_cloud_trust.h

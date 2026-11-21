@@ -21,13 +21,16 @@ cache occupies the old unused app1 area; verify it is blank before first use.
 Unknown nonblank filesystems are never automatically formatted. Old Pocket
 Wi-Fi profiles migrate; Pocket server credentials intentionally do not migrate.
 Enroll the hardware ID shown by USB in an enabled Voxi account and provision
-its own Voxi token and trusted gateway CA. Never share another device's token.
+its own Voxi token. The official gateway root CA is bundled and selected
+automatically only for the exact official host and port; custom hosts require
+an explicit trusted root. Never share another device's token.
 
 ## Controls
 
 - Rotate the physical ring: move through enabled cloud channels (up to 16).
 - Channel names use the existing cloud-provided Chinese label bitmap.
 - Hold the on-screen TALK area for at least 300ms; release to send.
+- Before enrollment, PAIR DEVICE opens setup instead of trying to record.
 - Tap SETUP at top right to show USB/hotspot instructions; tap bottom to return.
 - Idle 60 seconds dims the LCD to 5%; touch/rotation restores 65% brightness.
   Wi-Fi stays connected. Deep sleep is disabled until a wake circuit is verified.
@@ -55,3 +58,9 @@ in local verification notes. Flash write hashes verified. USB reports LCD ready
 360x360, touch ready, live PDM samples, mounted LittleFS recording cache and
 successful remembered Wi-Fi association. Per-device cloud enrollment and real
 spoken/headphone listening are separate checks; do not infer them from I2S writes.
+
+The official trust source is `gateway/voxi-cloud-trust.json` (public certificate
+only, no private key). Both web renderer and firmware build consume this file.
+Changing the host or port never installs this root for an arbitrary server.
+Root rotation requires a verified update to this bundled source and firmware;
+there is no automatic download-and-trust or insecure TLS fallback.

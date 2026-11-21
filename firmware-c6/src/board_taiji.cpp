@@ -62,7 +62,7 @@ static void screenTask(void*){
    else if(v.label.asciiName())centered(v.label.name,153,1,accent);
    centered(v.debug.phase[0]?v.debug.phase:"STARTING",188,2,white);
    canvas.fillRoundRect(103,240,154,58,25,0x18e5);canvas.drawRoundRect(103,240,154,58,25,accent);
-   centered("HOLD TO TALK",260,2,white);centered("Rotate: channel",319,1,muted);
+   centered(radioConfig.valid?"HOLD TO TALK":"PAIR DEVICE",260,2,white);centered("Rotate: channel",319,1,muted);
   }
   for(int top=0;top<360&&displayReady;top+=12){
    for(int row=0;row<12;row++)for(int x=0;x<360;x++){uint16_t c=pixels[(359-top-row)*360+359-x];stripe[row*360+x]=(c>>8)|(c<<8);}
@@ -90,8 +90,8 @@ void boardStatusTick(){
   uint8_t d[5];for(auto &b:d)b=Wire.read();
   int x=((d[1]&15)<<8)|d[2],y=((d[3]&15)<<8)|d[4];
   if((d[0]&15)&&x<360&&y<360){touchHeld=true;touchX=359-x;touchY=359-y;touchSamples++;lastInput=millis();
-   if(!was){if(base.setup&&touchY>240)requestCloseSetupScreen();else if(touchY<100&&touchX>240)requestSetupScreen();}
-   pttHeld=!base.setup&&touchY>=230&&touchY<=310&&touchX>=90&&touchX<=270;
+   if(!was){if(base.setup&&touchY>240)requestCloseSetupScreen();else if((touchY<100&&touchX>240)||(!radioConfig.valid&&touchY>=230&&touchY<=310&&touchX>=90&&touchX<=270))requestSetupScreen();}
+   pttHeld=radioConfig.valid&&!base.setup&&touchY>=230&&touchY<=310&&touchX>=90&&touchX<=270;
   }
  }
  bool wanted=millis()-lastInput>=60000;if(dimmed!=wanted){dimmed=wanted;ledcWrite(47,(dimmed?5:65)*511/100);}

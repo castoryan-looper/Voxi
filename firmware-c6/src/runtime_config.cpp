@@ -15,6 +15,7 @@
 #include <time.h>
 #include <mbedtls/x509_crt.h>
 #include "setup_page.h"
+#include "voxi_cloud_trust.h"
 #include "opus_reply.h"
 #include "opus_uplink.h"
 #include "cellular_protocol.h"
@@ -39,6 +40,9 @@ void requestCloseSetupScreen(){touchCloseRequested=true;}
 void requestSetupScreen(){touchSetupRequested=true;}
 static String normalCa(String s){s.replace("\\n","\n");s.replace("\r","");s.trim();if(s.length())s+='\n';return s;}
 static bool validCa(const String& s){mbedtls_x509_crt c;mbedtls_x509_crt_init(&c);int ret=mbedtls_x509_crt_parse(&c,(const unsigned char*)s.c_str(),s.length()+1);mbedtls_x509_crt_free(&c);return ret==0;}
+static void applyDefaultTrust(RadioConfig& c){
+  if(c.tls&&c.host==VOXI_CLOUD_HOST&&c.port==VOXI_CLOUD_PORT&&!c.ca.length())c.ca=VOXI_CLOUD_CA;
+}
 static bool configured(const RadioConfig& c,const KnownWifiSet& k){return (k.count||c.networkMode=="cellular")&&c.host.length()&&c.token.length()>=16&&(!c.tls||validCa(c.ca));}
 static String readStored(){
   if(!storageReady)return "";
@@ -85,6 +89,7 @@ static void loadConfig(){
   // Bring forward only remembered Wi-Fi, never Pocket's unrelated server token.
   if(!known.count){Preferences old;if(old.begin("pocket",true)){String wire=old.isKey("wifi_known")?old.getString("wifi_known",""):String();old.end();JsonDocument networks;if(wire.length()&&!deserializeJson(networks,wire))parseProfiles(networks,known);}}
   int preferred=knownWifiFind(known,known.preferred);if(preferred>=0){radioConfig.ssid=known.profiles[preferred].ssid;radioConfig.password=known.profiles[preferred].password;}
+  applyDefaultTrust(radioConfig);
   radioConfig.valid=configured(radioConfig,known);if(radioConfig.valid)configIssue="";else if(!radioConfig.token.length()&&!radioConfig.ca.length())configIssue="missing_token_and_ca";else if(!radioConfig.token.length())configIssue="missing_token";else if(radioConfig.tls&&!radioConfig.ca.length())configIssue="missing_ca";
 }
 static void profilesJson(JsonDocument& d){
@@ -153,7 +158,7 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
 #endif
   if(c.apn.length()>63)return fail(out,"APN最长63字符");
   for(char ch:c.apn)if(!isalnum((unsigned char)ch)&&ch!='.'&&ch!='-')return fail(out,"APN只能含字母、数字、点和短横线");
-  c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");if(!c.ca.length())c.ca=radioConfig.ca;if(!c.host.length())c.host=radioConfig.host;if(!c.ssid.length())c.ssid=radioConfig.ssid;
+  c.ssid=body["ssid"]|"";c.host=body["host"]|"";c.token=body["token"]|"";c.ca=normalCa(body["ca"]|"");if(!c.host.length())c.host=radioConfig.host;if(!c.ssid.length())c.ssid=radioConfig.ssid;
   String password=body["password"]|"";if(!c.token.length())c.token=radioConfig.token;
   int saved=knownWifiFind(known,c.ssid.c_str());
   bool keepWifi=c.networkMode=="cellular"&&!body["password"].as<String>().length()&&c.ssid==radioConfig.ssid;
@@ -167,6 +172,8 @@ static int saveConfig(JsonVariantConst body,JsonDocument& out){
   if(!c.host.length()||c.host.length()>253)return fail(out,"请填写云端域名或 IP");
   for(unsigned i=0;i<c.host.length();i++){char ch=c.host[i];if(!isalnum((unsigned char)ch)&&ch!='.'&&ch!='-')return fail(out,"主机名不能包含协议、路径或端口");}
   if(port<1||port>65535)return fail(out,"端口需要 1–65535");c.port=port;
+  if(!c.ca.length()&&c.host==radioConfig.host&&c.port==radioConfig.port)c.ca=radioConfig.ca;
+  applyDefaultTrust(c);
   if(c.token.length()<16||c.token.length()>256||c.token.indexOf('\n')>=0||c.token.indexOf('\r')>=0)return fail(out,"设备令牌需要 16–256 字符");
   if(c.ca.length()>6000||(c.tls&&!validCa(c.ca)))return fail(out,"请粘贴有效 PEM 根 CA 证书");
   if(c.networkMode=="cellular"&&!c.tls)return fail(out,"4G连接必须开启TLS并配置根CA证书");
