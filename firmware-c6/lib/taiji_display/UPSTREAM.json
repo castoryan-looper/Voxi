@@ -1,0 +1,5 @@
+{
+  "url": "https://files.waveshare.com/wiki/ESP32-S3-Knob-Touch-LCD-1.8/ESP32-S3-Knob-Touch-LCD-1.8-Demo.zip",
+  "archive_sha256": "11e382444fe93470fbe463829c1e0ebad5bdb5115fd2d72f6159cd7700015030",
+  "note": "Espressif panel driver retains Apache-2.0 SPDX headers; board initialization table from Waveshare official demo. No factory firmware images included."
+}

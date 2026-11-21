@@ -28,7 +28,7 @@ static bool inputDown(){
 #ifdef VOXI_BOARD_MINICAM
  if(boardIdleInputActive())return true;
 #endif
- return digitalRead(BOARD_BOOT_KEY)==LOW||boardPowerPressed()||boardTouchActive();
+ return (BOARD_BOOT_KEY>=0&&digitalRead(BOARD_BOOT_KEY)==LOW)||boardPowerPressed()||boardTouchActive();
 }
 void standbyBegin(){
 #ifdef VOXI_BOARD_MINICAM
@@ -53,7 +53,11 @@ void standbyActivity(){
 }
 bool standbyScreenOff(){return idleStage!=0;}
 bool standbySuppressInput(){if(!wakeGuard)return false;if((int32_t)(millis()-wakeGuardUntil)<0)return true;if(!inputDown())wakeGuard=false;return true;}
-void standbyDiagnostics(JsonDocument& out){out["standbyIdleMs"]=uint32_t(millis()-policy.lastActivity);out["standbyTimeoutMs"]=60000;out["standbyMode"]="light_sleep";out["standbyCount"]=retained.count;out["standbyWakeCause"]=retained.wake;out["standbyLastError"]=retained.error;out["standbyWakeInputGuard"]=wakeGuard;
+void standbyDiagnostics(JsonDocument& out){out["standbyIdleMs"]=uint32_t(millis()-policy.lastActivity);out["standbyTimeoutMs"]=60000;out["standbyMode"]="light_sleep";
+#ifdef VOXI_BOARD_TAIJI
+ out["standbyMode"]="connected_dim";out["standbySleepEnabled"]=false;
+#endif
+out["standbyCount"]=retained.count;out["standbyWakeCause"]=retained.wake;out["standbyLastError"]=retained.error;out["standbyWakeInputGuard"]=wakeGuard;
 #ifdef VOXI_BOARD_MINICAM
  out["standbyMode"]="connected";out["standbyStage"]=idleStage;out["standbyScreenMinutes"]=connected.screenMinutes;out["standbyLinkMinutes"]=0;out["standbySleepMinutes"]=0;out["standbyTimeoutMs"]=connected.screenMinutes*60000u;out["standbyLastWakeAtMs"]=wakeAt;out["standbyWakeRestoreMs"]=wakeRestoreMs;out["standbyRestoreErrors"]=restoreErrors;out["standbyDisconnectEnabled"]=false;out["standbySleepEnabled"]=false;
  out["standbyWatchdogArmed"]=idleStage&&esp_task_wdt_status(nullptr)==ESP_OK;
@@ -74,6 +78,10 @@ bool standbySaveSettings(JsonVariantConst body,JsonDocument& out){
 #endif
 }
 void standbyTick(bool busy,bool provisioning){
+#ifdef VOXI_BOARD_TAIJI
+ // No verified wake interrupt: retain Wi-Fi and dim the LCD independently.
+ return;
+#endif
  static int encoderA=-1,encoderB=-1;
  bool input=inputDown();
  if(BOARD_ENCODER_A>=0){int a=digitalRead(BOARD_ENCODER_A),b=digitalRead(BOARD_ENCODER_B);if(encoderA>=0&&(a!=encoderA||b!=encoderB))input=true;encoderA=a;encoderB=b;}
@@ -105,7 +113,7 @@ void standbyTick(bool busy,bool provisioning){
  esp_err_t result=esp_light_sleep_start();
  retained.error=result;retained.wake=esp_sleep_get_wakeup_cause();retained.wakePending=true;
  // Release strapping buttons before restarting, so BOOT wake is not a bootloader request.
- while(digitalRead(BOARD_BOOT_KEY)==LOW||boardPowerPressed())delay(10);
+ while((BOARD_BOOT_KEY>=0&&digitalRead(BOARD_BOOT_KEY)==LOW)||boardPowerPressed())delay(10);
  // Restore drivers and TLS from a clean boot rather than reuse half-stopped DMA.
  ESP.restart();
 }

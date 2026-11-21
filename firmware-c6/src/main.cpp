@@ -146,7 +146,7 @@ constexpr uint32_t RADIO_RECONNECT_MS=2000;
 #else
 constexpr uint32_t RADIO_RECONNECT_MS=5000;
 #endif
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)||defined(VOXI_BOARD_TAIJI)
 constexpr size_t CAP=12*48000; // Reserve 12 seconds in external PSRAM, not internal DMA RAM.
 static uint8_t* playback=nullptr;
 #else
@@ -167,7 +167,7 @@ size_t head=0,tail=0,used=0;
 static uint32_t lastReplyPacketAt=0,replyGapMaxMs=0;
 static uint32_t playbackServiceAt=0,playbackServiceGapMaxMs=0;static size_t playbackPeakBytes=0;
 static uint32_t replyRxCrc=0,replyConsumedCrc=0,replyRxBytes=0,replyConsumedBytes=0;static bool replyIntegrityComplete=false;
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)||defined(VOXI_BOARD_TAIJI)
 // The measured link has 2–3s gaps. Use PSRAM reserve and keep learned jitter
 // protection across turns rather than resetting to the C6's small watermark.
 static PlaybackGate playbackGate(2*48000,6*48000,48000,true);
@@ -638,7 +638,7 @@ void button(){
   // MiniCam supplies the debounced physical key, sharing the normal hold-to-talk policy.
   bool down=boardTouchPttPressed();
 #else
-  bool down=digitalRead(PIN_PTT)==LOW||boardTouchPttPressed();
+  bool down=(PIN_PTT>=0&&digitalRead(PIN_PTT)==LOW)||boardTouchPttPressed();
 #endif
   if(down!=candidate){
     candidate=down;changedAt=millis();
@@ -749,11 +749,11 @@ void audioTick(){
     if(ready&&!tx&&!uploading&&!playing&&!cueActive&&played!=lastReported&&sendText(s))lastReported=played;}
 }
 void setup(){
-  Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
+  Serial.setRxBufferSize(16384);Serial.setTxBufferSize(8192);Serial.begin(115200);if(PIN_PTT>=0)pinMode(PIN_PTT,INPUT_PULLUP);if(PIN_ENC_A>=0)pinMode(PIN_ENC_A,INPUT_PULLUP);if(PIN_ENC_B>=0)pinMode(PIN_ENC_B,INPUT_PULLUP);
   if(BOARD_POWER_KEY>=0)pinMode(BOARD_POWER_KEY,INPUT_PULLUP);
   encPrev=PIN_ENC_A>=0&&PIN_ENC_B>=0?(digitalRead(PIN_ENC_A)<<1)|digitalRead(PIN_ENC_B):0;
   diagnosticsBegin();boardInit();audioCacheInit();setupBegin();standbyBegin();
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)||defined(VOXI_BOARD_TAIJI)
   playback=(uint8_t*)heap_caps_malloc(CAP,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   if(!playback){diagnosticError("S3 PSRAM unavailable: check OPI PSRAM settings");radioConfig.valid=false;}
 #endif
@@ -761,7 +761,7 @@ void setup(){
   displayChannel(channel,false);
   if(radioConfig.tls&&!radioUsesCellular())configTime(0,0,"ntp.tencent.com","pool.ntp.org");
   incoming=xQueueCreate(8,sizeof(Packet));outgoing=xQueueCreate(8,sizeof(TxPacket));
-#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)
+#if defined(VOXI_BOARD_S3G)||defined(VOXI_BOARD_AMOLED)||defined(VOXI_BOARD_MINICAM)||defined(VOXI_BOARD_TAIJI)
 #ifdef VOXI_OPUS_UPLINK
   constexpr uint32_t networkStack=32768;
 #else

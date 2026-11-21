@@ -25,6 +25,23 @@ class LayoutTest(unittest.TestCase):
             fields=row.split(',')
             self.assertLessEqual(int(fields[3],0)+int(fields[4],0),8*1024*1024)
 
+    def test_taiji_preserves_existing_nvs_and_legacy_fat(self):
+        root=Path(__file__).resolve().parents[1]
+        env=Environment(PROJECT_DIR=str(root/'firmware-c6'),PARTITION_FILE='partitions-taiji.csv',FLASH_EXTRA_IMAGES=[('0x0','bootloader.bin'),('0x8000','partitions.bin'),('0xe000','boot_app0.bin')])
+        runpy.run_path(str(SCRIPT),init_globals={'Import':lambda _:None,'env':env})
+        self.assertEqual(len(env['FLASH_EXTRA_IMAGES']),2)
+        rows=[]
+        for row in (root/'firmware-c6/partitions-taiji.csv').read_text().splitlines():
+            if not row or row.startswith('#'):continue
+            fields=row.split(',');rows.append((fields[0],int(fields[3],0),int(fields[4],0)))
+        parts={name:(start,size) for name,start,size in rows}
+        self.assertEqual(parts['nvs'],(0x9000,0x5000))
+        self.assertEqual(parts['legacy_fat'],(0x610000,0x9e0000))
+        self.assertEqual(parts['coredump'],(0xff0000,0x10000))
+        for (_,start,size),(_,next_start,_) in zip(rows,rows[1:]):
+            self.assertLessEqual(start+size,next_start)
+        self.assertLessEqual(max(start+size for _,start,size in rows),16*1024*1024)
+
     def test_rejects_other_image_overlapping_nvs(self):
         root=Path(__file__).resolve().parents[1]
         env=Environment(PROJECT_DIR=str(root/'firmware-c6'),FLASH_EXTRA_IMAGES=[('0xa000','unexpected.bin')])

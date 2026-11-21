@@ -21,6 +21,7 @@ bool cancelDownlinkTest();
 void radioTransportDiagnostics(JsonDocument& out);
 
 void requestSetupScreen();
+void requestCloseSetupScreen();
 void requestChannelDelta(int delta);
 
 bool radioCanStartRecording();

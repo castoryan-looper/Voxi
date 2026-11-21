@@ -30,11 +30,12 @@ static bool storageReady=false,ap=false,configView=false,busyNow=false,cloudNow=
 static uint32_t restartAt=0,chordAt=0,attemptAt=0,nextScan=0,scanAt=0,blocked[8]={};
 static int currentChannel=0,attempt=-1;
 static volatile int wifiReason=0;
-static bool touchSetupRequested=false;
+static bool touchSetupRequested=false,touchCloseRequested=false;
 #ifdef VOXI_OPUS_UPLINK
 static JsonArray uplinkProbePackets;
 static bool uplinkProbeSend(const uint8_t* bytes,size_t n){String hex;hex.reserve(n*2);const char digits[]="0123456789abcdef";for(size_t i=0;i<n;i++){hex+=digits[bytes[i]>>4];hex+=digits[bytes[i]&15];}return uplinkProbePackets.add(hex);}
 #endif
+void requestCloseSetupScreen(){touchCloseRequested=true;}
 void requestSetupScreen(){touchSetupRequested=true;}
 static String normalCa(String s){s.replace("\\n","\n");s.replace("\r","");s.trim();if(s.length())s+='\n';return s;}
 static bool validCa(const String& s){mbedtls_x509_crt c;mbedtls_x509_crt_init(&c);int ret=mbedtls_x509_crt_parse(&c,(const unsigned char*)s.c_str(),s.length()+1);mbedtls_x509_crt_free(&c);return ret==0;}
@@ -304,12 +305,17 @@ void setupTick(bool busy,bool cloudReady,int channel){
   if(usb!=usbCandidate){usbCandidate=usb;usbChangedAt=millis();}
   if(usbCandidate!=usbWas&&millis()-usbChangedAt>=400){
     usbWas=usbCandidate;
-    if(usbWas){closeAp();configView=true;showSetup();}
+    if(usbWas){closeAp();
+#ifndef VOXI_BOARD_TAIJI
+    configView=true;showSetup();
+#endif
+    }
     else{configView=false;displayChannel(currentChannel,cloudNow);}
   }
   if(ap){dns.processNextRequest();web.handleClient();}
+  if(touchCloseRequested&&!busy){touchCloseRequested=false;closeAp();configView=false;displayChannel(currentChannel,cloudNow);}
   if(touchSetupRequested&&!busy){touchSetupRequested=false;openSetup();}
-  bool chord=digitalRead(BOARD_BOOT_KEY)==LOW&&boardPowerPressed();
+  bool chord=BOARD_BOOT_KEY>=0&&digitalRead(BOARD_BOOT_KEY)==LOW&&boardPowerPressed();
   if(chord&&!busy){if(!chordAt)chordAt=millis();if(!chordTriggered&&millis()-chordAt>3000){openSetup();chordTriggered=true;}}
   else{chordAt=0;chordTriggered=false;}
   // Standby remains visible offline; BOOT+PWR or the web button opens setup.

@@ -1,5 +1,19 @@
 #pragma once
-#if defined(VOXI_BOARD_MINICAM)
+#if defined(VOXI_BOARD_TAIJI)
+#define BOARD_NAME "taiji-knob32-round-1.8"
+#define BOARD_BOOT_KEY -1
+#define BOARD_POWER_KEY -1
+#define BOARD_BAT_ADC -1
+#define BOARD_I2C_SDA 11
+#define BOARD_I2C_SCL 12
+#define BOARD_I2S_MCLK -1
+#define BOARD_I2S_BCLK 39
+#define BOARD_I2S_WS 40
+#define BOARD_I2S_DOUT 41
+#define BOARD_I2S_DIN 46
+#define BOARD_ENCODER_A -1
+#define BOARD_ENCODER_B -1
+#elif defined(VOXI_BOARD_MINICAM)
 #define BOARD_NAME "zhengchen-minicam-2.0-ml307"
 #define BOARD_BOOT_KEY 11
 #define BOARD_POWER_KEY -1

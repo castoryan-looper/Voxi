@@ -65,9 +65,11 @@ jobs:
       - run: g++ -std=c++17 tools/test_standby.cpp -o /tmp/voxi-standby && /tmp/voxi-standby
       - run: g++ -std=c++17 tools/test_minicam_controls.cpp -o /tmp/voxi-minicam && /tmp/voxi-minicam
       - run: g++ -std=c++17 tools/test_cellular_protocol.cpp -o /tmp/voxi-cellular && /tmp/voxi-cellular
+      - run: g++ -std=c++17 tools/test_taiji_encoder.cpp -o /tmp/voxi-taiji-encoder && /tmp/voxi-taiji-encoder
       - run: python tools/test_flash_layout.py
       - run: pio run --project-dir firmware-c6 -e waveshare_c6
       - run: pio run --project-dir firmware-c6 -e waveshare_s3g
       - run: pio run --project-dir firmware-c6 -e waveshare_amoled18_v2
       - run: pio run --project-dir firmware-c6 -e zhengchen_minicam_20
       - run: pio run --project-dir firmware-c6 -e zhengchen_minicam_20_gpio11_ptt
+      - run: pio run --project-dir firmware-c6 -e taiji_knob32
