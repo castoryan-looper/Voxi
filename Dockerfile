@@ -3,7 +3,7 @@ LABEL io.voxi.project="voxi"
 WORKDIR /app
 COPY gateway/package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
-COPY gateway/*.mjs ./
+COPY gateway/*.mjs gateway/voxi-cloud-trust.json ./
 COPY gateway/*.html gateway/*.css gateway/radio-schematic.svg gateway/connection-marks.svg gateway/connection-marks.LICENSE ./
 COPY gateway/voxi-openclaw.py gateway/voxi-context-sync.py ./
 RUN mkdir /state && chown node:node /state

@@ -1,3 +1,4 @@
+import {renderSetupPage} from './setup-page.mjs';
 import {rotateSession} from './session-policy.mjs';
 import {OpusDownlink,OPUS_FORMAT,OPUS_BITRATE} from './opus.mjs';
 import {OPUS_BATCH_FORMAT} from './opus-batch.mjs';
@@ -92,7 +93,7 @@ export function createGateway({mode='mock',token,apiKey,model='gpt-realtime-2.1'
     }
     if(req.url==='/setup/'||req.url==='/setup'){
       res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Frame-Options':'DENY'});
-      res.end(readFileSync(new URL('./setup.html',import.meta.url)));return;
+      res.end(renderSetupPage());return;
     }
     if(req.url!=='/healthz'){res.writeHead(404);res.end();return;}
     res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true,mode,revision,downlinkFormat:OPUS_FORMAT,opusOnly:true,audioBitrate:OPUS_BITRATE}));

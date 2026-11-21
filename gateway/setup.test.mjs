@@ -2,10 +2,12 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-const source=readFileSync(new URL('./setup.html',import.meta.url),'utf8').split('<script>')[1].split('</script>')[0];
+import {renderSetupPage} from './setup-page.mjs';
+const source=renderSetupPage().split('<script>')[1].split('</script>')[0];
 function page(){
  const nodes=new Map(),stored=new Map();
  const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',dataset:{},style:{},checked:false,hidden:false,disabled:false,textContent:'',children:[],replaceChildren(...v){this.children=v;},append(v){this.children.push(v);},add(v){this.children.push(v);},reportValidity(){return true;}});return nodes.get(id);};
+ get('cloudTrust').textContent=readFileSync(new URL('./voxi-cloud-trust.json',import.meta.url),'utf8');
  const context=vm.createContext({document:{getElementById:get,createElement:()=>({append(){}})},location:{protocol:'http:',hostname:'localhost'},TextDecoder,TextEncoder,Map,Set,Promise,Error,Number,JSON,Math,Option:class{constructor(text,value){this.text=text;this.value=value;}},setInterval(){},setTimeout,clearTimeout,sessionStorage:{setItem:(k,v)=>stored.set(k,v),getItem:k=>stored.get(k),removeItem:k=>stored.delete(k)}});
  vm.runInContext(source,context);return {context,get,stored};
 }
@@ -118,4 +120,33 @@ test('connected standby only edits screen timeout and hides retired disconnect/s
  assert.equal(get('standby').hidden,false);assert.equal(get('standbyLegacy').hidden,true);assert.equal(get('standbyTitle').textContent,'联网待机');
  context.calls=[];vm.runInContext("api=async(method,body)=>{calls.push({method,body});return {standbyMode:'connected',standbyScreenMinutes:1440,message:'已保存'};};",context);
  get('standbyScreen').value='1440';await get('saveStandby').onclick();assert.equal(context.calls.length,1);assert.equal(context.calls[0].body.screenMinutes,1440);assert.deepEqual(Object.keys(context.calls[0].body),['screenMinutes']);
+});
+
+test('official Voxi cloud injects bundled CA without asking the user to enter it',async()=>{
+ const {context,get}=page();const trust=JSON.parse(readFileSync(new URL('./voxi-cloud-trust.json',import.meta.url),'utf8'));
+ get('host').value=trust.host;get('port').value=String(trust.port);get('tls').checked=true;
+ vm.runInContext('refreshTrust()',context);assert.equal(get('caAdvanced').open,false);assert.match(get('trustHint').textContent,/自动配置/);
+ get('token').value='device-specific-token';context.calls=[];
+ vm.runInContext("api=async(method,body)=>{calls.push({method,body});return {saved:true,configRevision:'ca-test',message:'saved'};};",context);
+ await get('form').onsubmit({preventDefault(){}});
+ assert.equal(context.calls[0].body.ca,trust.ca);assert.equal(context.calls[0].body.tls,true);
+ assert.equal(get('ca').value,'');assert.equal(context.calls[0].body.token,'device-specific-token');
+});
+
+test('custom server never receives the official CA automatically and keeps the override',async()=>{
+ const {context,get}=page();get('host').value='self.example.com';get('port').value='9443';get('tls').checked=true;
+ vm.runInContext('refreshTrust()',context);assert.equal(get('caAdvanced').open,true);assert.match(get('trustHint').textContent,/自建服务器/);
+ context.calls=[];vm.runInContext("api=async(method,body)=>{calls.push({method,body});return {saved:true};};",context);
+ await get('form').onsubmit({preventDefault(){}});assert.equal(context.calls[0].body.ca,'');
+ get('ca').value='user CA';await get('form').onsubmit({preventDefault(){}});assert.equal(context.calls[1].body.ca,'user CA');
+ get('host').value='43.160.215.253';get('port').value='9444';get('ca').value='';
+ await get('form').onsubmit({preventDefault(){}});assert.equal(context.calls[2].body.ca,'');
+});
+
+test('saved official root stays hidden while existing custom trust remains editable',()=>{
+ const {context,get}=page();const trust=JSON.parse(readFileSync(new URL('./voxi-cloud-trust.json',import.meta.url),'utf8'));
+ context.trust=trust;vm.runInContext('fill({...trust,tls:true,tokenConfigured:false,caConfigured:true})',context);
+ assert.equal(get('ca').value,'');assert.equal(get('caAdvanced').open,false);assert.match(get('cloudSaved').textContent,/证书：自动配置/);
+ vm.runInContext("fill({host:'private.example.com',port:443,tls:true,ca:'custom-root',caConfigured:true})",context);
+ assert.equal(get('ca').value,'custom-root');assert.equal(get('caAdvanced').open,true);
 });
