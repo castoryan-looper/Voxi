@@ -1,4 +1,5 @@
 #include "../firmware-c6/include/playback_gate.h"
+#include "../firmware-c6/include/adaptive_playback.h"
 #include <assert.h>
 int main(){
  PlaybackGate gate;
@@ -66,6 +67,14 @@ int main(){
    assert(adaptive.canWrite(threshold,false));
  }
  adaptive.reset();assert(adaptive.canWrite(480,true));assert(adaptive.rebuffers==0);
+ // MiniCam was left with 1.8s buffered below its 2s refill watermark.
+ // The watchdog enters the ending path so the received tail can drain.
+ adaptive.reset();assert(adaptive.canWrite(adaptive.targetBytes,false));
+ assert(!adaptive.canWrite(0,false));
+ queued=86400;
+ assert(!adaptive.canWrite(queued,false));
+ for(;queued;queued-=480)assert(adaptive.canWrite(queued,true));
+ assert(!adaptive.canWrite(0,true));assert(adaptive.rebuffers==1);
  PlaybackGate shortGap(960,1920,480);
  assert(shortGap.canWrite(960,false));
  assert(!shortGap.canWrite(0,false,true));
@@ -73,4 +82,46 @@ int main(){
  assert(shortGap.canWrite(480,false,true)); // nearby packet, no re-prime
  assert(!shortGap.canWrite(0,false));
  assert(!shortGap.primed&&shortGap.rebuffers==1);
+
+ AdaptivePlayback estimate;
+ assert(estimate.startupMs()==2000);
+ estimate.begin(0);
+ uint32_t at=0,received=0;
+ // Several healthy windows lower the cold-start reserve.
+ for(;at<20000;){at+=200;received+=200;estimate.observe(at,received,1600);}
+ assert(estimate.startupMs()<2000&&estimate.recoveryMs()==1000);
+ // Over 3s only 1s of audio arrives. React at the underrun even before
+ // the next complete observation window, then size recovery to the gap.
+ for(int i=1;i<=15;i++){
+   at+=200;
+   if(i%3==0)received+=200;
+   estimate.observe(at,received,0);
+ }
+ assert(estimate.deficitMs()==2000);
+ estimate.underrun();
+ assert(estimate.startupMs()==2250&&estimate.recoveryMs()==2250);
+ assert(estimate.recoveryMs(3100)==3350&&estimate.recoveryMs(20000)==4000);
+ // Refill credit can hold back transmission while the ring stays full.
+ estimate.begin(at,received);
+ for(int i=0;i<300;i++){at+=200;estimate.observe(at,received,5000);}
+ assert(estimate.deficitMs()==0&&estimate.startupMs()==750);
+
+ // Reproduce the field stall: 3s arrived after a long gap, but the
+ // watermark was 4s. Limit the wait from the first usable reserve.
+ PlaybackGate refill(4*48000,6*48000,0);
+ assert(!refill.canWrite(3*48000,false,false,true)); // initial start is unchanged
+ assert(refill.canWrite(4*48000,false));
+ assert(!refill.canWrite(0,false));
+ estimate.underrun();
+ assert(!estimate.resumeRefillEarly(97000,0,4000));
+ assert(!estimate.resumeRefillEarly(112000,1999,4000));
+ assert(!estimate.resumeRefillEarly(113000,3000,4000));
+ assert(!estimate.resumeRefillEarly(114199,3000,4000));
+ assert(!refill.canWrite(3*48000,false));
+ assert(refill.canWrite(3*48000,false,false,estimate.resumeRefillEarly(114200,3000,4000)));
+ assert(refill.threshold()==4*48000&&refill.rebuffers==1);
+ assert(!refill.canWrite(0,false));
+ estimate.underrun();
+ assert(!estimate.resumeRefillEarly(120000,3000,4000)); // a new wait for the next stall
+ assert(refill.canWrite(4*48000,false,false,estimate.resumeRefillEarly(120100,4000,4000)));
 }
